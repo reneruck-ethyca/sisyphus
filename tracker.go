@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -146,6 +147,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 		slog.Warn("fetching PR", "pr", key, "err", err)
 		return
 	}
+	isCandidate = isCandidate || stillMine(pr, t.cfg.User)
 	if reason := dropReason(pr, t.cfg.User, isCandidate, t.cfg.IncludeDrafts); reason != "" {
 		if tr.CreatedWorktree {
 			if err := removeWorktree(ctx, t.repoDir(tr.Repo), tr.HeadRef, tr.CreatedBranch); err != nil {
@@ -172,7 +174,9 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 
 func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
 	var onConflict func(string) error
-	if hook := t.cfg.Hooks["on_conflict"]; hook != "" {
+	// Hooks run at most maxHookRuns times per PR head; a persistent conflict
+	// waits for a new push instead of re-running the hook every tick.
+	if hook := t.cfg.Hooks["on_conflict"]; hook != "" && tr.ConflictHeadSHA != tr.HeadSHA {
 		onConflict = func(reason string) error {
 			return runHook(ctx, hook, t.cfg.HookTimeout.Duration, tr.Worktree, map[string]string{
 				"WATERBOY_HOOK": "on_conflict", "WATERBOY_PR_URL": tr.URL, "WATERBOY_REPO": tr.Repo,
@@ -188,6 +192,12 @@ func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
 		}
 		return err
 	}, onConflict, maxHookRuns)
+	var ce *ConflictError
+	if errors.As(err, &ce) {
+		tr.ConflictHeadSHA = tr.HeadSHA
+	} else if err == nil {
+		tr.ConflictHeadSHA = ""
+	}
 	if err != nil {
 		tr.LastError = err.Error()
 		slog.Warn("syncing worktree", "pr", tr.Key(), "worktree", tr.Worktree, "err", err)

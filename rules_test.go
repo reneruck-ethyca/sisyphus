@@ -60,3 +60,16 @@ func TestNewReplies(t *testing.T) {
 	check(at(8), 0, at(8))
 	check(time.Time{}, 3, at(8))
 }
+
+// Review #3: search lag must not drop a PR the payload still shows as ours.
+func TestStillMine(t *testing.T) {
+	if !stillMine(PR{RequestedReviewers: []string{"me"}}, "me") {
+		t.Error("requested reviewer")
+	}
+	if !stillMine(PR{Reviews: []Review{rv("me", "COMMENTED", 1)}}, "me") {
+		t.Error("reviewed by me")
+	}
+	if stillMine(PR{RequestedReviewers: []string{"alice"}, Reviews: []Review{rv("alice", "COMMENTED", 1)}}, "me") {
+		t.Error("not mine")
+	}
+}

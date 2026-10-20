@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 type fakeGitHub struct {
@@ -101,5 +103,36 @@ func TestTickRecordsNewReply(t *testing.T) {
 	got := tr.state.PRs[refA.Key()]
 	if !got.PendingUpdates || !got.LastSeenAt.Equal(at(2)) {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestTickKeepsRequestedPRMissingFromSearch(t *testing.T) {
+	gh := &fakeGitHub{prs: map[string]PR{refA.Key(): {PRRef: refA, State: "open", HeadSHA: "a", RequestedReviewers: []string{"me"}}}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", CreatedWorktree: true})
+	tr.Tick(context.Background())
+	if tr.state.PRs[refA.Key()] == nil {
+		t.Fatal("dropped on search lag")
+	}
+}
+
+// Review #4: a persistent conflict runs the hook once per PR head, not every tick.
+func TestSyncHookOncePerHead(t *testing.T) {
+	_, clone := setup(t)
+	os.WriteFile(filepath.Join(clone, "a.txt"), []byte("dirty"), 0o644)
+	runs := filepath.Join(t.TempDir(), "runs")
+	tr := newTestTracker(t, &fakeGitHub{})
+	tr.cfg.Hooks = map[string]string{"on_conflict": "echo x >> " + runs}
+	tr.cfg.HookTimeout = Duration{time.Minute}
+	tracked := &Tracked{PRRef: refA, HeadRef: "feature/x", HeadSHA: "h1", Worktree: clone}
+	count := func() int { b, _ := os.ReadFile(runs); return strings.Count(string(b), "x") }
+	tr.sync(context.Background(), tracked)
+	tr.sync(context.Background(), tracked)
+	if count() != maxHookRuns || tracked.LastError == "" {
+		t.Fatalf("hook runs %d, err %q", count(), tracked.LastError)
+	}
+	tracked.HeadSHA = "h2"
+	tr.sync(context.Background(), tracked)
+	if count() != 2*maxHookRuns {
+		t.Fatalf("new head should re-run hook: %d", count())
 	}
 }

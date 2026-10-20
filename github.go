@@ -39,7 +39,8 @@ type PR struct {
 	State              string // "open" | "closed"
 	Merged, Draft      bool
 	HeadRef, HeadSHA   string
-	HeadRepo           string // "owner/name"; "" if the fork was deleted
+	HeadRepo           string   // "owner/name"; "" if the fork was deleted
+	RequestedReviewers []string // logins of individually requested reviewers
 	Reviews            []Review
 	Comments           []Comment // issue + inline review comments
 }
@@ -51,8 +52,14 @@ type GitHub interface {
 	PR(ctx context.Context, ref PRRef) (PR, error)
 }
 
+// cmdTimeout bounds every gh/git/wtp call so a hung network call can't stall
+// the tick loop. Generous because `wtp add` runs dependency-install hooks.
+var cmdTimeout = 15 * time.Minute
+
 // run executes a command in dir and returns trimmed stdout; errors carry stderr.
 func run(ctx context.Context, dir, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
@@ -142,14 +149,15 @@ type ghRepo struct {
 
 func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
 	var p struct {
-		Number  int    `json:"number"`
-		State   string `json:"state"`
-		Merged  bool   `json:"merged"`
-		Draft   bool   `json:"draft"`
-		HTMLURL string `json:"html_url"`
-		Title   string `json:"title"`
-		User    ghUser `json:"user"`
-		Head    struct {
+		Number             int      `json:"number"`
+		State              string   `json:"state"`
+		Merged             bool     `json:"merged"`
+		Draft              bool     `json:"draft"`
+		HTMLURL            string   `json:"html_url"`
+		Title              string   `json:"title"`
+		User               ghUser   `json:"user"`
+		RequestedReviewers []ghUser `json:"requested_reviewers"`
+		Head               struct {
 			Ref  string  `json:"ref"`
 			SHA  string  `json:"sha"`
 			Repo *ghRepo `json:"repo"`
@@ -166,6 +174,9 @@ func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
 		URL:   p.HTMLURL, Title: p.Title, Author: p.User.Login,
 		State: p.State, Merged: p.Merged, Draft: p.Draft,
 		HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA,
+	}
+	for _, u := range p.RequestedReviewers {
+		pr.RequestedReviewers = append(pr.RequestedReviewers, u.Login)
 	}
 	if p.Head.Repo != nil {
 		pr.HeadRepo = p.Head.Repo.FullName

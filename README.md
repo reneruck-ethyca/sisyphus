@@ -47,11 +47,16 @@ Fork PRs are skipped.
 
 Syncing on new commits fast-forwards the worktree. After a force-push it hard-resets only if
 the worktree is still exactly where waterboy last put it. Reused worktrees and pre-existing
-branches are never reset or deleted. Modified tracked files or diverged history are a conflict.
+branches are never reset or deleted. Modified tracked files, unpushed local commits, diverged
+history, or an incoming file colliding with an untracked one are a conflict.
+
+A PR missing from search results is only dropped if its own payload agrees (you're not a
+requested reviewer and haven't reviewed), so search lag can't delete worktrees.
 
 ## `on_conflict` hook
 
-Runs via `sh -c` with the worktree as cwd, at most 3 times per sync (sync is retried after each
-run), then the PR gets `last_error` and is retried next tick. Environment:
+Runs via `sh -c` with the worktree as cwd, at most 3 times per PR head (sync is retried after
+each run). If it's still conflicting the PR gets `last_error`; the hook runs again only after a
+new push. Environment:
 `WATERBOY_HOOK`, `WATERBOY_PR_URL`, `WATERBOY_REPO`, `WATERBOY_PR_NUMBER`, `WATERBOY_BRANCH`,
-`WATERBOY_WORKTREE`, `WATERBOY_CONFLICT_REASON` (`dirty` | `diverged`).
+`WATERBOY_WORKTREE`, `WATERBOY_CONFLICT_REASON` (`dirty` | `ahead` | `diverged` | `untracked-collision`).

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -127,5 +128,46 @@ func TestValidBranch(t *testing.T) {
 		if got := validBranch(context.Background(), name); got != want {
 			t.Errorf("%q: got %v want %v", name, got, want)
 		}
+	}
+}
+
+// Review #1: a no-op ff while the user is ahead must not record their commit as
+// synced, or a later force-push would hard-reset it away.
+func TestSyncLocalAheadNeverReset(t *testing.T) {
+	up, clone := setup(t)
+	synced := git(t, clone, "rev-parse", "HEAD")
+	local := commit(t, clone, "c.txt", "local work")
+	_, err := syncWorktree(context.Background(), clone, "feature/x", synced)
+	wantConflict(t, err, "ahead")
+	git(t, up, "commit", "-q", "--amend", "-m", "amended")
+	_, err = syncWorktree(context.Background(), clone, "feature/x", synced)
+	wantConflict(t, err, "diverged")
+	if head := git(t, clone, "rev-parse", "HEAD"); head != local {
+		t.Fatalf("local commit lost: HEAD %s want %s", head, local)
+	}
+}
+
+// Review #2: an incoming file colliding with an untracked local file must not
+// be resolved by reset --hard.
+func TestSyncUntrackedCollision(t *testing.T) {
+	up, clone := setup(t)
+	synced := git(t, clone, "rev-parse", "HEAD")
+	os.WriteFile(filepath.Join(clone, "new.txt"), []byte("MINE"), 0o644)
+	commit(t, up, "new.txt", "THEIRS")
+	_, err := syncWorktree(context.Background(), clone, "feature/x", synced)
+	wantConflict(t, err, "untracked-collision")
+	if b, _ := os.ReadFile(filepath.Join(clone, "new.txt")); string(b) != "MINE" {
+		t.Fatalf("untracked file clobbered: %q", b)
+	}
+}
+
+// Review #5: a hung command must not block a tick forever.
+func TestRunTimeout(t *testing.T) {
+	old := cmdTimeout
+	cmdTimeout = 100 * time.Millisecond
+	defer func() { cmdTimeout = old }()
+	start := time.Now()
+	if _, err := run(context.Background(), "", "sleep", "5"); err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("err=%v after %v", err, time.Since(start))
 	}
 }

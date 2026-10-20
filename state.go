@@ -21,7 +21,8 @@ type Tracked struct {
 	CreatedBranch   bool      `json:"created_branch"`
 	TrackedAt       time.Time `json:"tracked_at"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
-	PendingUpdates  bool      `json:"pending_updates"` // consumed by the (future) review launcher
+	ConflictHeadSHA string    `json:"conflict_head_sha,omitempty"` // on_conflict already exhausted for this head
+	PendingUpdates  bool      `json:"pending_updates"`             // consumed by the (future) review launcher
 	LastError       string    `json:"last_error,omitempty"`
 }
 

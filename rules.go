@@ -53,6 +53,22 @@ func dropReason(pr PR, me string, isCandidate, includeDrafts bool) string {
 	return ""
 }
 
+// stillMine reports whether the PR payload itself says it awaits me: I'm a
+// requested reviewer or have reviewed. Guards against search lag/incomplete results.
+func stillMine(pr PR, me string) bool {
+	for _, u := range pr.RequestedReviewers {
+		if u == me {
+			return true
+		}
+	}
+	for _, r := range pr.Reviews {
+		if r.User == me {
+			return true
+		}
+	}
+	return false
+}
+
 // newReplies counts human comments and review bodies not by me that are newer
 // than since. latest is the newest timestamp seen on the PR (or since), used to
 // advance the cursor.

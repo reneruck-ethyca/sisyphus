@@ -7,7 +7,7 @@ import (
 )
 
 // ConflictError means a worktree can't be synced without a human (or hook).
-type ConflictError struct{ Reason string } // "dirty" | "diverged"
+type ConflictError struct{ Reason string } // "dirty" | "ahead" | "diverged" | "untracked-collision"
 
 func (e *ConflictError) Error() string { return "worktree conflict: " + e.Reason }
 
@@ -89,8 +89,10 @@ func headSHA(ctx context.Context, dir string) (string, error) {
 }
 
 // syncWorktree brings dir up to origin/branch and returns the new HEAD.
-// Fast-forward when possible; hard-reset only if HEAD is still exactly where we
-// last synced it (i.e. a force-push and no local work). Anything else is a conflict.
+//   - behind: fast-forward (a collision with untracked files is a conflict)
+//   - ahead (local unpushed commits): conflict, never recorded as synced
+//   - diverged: hard-reset only if HEAD is still exactly where we last synced it
+//     (a force-push with no local work); otherwise conflict.
 func syncWorktree(ctx context.Context, dir, branch, syncedSHA string) (string, error) {
 	if err := fetchBranch(ctx, dir, branch); err != nil {
 		return "", err
@@ -104,18 +106,34 @@ func syncWorktree(ctx context.Context, dir, branch, syncedSHA string) (string, e
 		return "", &ConflictError{Reason: "dirty"}
 	}
 	remote := "origin/" + branch
-	if _, err := run(ctx, dir, "git", "merge", "--ff-only", "--quiet", remote); err == nil {
-		return headSHA(ctx, dir)
-	}
 	head, err := headSHA(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	if syncedSHA == "" || head != syncedSHA {
-		return "", &ConflictError{Reason: "diverged"}
-	}
-	if _, err := run(ctx, dir, "git", "reset", "--hard", "--quiet", remote); err != nil {
+	remoteSHA, err := run(ctx, dir, "git", "rev-parse", remote)
+	if err != nil {
 		return "", err
 	}
-	return headSHA(ctx, dir)
+	isAncestor := func(a, b string) bool {
+		_, err := run(ctx, dir, "git", "merge-base", "--is-ancestor", a, b)
+		return err == nil
+	}
+	switch {
+	case head == remoteSHA:
+		return head, nil
+	case isAncestor(head, remoteSHA):
+		if _, err := run(ctx, dir, "git", "merge", "--ff-only", "--quiet", remote); err != nil {
+			return "", &ConflictError{Reason: "untracked-collision"}
+		}
+		return headSHA(ctx, dir)
+	case isAncestor(remoteSHA, head):
+		return "", &ConflictError{Reason: "ahead"}
+	case syncedSHA != "" && head == syncedSHA:
+		if _, err := run(ctx, dir, "git", "reset", "--hard", "--quiet", remote); err != nil {
+			return "", err
+		}
+		return headSHA(ctx, dir)
+	default:
+		return "", &ConflictError{Reason: "diverged"}
+	}
 }
