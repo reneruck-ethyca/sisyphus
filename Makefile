@@ -1,4 +1,4 @@
-.PHONY: build test install-agent uninstall-agent
+.PHONY: build test plist install-agent uninstall-agent
 
 LABEL := com.reneruck.waterboy
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -9,10 +9,18 @@ build:
 test:
 	go test ./...
 
-# PATH is captured from the installing shell so gh/git/wtp resolve under launchd.
-install-agent: build
-	mkdir -p $(HOME)/Library/LaunchAgents $(HOME)/Library/Logs
-	sed -e "s|@BIN@|$(CURDIR)/bin/waterboy|" -e "s|@PATH@|$$PATH|" -e "s|@HOME@|$(HOME)|g" launchagent.plist > $(PLIST)
+# Renders the LaunchAgent. PATH is captured from the installing shell so gh/git/wtp
+# resolve under launchd; plutil sets values literally (no sed escaping pitfalls).
+plist:
+	mkdir -p $(dir $(PLIST)) $(HOME)/Library/Logs
+	cp launchagent.plist $(PLIST)
+	plutil -replace ProgramArguments.0 -string "$(CURDIR)/bin/waterboy" $(PLIST)
+	plutil -replace EnvironmentVariables.PATH -string "$$PATH" $(PLIST)
+	plutil -replace EnvironmentVariables.HOME -string "$(HOME)" $(PLIST)
+	plutil -replace StandardOutPath -string "$(HOME)/Library/Logs/waterboy.log" $(PLIST)
+	plutil -replace StandardErrorPath -string "$(HOME)/Library/Logs/waterboy.log" $(PLIST)
+
+install-agent: build plist
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	launchctl bootstrap gui/$$(id -u) $(PLIST)
 
