@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>waterboy</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #fff; --line: #e5e5ea; --hover: #f5f5f7;
+          --ok: #248a3d; --pending: #b25000; --error: #d70015; --conflict: #8944ab; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #f5f5f7; --muted: #98989d; --bg: #1c1c1e; --line: #38383a; --hover: #2c2c2e;
+            --ok: #30d158; --pending: #ff9f0a; --error: #ff453a; --conflict: #bf5af2; }
+  }
+  body { margin: 0; padding: 20px 24px; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 17px; margin: 0; }
+  .muted { color: var(--muted); }
+  .err { color: var(--error); margin: 0 0 12px; }
+  button { margin-left: auto; font: inherit; padding: 4px 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 500; color: var(--muted); }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--hover); }
+  .health { font-weight: 600; }
+  .ok { color: var(--ok); } .pending { color: var(--pending); } .error { color: var(--error); } .conflict { color: var(--conflict); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
+  dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
+  a { color: inherit; }
+</style>
+<script type="module">
+  import { Call, Events, Browser } from "/wails/runtime.js";
+
+  const call = (m, ...a) => Call.ByName("main.UI." + m, ...a);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+  const time = t => !t || t.startsWith("0001") ? "never" : new Date(t).toLocaleString();
+  const app = document.getElementById("app");
+  let status;
+
+  async function render() {
+    const id = decodeURIComponent(location.hash.slice(1));
+    app.innerHTML = id ? await detail(id) : overview();
+  }
+
+  function overview() {
+    const s = status;
+    const rows = s.prs.map(p => `<tr data-id="${esc(p.id)}">
+        <td class="health ${p.health}">${p.health}</td><td>${esc(p.id)}</td><td>${esc(p.title)}</td>
+        <td class="muted">${esc(p.head_ref)}</td><td class="muted">${time(p.last_seen_at)}</td></tr>`).join("");
+    return `<header><h1>waterboy</h1>
+        <span class="muted">${esc(s.user)} · ${esc(s.org)} · every ${esc(s.interval)} ·
+        ${s.running ? "running…" : "last run " + time(s.last_run)}</span>
+        <button id="run" ${s.running ? "disabled" : ""}>Run now</button></header>
+      ${s.last_error ? `<p class="err">${esc(s.last_error)}</p>` : ""}
+      ${s.prs.length ? `<table><thead><tr><th>Health</th><th>PR</th><th>Title</th><th>Branch</th><th>Last seen</th></tr></thead>
+        <tbody>${rows}</tbody></table>` : `<p class="muted">No PRs tracked.</p>`}`;
+  }
+
+  async function detail(id) {
+    let p;
+    try { p = await call("PR", id); } catch (e) { return `<p><a href="#">← All PRs</a></p><p class="err">${esc(e.message ?? e)}</p>`; }
+    const field = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+    return `<p><a href="#">← All PRs</a></p>
+      <header><h1>${esc(p.title)}</h1><span class="health ${p.health}">${p.health}</span></header>
+      ${p.last_error ? `<p class="err">${esc(p.last_error)}</p>` : ""}
+      <dl>${[
+        field("PR", `<a href="${esc(p.url)}" data-external>${esc(p.id)}</a>`),
+        field("Branch", esc(p.head_ref)),
+        field("Head", esc(p.head_sha)),
+        field("Synced", esc(p.synced_sha) || "—"),
+        field("Worktree", esc(p.worktree) + (p.created_worktree ? "" : " <span class=muted>(reused)</span>")),
+        field("Pending updates", p.pending_updates ? "yes" : "no"),
+        field("Tracked since", time(p.tracked_at)),
+        field("Last seen", time(p.last_seen_at)),
+      ].join("")}</dl>`;
+  }
+
+  app.addEventListener("click", e => {
+    if (e.target.id === "run") return call("RunNow");
+    const a = e.target.closest("a[data-external]");
+    if (a) { e.preventDefault(); return Browser.OpenURL(a.href); }
+    const row = e.target.closest("tr[data-id]");
+    if (row) location.hash = encodeURIComponent(row.dataset.id);
+  });
+  addEventListener("hashchange", render);
+  Events.On("status", e => { status = e.data; render(); });
+  status = await call("Status");
+  render();
+</script>
+</head>
+<body><main id="app"></main></body>
+</html>

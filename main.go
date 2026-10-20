@@ -9,10 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
-
-	"fyne.io/systray"
 )
 
 func checkTools(names ...string) error {
@@ -60,63 +56,9 @@ func main() {
 		return
 	}
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() { <-sigs; systray.Quit() }()
-
-	systray.Run(func() { onReady(ctx, cfg, svc) }, cancel)
-}
-
-func onReady(ctx context.Context, cfg Config, svc *Service) {
-	systray.SetTitle("WB")
-	systray.SetTooltip("waterboy")
-	status := systray.AddMenuItem("Starting…", "")
-	status.Disable()
-	runNowItem := systray.AddMenuItem("Run now", "")
-	dashboard := systray.AddMenuItem("Open dashboard", "")
-	dashURL, err := startHTTP(cfg.HTTPAddr, svc)
-	if err != nil {
-		slog.Error("dashboard disabled", "addr", cfg.HTTPAddr, "err", err)
-		dashboard.Disable()
-	} else {
-		slog.Info("dashboard", "url", dashURL)
+	if err := runApp(cfg, svc); err != nil {
+		fatal(err)
 	}
-	openState := systray.AddMenuItem("Open state file", "")
-	systray.AddSeparator()
-	quit := systray.AddMenuItem("Quit", "")
-
-	svc.OnChange(func(st Status) {
-		switch {
-		case st.Running:
-			status.SetTitle("Running… · " + st.Summary())
-		case st.LastError != "":
-			status.SetTitle(fmt.Sprintf("Last run %s failed: %.60s", st.LastRun.Format("15:04"), st.LastError))
-		default:
-			status.SetTitle(fmt.Sprintf("Last run %s · %s", st.LastRun.Format("15:04"), st.Summary()))
-		}
-	})
-	go func() {
-		for {
-			select {
-			case <-runNowItem.ClickedCh:
-				svc.RunNow()
-			case <-dashboard.ClickedCh:
-				if err := exec.Command("open", dashURL).Run(); err != nil {
-					slog.Warn("opening dashboard", "err", err)
-				}
-			case <-openState.ClickedCh:
-				if err := exec.Command("open", cfg.StateFile).Run(); err != nil {
-					slog.Warn("opening state file", "err", err)
-				}
-			case <-quit.ClickedCh:
-				systray.Quit()
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	go svc.Run(ctx)
 }
 
 func fatal(err error) {

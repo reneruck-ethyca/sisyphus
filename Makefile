@@ -3,8 +3,13 @@
 LABEL := com.reneruck.waterboy
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
 
+# Match Go's own macOS minimum so cgo objects (Wails) and the linker agree; silences ld warnings.
+export CGO_CFLAGS := -O2 -g -mmacosx-version-min=13.0
+export CGO_LDFLAGS := -mmacosx-version-min=13.0
+
+# production tag: no devtools/inspector in the window.
 build:
-	go build -o bin/waterboy .
+	go build -tags production -o bin/waterboy .
 
 test:
 	go test ./...

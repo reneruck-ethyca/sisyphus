@@ -13,12 +13,17 @@ It does not run reviews yet. `onTracked` / `onUpdated` in `tracker.go` are the h
 UIs talk to `Service` (`service.go`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`. It owns
 the run loop and hands out copies of state, so a UI or API never races a running tick.
 
+The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process.
+The window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI`
+struct via `/wails/runtime.js` and re-renders on the `status` event pushed from `OnChange`.
+No Wails CLI or npm needed; `go build` is enough.
+
 ## Usage
 
 ```bash
 make build                     # bin/waterboy (needs cgo / Xcode CLT)
-bin/waterboy -once             # single tick, no tray; good for testing
-bin/waterboy                   # menu-bar app ("WB"): status, Run now, Open dashboard, Open state file, Quit
+bin/waterboy -once             # single tick, no tray or window; good for testing
+bin/waterboy                   # menu-bar app ("WB"): status, Open window, Open dashboard, Run now, Open state file, Quit
 make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/waterboy.log
 make uninstall-agent
 ```

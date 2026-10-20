@@ -1,0 +1,98 @@
+package main
+
+import (
+	"embed"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os/exec"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
+)
+
+//go:embed frontend
+var frontend embed.FS
+
+// UI is what the window's JS can call (as "main.UI.<Method>"). It only wraps
+// Service, so Run/OnChange stay out of the frontend's reach.
+type UI struct{ svc *Service }
+
+func (u *UI) Status() Status { return u.svc.Status() }
+func (u *UI) RunNow()        { u.svc.RunNow() }
+
+func (u *UI) PR(id string) (PRView, error) {
+	pr, ok := u.svc.PR(id)
+	if !ok {
+		return PRView{}, fmt.Errorf("%s is not tracked", id)
+	}
+	return pr, nil
+}
+
+// runApp owns the macOS main thread: menu-bar item, window, and the tick loop.
+func runApp(cfg Config, svc *Service) error {
+	assets, _ := fs.Sub(frontend, "frontend") // can't fail: "frontend" is a valid, embedded path
+	app := application.New(application.Options{
+		Name:     "waterboy",
+		Services: []application.Service{application.NewService(&UI{svc})},
+		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
+		Mac:      application.MacOptions{ActivationPolicy: application.ActivationPolicyAccessory},
+	})
+
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title: "waterboy", Width: 900, Height: 600, Hidden: true, URL: "/",
+	})
+	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		win.Hide() // keep it around for "Open window"
+		e.Cancel()
+	})
+	openWindow := func() { win.Show(); win.Focus() }
+
+	menu := app.NewMenu()
+	status := menu.Add("Starting…").SetEnabled(false)
+	menu.Add("Open window").OnClick(func(*application.Context) { openWindow() })
+	dashboard := menu.Add("Open dashboard")
+	if dashURL, err := startHTTP(cfg.HTTPAddr, svc); err != nil {
+		slog.Error("dashboard disabled", "addr", cfg.HTTPAddr, "err", err)
+		dashboard.SetEnabled(false)
+	} else {
+		slog.Info("dashboard", "url", dashURL)
+		dashboard.OnClick(func(*application.Context) {
+			if err := exec.Command("open", dashURL).Run(); err != nil {
+				slog.Warn("opening dashboard", "err", err)
+			}
+		})
+	}
+	menu.Add("Run now").OnClick(func(*application.Context) { svc.RunNow() })
+	menu.Add("Open state file").OnClick(func(*application.Context) {
+		if err := exec.Command("open", cfg.StateFile).Run(); err != nil {
+			slog.Warn("opening state file", "err", err)
+		}
+	})
+	menu.AddSeparator()
+	menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
+
+	tray := app.SystemTray.New()
+	tray.SetLabel("WB")
+	tray.SetTooltip("waterboy")
+	tray.SetMenu(menu)
+
+	svc.OnChange(func(st Status) {
+		status.SetLabel(trayStatus(st))
+		app.Event.Emit("status", st)
+	})
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		go svc.Run(app.Context())
+	})
+	return app.Run()
+}
+
+func trayStatus(st Status) string {
+	switch {
+	case st.Running:
+		return "Running… · " + st.Summary()
+	case st.LastError != "":
+		return fmt.Sprintf("Last run %s failed: %.60s", st.LastRun.Format("15:04"), st.LastError)
+	}
+	return fmt.Sprintf("Last run %s · %s", st.LastRun.Format("15:04"), st.Summary())
+}
