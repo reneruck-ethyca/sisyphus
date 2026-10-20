@@ -10,6 +10,9 @@ On each tick it:
 
 It does not run reviews yet. `onTracked` / `onUpdated` in `tracker.go` are the hooks for that.
 
+UIs talk to `Service` (`service.go`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`. It owns
+the run loop and hands out copies of state, so a UI or API never races a running tick.
+
 ## Usage
 
 ```bash

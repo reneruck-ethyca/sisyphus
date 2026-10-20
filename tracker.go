@@ -17,6 +17,7 @@ type Tracker struct {
 	gh      GitHub
 	state   *State
 	skipped map[string]bool // log-once for forks / missing clones
+	onSave  func()          // called after every state save, on the ticking goroutine
 }
 
 func NewTracker(cfg Config, gh GitHub, st *State) *Tracker {
@@ -33,19 +34,12 @@ func onUpdated(tr *Tracked, newCommits bool, replies int) {
 	slog.Info("PR updated", "pr", tr.Key(), "new_commits", newCommits, "new_replies", replies)
 }
 
-func (t *Tracker) Summary() string {
-	pending := 0
-	for _, tr := range t.state.PRs {
-		if tr.PendingUpdates {
-			pending++
-		}
-	}
-	return fmt.Sprintf("%d tracked · %d pending", len(t.state.PRs), pending)
-}
-
 func (t *Tracker) save() {
 	if err := t.state.Save(t.cfg.StateFile); err != nil {
 		slog.Error("saving state", "err", err)
+	}
+	if t.onSave != nil {
+		t.onSave()
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"fyne.io/systray"
 )
@@ -49,14 +48,15 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	tracker := NewTracker(cfg, gh, st)
+	svc := NewService(cfg, NewTracker(cfg, gh, st))
 	slog.Info("waterboy starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
 
 	if *once {
-		if err := tracker.Tick(ctx); err != nil {
-			fatal(err)
+		svc.tick(ctx)
+		if st := svc.Status(); st.LastError != "" {
+			fatal(fmt.Errorf("%s", st.LastError))
 		}
-		slog.Info("tick done", "summary", tracker.Summary())
+		slog.Info("tick done", "summary", svc.Status().Summary())
 		return
 	}
 
@@ -64,10 +64,10 @@ func main() {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go func() { <-sigs; systray.Quit() }()
 
-	systray.Run(func() { onReady(ctx, cfg, tracker) }, cancel)
+	systray.Run(func() { onReady(ctx, cfg, svc) }, cancel)
 }
 
-func onReady(ctx context.Context, cfg Config, tracker *Tracker) {
+func onReady(ctx context.Context, cfg Config, svc *Service) {
 	systray.SetTitle("WB")
 	systray.SetTooltip("waterboy")
 	status := systray.AddMenuItem("Starting…", "")
@@ -77,15 +77,21 @@ func onReady(ctx context.Context, cfg Config, tracker *Tracker) {
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "")
 
-	runNow := make(chan struct{}, 1)
+	svc.OnChange(func(st Status) {
+		switch {
+		case st.Running:
+			status.SetTitle("Running… · " + st.Summary())
+		case st.LastError != "":
+			status.SetTitle(fmt.Sprintf("Last run %s failed: %.60s", st.LastRun.Format("15:04"), st.LastError))
+		default:
+			status.SetTitle(fmt.Sprintf("Last run %s · %s", st.LastRun.Format("15:04"), st.Summary()))
+		}
+	})
 	go func() {
 		for {
 			select {
 			case <-runNowItem.ClickedCh:
-				select {
-				case runNow <- struct{}{}:
-				default: // a run is already queued
-				}
+				svc.RunNow()
 			case <-openState.ClickedCh:
 				if err := exec.Command("open", cfg.StateFile).Run(); err != nil {
 					slog.Warn("opening state file", "err", err)
@@ -98,27 +104,7 @@ func onReady(ctx context.Context, cfg Config, tracker *Tracker) {
 			}
 		}
 	}()
-
-	// Single loop goroutine: ticks never overlap.
-	go func() {
-		ticker := time.NewTicker(cfg.Interval.Duration)
-		defer ticker.Stop()
-		for {
-			status.SetTitle("Running…")
-			if err := tracker.Tick(ctx); err != nil {
-				slog.Error("tick failed", "err", err)
-				status.SetTitle(fmt.Sprintf("Last run %s failed: %.60s", time.Now().Format("15:04"), err))
-			} else {
-				status.SetTitle(fmt.Sprintf("Last run %s · %s", time.Now().Format("15:04"), tracker.Summary()))
-			}
-			select {
-			case <-ticker.C:
-			case <-runNow:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	go svc.Run(ctx)
 }
 
 func fatal(err error) {
