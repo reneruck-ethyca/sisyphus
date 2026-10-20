@@ -27,6 +27,16 @@ func parseWorktreeList(porcelain, branch string) string {
 	return ""
 }
 
+// validBranch rejects branch names (from GitHub, i.e. untrusted) that git
+// wouldn't accept or that could be parsed as a flag by git/wtp.
+func validBranch(ctx context.Context, name string) bool {
+	if name == "" || strings.HasPrefix(name, "-") {
+		return false
+	}
+	_, err := run(ctx, "", "git", "check-ref-format", "--branch", name)
+	return err == nil
+}
+
 func findWorktree(ctx context.Context, repoDir, branch string) (string, error) {
 	out, err := run(ctx, repoDir, "git", "worktree", "list", "--porcelain")
 	if err != nil {

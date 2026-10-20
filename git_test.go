@@ -121,3 +121,11 @@ func TestSyncReusedNeverResets(t *testing.T) {
 		t.Fatalf("reused worktree was moved: %s -> %s", before, after)
 	}
 }
+
+func TestValidBranch(t *testing.T) {
+	for name, want := range map[string]bool{"feature/x": true, "ENG-1": true, "--force": false, "-x": false, "a..b": false, "": false} {
+		if got := validBranch(context.Background(), name); got != want {
+			t.Errorf("%q: got %v want %v", name, got, want)
+		}
+	}
+}

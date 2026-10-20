@@ -94,6 +94,10 @@ func (t *Tracker) discover(ctx context.Context, ref PRRef) bool {
 		t.skipOnce(key, "fork")
 		return false
 	}
+	if !validBranch(ctx, pr.HeadRef) {
+		t.skipOnce(key, "invalid branch name "+strconv.Quote(pr.HeadRef))
+		return false
+	}
 	repoDir := t.repoDir(pr.Repo)
 	if _, err := os.Stat(repoDir); err != nil {
 		t.skipOnce(key, "no clone at "+repoDir)
