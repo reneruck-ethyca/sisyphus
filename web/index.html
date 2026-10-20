@@ -1,0 +1,33 @@
+{{template "head" "Status"}}
+<header>
+  <h1>waterboy</h1>
+  <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
+  <span>{{if .Running}}Running…{{else}}Last run {{when .LastRun}}{{end}} · {{.Summary}}</span>
+  <button id="run" {{if .Running}}disabled{{end}}>Run now</button>
+</header>
+{{with .LastError}}<p class="err">Last run failed: {{.}}</p>{{end}}
+<table>
+  <thead><tr><th>PR</th><th>Title</th><th>Health</th><th>Pending</th><th>Last error</th><th>Worktree</th></tr></thead>
+  <tbody>
+  {{range .PRs}}
+    <tr>
+      <td class="nowrap"><a href="/prs/{{.Repo}}/{{.Number}}">{{.ID}}</a> <a href="{{.URL}}" title="Open on GitHub">↗</a></td>
+      <td>{{.Title}}</td>
+      <td><span class="health {{.Health}}">{{.Health}}</span></td>
+      <td>{{if .PendingUpdates}}yes{{end}}</td>
+      <td class="err">{{.LastError}}</td>
+      <td><code>{{.Worktree}}</code></td>
+    </tr>
+  {{else}}
+    <tr><td colspan="6" class="muted">No PRs tracked.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+<script>
+  document.getElementById("run").onclick = async (e) => {
+    e.target.disabled = true;
+    await fetch("/api/run", {method: "POST"});
+    setTimeout(() => location.reload(), 1000);
+  };
+</script>
+{{template "foot"}}

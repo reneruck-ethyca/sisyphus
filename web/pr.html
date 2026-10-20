@@ -1,0 +1,22 @@
+{{template "head" .ID}}
+<header>
+  <h1>{{.ID}}</h1>
+  <span class="health {{.Health}}">{{.Health}}</span>
+  <a href="/">← all PRs</a>
+</header>
+<p>{{.Title}}</p>
+<dl>
+  <dt>URL</dt><dd><a href="{{.URL}}">{{.URL}}</a></dd>
+  <dt>Branch</dt><dd><code>{{.HeadRef}}</code></dd>
+  <dt>Head SHA</dt><dd><code>{{.HeadSHA}}</code></dd>
+  <dt>Synced SHA</dt><dd><code>{{or .SyncedSHA "—"}}</code></dd>
+  <dt>Worktree</dt><dd><code>{{.Worktree}}</code></dd>
+  <dt>Created worktree</dt><dd>{{.CreatedWorktree}}</dd>
+  <dt>Created branch</dt><dd>{{.CreatedBranch}}</dd>
+  <dt>Tracked since</dt><dd>{{when .TrackedAt}}</dd>
+  <dt>Last seen activity</dt><dd>{{when .LastSeenAt}}</dd>
+  <dt>Pending updates</dt><dd>{{.PendingUpdates}}</dd>
+  <dt>Conflict head</dt><dd><code>{{or .ConflictHeadSHA "—"}}</code></dd>
+  <dt>Last error</dt><dd class="err">{{or .LastError "—"}}</dd>
+</dl>
+{{template "foot"}}

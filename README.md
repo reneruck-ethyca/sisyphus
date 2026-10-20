@@ -18,10 +18,14 @@ the run loop and hands out copies of state, so a UI or API never races a running
 ```bash
 make build                     # bin/waterboy (needs cgo / Xcode CLT)
 bin/waterboy -once             # single tick, no tray; good for testing
-bin/waterboy                   # menu-bar app ("WB"): status, Run now, Open state file, Quit
+bin/waterboy                   # menu-bar app ("WB"): status, Run now, Open dashboard, Open state file, Quit
 make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/waterboy.log
 make uninstall-agent
 ```
+
+The menu-bar app also serves a dashboard (overview + per-PR details, auto-refreshing) and a JSON
+API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `POST /api/run`.
+If the port is taken it logs and runs without it.
 
 Requires `gh` (authenticated), `git`, and `wtp` on PATH. `install-agent` bakes your current
 shell's PATH into the LaunchAgent.
@@ -40,6 +44,7 @@ Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
 | `include_drafts` | `false` | also track draft PRs |
 | `hooks` | `{}` | `{"on_conflict": "<shell command>"}` |
 | `hook_timeout` | `30m` | per hook run |
+| `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; only loopback `Host`s and same-origin POSTs are accepted |
 
 ## Rules
 

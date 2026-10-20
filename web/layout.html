@@ -1,0 +1,36 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="15">
+<title>{{.}} · waterboy</title>
+<style>
+  :root { color-scheme: light dark; --muted: light-dark(#666, #999); --line: light-dark(#ddd, #333); }
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+  a { color: light-dark(#0b57d0, #8ab4f8); }
+  header { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  .muted { color: var(--muted); }
+  .nowrap { white-space: nowrap; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); }
+  code { font: 12px ui-monospace, monospace; word-break: break-all; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.5rem; margin-top: 1rem; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+  .health { display: inline-block; padding: 0 .5rem; border-radius: 1rem; font-size: 12px; font-weight: 600; }
+  .ok       { background: light-dark(#e6f4ea, #1e3a29); color: light-dark(#137333, #81c995); }
+  .pending  { background: light-dark(#e8f0fe, #1c2b45); color: light-dark(#1a56c4, #8ab4f8); }
+  .error    { background: light-dark(#fef7e0, #3d3214); color: light-dark(#a05a00, #fdd663); }
+  .conflict { background: light-dark(#fce8e6, #3f1f1d); color: light-dark(#c5221f, #f28b82); }
+  .err { color: light-dark(#c5221f, #f28b82); }
+</style>
+</head>
+<body>
+{{end}}
+
+{{define "foot"}}</body>
+</html>
+{{end}}

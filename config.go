@@ -35,6 +35,7 @@ type Config struct {
 	IncludeDrafts bool              `json:"include_drafts"`
 	Hooks         map[string]string `json:"hooks"` // "on_conflict": "<shell cmd>"
 	HookTimeout   Duration          `json:"hook_timeout"`
+	HTTPAddr      string            `json:"http_addr"` // dashboard + JSON API
 }
 
 func defaultConfigPath() string {
@@ -49,6 +50,7 @@ func LoadConfig(path string) (Config, error) {
 		ReposRoot:   "~/Dev",
 		StateFile:   "~/.local/state/waterboy/state.json",
 		HookTimeout: Duration{30 * time.Minute},
+		HTTPAddr:    "127.0.0.1:7465",
 	}
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

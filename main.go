@@ -73,6 +73,14 @@ func onReady(ctx context.Context, cfg Config, svc *Service) {
 	status := systray.AddMenuItem("Starting…", "")
 	status.Disable()
 	runNowItem := systray.AddMenuItem("Run now", "")
+	dashboard := systray.AddMenuItem("Open dashboard", "")
+	dashURL, err := startHTTP(cfg.HTTPAddr, svc)
+	if err != nil {
+		slog.Error("dashboard disabled", "addr", cfg.HTTPAddr, "err", err)
+		dashboard.Disable()
+	} else {
+		slog.Info("dashboard", "url", dashURL)
+	}
 	openState := systray.AddMenuItem("Open state file", "")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "")
@@ -92,6 +100,10 @@ func onReady(ctx context.Context, cfg Config, svc *Service) {
 			select {
 			case <-runNowItem.ClickedCh:
 				svc.RunNow()
+			case <-dashboard.ClickedCh:
+				if err := exec.Command("open", dashURL).Run(); err != nil {
+					slog.Warn("opening dashboard", "err", err)
+				}
 			case <-openState.ClickedCh:
 				if err := exec.Command("open", cfg.StateFile).Run(); err != nil {
 					slog.Warn("opening state file", "err", err)
