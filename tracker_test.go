@@ -34,6 +34,9 @@ func newTestTracker(t *testing.T, gh GitHub, tracked ...*Tracked) *Tracker {
 	os.Mkdir(cfg.ReposRoot, 0o755)
 	st := &State{PRs: map[string]*Tracked{}}
 	for _, tr := range tracked {
+		if tr.Worktree == "" {
+			tr.Worktree = dir // must exist, or Tick treats it as deleted by hand
+		}
 		st.PRs[tr.Key()] = tr
 	}
 	return NewTracker(cfg, gh, st)
@@ -134,5 +137,49 @@ func TestSyncHookOncePerHead(t *testing.T) {
 	tr.sync(context.Background(), tracked)
 	if count() != 2*maxHookRuns {
 		t.Fatalf("new head should re-run hook: %d", count())
+	}
+}
+
+// A worktree the user deleted by hand is forgotten (and our branch removed if it
+// holds nothing unpushed) instead of leaving the PR stuck; discover re-tracks it.
+func TestTickForgetsManuallyDeletedWorktree(t *testing.T) {
+	_, clone := setup(t)
+	gh := &fakeGitHub{}
+	tr := newTestTracker(t, gh)
+	tr.cfg.ReposRoot = filepath.Dir(clone)
+	ref := PRRef{"ethyca/clone", 1}
+	wt := filepath.Join(t.TempDir(), "wt")
+	git(t, clone, "worktree", "add", "-q", "-b", "pr-branch", wt)
+	os.RemoveAll(wt)
+	tr.state.PRs[ref.Key()] = &Tracked{PRRef: ref, HeadRef: "pr-branch", Worktree: wt, CreatedWorktree: true, CreatedBranch: true}
+
+	if err := tr.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.state.PRs) != 0 || gh.prCalls != 0 {
+		t.Fatalf("still tracked: %+v calls=%d", tr.state.PRs, gh.prCalls)
+	}
+	if branchExists(context.Background(), clone, "pr-branch") {
+		t.Fatal("created branch with nothing unpushed should be deleted")
+	}
+}
+
+func TestTickKeepsUnpushedBranchOfDeletedWorktree(t *testing.T) {
+	_, clone := setup(t)
+	tr := newTestTracker(t, &fakeGitHub{})
+	tr.cfg.ReposRoot = filepath.Dir(clone)
+	ref := PRRef{"ethyca/clone", 1}
+	wt := filepath.Join(t.TempDir(), "wt")
+	git(t, clone, "worktree", "add", "-q", "-b", "pr-branch", wt)
+	commit(t, wt, "local.txt", "unpushed review notes")
+	os.RemoveAll(wt)
+	tr.state.PRs[ref.Key()] = &Tracked{PRRef: ref, HeadRef: "pr-branch", Worktree: wt, CreatedWorktree: true, CreatedBranch: true}
+
+	tr.Tick(context.Background())
+	if len(tr.state.PRs) != 0 {
+		t.Fatalf("still tracked: %+v", tr.state.PRs)
+	}
+	if !branchExists(context.Background(), clone, "pr-branch") {
+		t.Fatal("branch with unpushed commits must be kept")
 	}
 }

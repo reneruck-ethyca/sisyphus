@@ -141,6 +141,10 @@ func (t *Tracker) discover(ctx context.Context, ref PRRef) bool {
 func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 	key := tr.Key()
 	defer t.save()
+	if _, err := os.Stat(tr.Worktree); errors.Is(err, os.ErrNotExist) {
+		t.forgetMissing(ctx, tr)
+		return
+	}
 	pr, err := t.gh.PR(ctx, tr.PRRef)
 	if err != nil {
 		tr.LastError = err.Error() // never drop on a fetch error
@@ -170,6 +174,23 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 	if tr.SyncedSHA != pr.HeadSHA {
 		t.sync(ctx, tr)
 	}
+}
+
+// forgetMissing handles a worktree deleted outside waterboy: drop the entry (the
+// next tick re-tracks the PR if it's still eligible) and delete our branch, but
+// only if it holds nothing unpushed (`git branch -d` refuses otherwise).
+func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
+	repoDir := t.repoDir(tr.Repo)
+	if _, err := run(ctx, repoDir, "git", "worktree", "prune"); err != nil {
+		slog.Warn("pruning worktrees", "pr", tr.Key(), "err", err)
+	}
+	if tr.CreatedBranch {
+		if _, err := run(ctx, repoDir, "git", "branch", "-d", "--", tr.HeadRef); err != nil {
+			slog.Warn("keeping branch of deleted worktree", "pr", tr.Key(), "branch", tr.HeadRef, "err", err)
+		}
+	}
+	delete(t.state.PRs, tr.Key())
+	slog.Info("worktree deleted outside waterboy, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
 }
 
 func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
