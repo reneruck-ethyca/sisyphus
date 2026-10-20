@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -44,4 +49,153 @@ type GitHub interface {
 	CurrentUser(ctx context.Context) (string, error)
 	Candidates(ctx context.Context, org, user string) ([]PRRef, error)
 	PR(ctx context.Context, ref PRRef) (PR, error)
+}
+
+// run executes a command in dir and returns trimmed stdout; errors carry stderr.
+func run(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// ghCLI implements GitHub by shelling out to an authenticated `gh`.
+type ghCLI struct{}
+
+func (ghCLI) CurrentUser(ctx context.Context) (string, error) {
+	return run(ctx, "", "gh", "api", "user", "-q", ".login")
+}
+
+func (ghCLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
+	seen := map[string]bool{}
+	var refs []PRRef
+	for _, filter := range []string{"--review-requested=" + user, "--reviewed-by=" + user} {
+		out, err := run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, filter,
+			"--json", "repository,number", "--limit", "200")
+		if err != nil {
+			return nil, err
+		}
+		found, err := parseSearch([]byte(out))
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range found {
+			if !seen[r.Key()] {
+				seen[r.Key()] = true
+				refs = append(refs, r)
+			}
+		}
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Key() < refs[j].Key() })
+	return refs, nil
+}
+
+// ponytail: per_page=100, no pagination — same ceiling as pr-review-queue.sh.
+func (ghCLI) PR(ctx context.Context, ref PRRef) (PR, error) {
+	base := fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number)
+	paths := []string{
+		base,
+		base + "/reviews?per_page=100",
+		base + "/comments?per_page=100",
+		fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", ref.Repo, ref.Number),
+	}
+	bodies := make([][]byte, len(paths))
+	for i, p := range paths {
+		out, err := run(ctx, "", "gh", "api", p)
+		if err != nil {
+			return PR{}, err
+		}
+		bodies[i] = []byte(out)
+	}
+	return parsePR(bodies[0], bodies[1], bodies[2], bodies[3])
+}
+
+func parseSearch(out []byte) ([]PRRef, error) {
+	var rows []struct {
+		Number     int `json:"number"`
+		Repository struct {
+			NameWithOwner string `json:"nameWithOwner"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return nil, fmt.Errorf("parse search: %w", err)
+	}
+	refs := make([]PRRef, len(rows))
+	for i, r := range rows {
+		refs[i] = PRRef{Repo: r.Repository.NameWithOwner, Number: r.Number}
+	}
+	return refs, nil
+}
+
+type ghUser struct {
+	Login string `json:"login"`
+	Type  string `json:"type"`
+}
+
+type ghRepo struct {
+	FullName string `json:"full_name"`
+}
+
+func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
+	var p struct {
+		Number  int    `json:"number"`
+		State   string `json:"state"`
+		Merged  bool   `json:"merged"`
+		Draft   bool   `json:"draft"`
+		HTMLURL string `json:"html_url"`
+		Title   string `json:"title"`
+		User    ghUser `json:"user"`
+		Head    struct {
+			Ref  string  `json:"ref"`
+			SHA  string  `json:"sha"`
+			Repo *ghRepo `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Repo ghRepo `json:"repo"`
+		} `json:"base"`
+	}
+	if err := json.Unmarshal(pull, &p); err != nil {
+		return PR{}, fmt.Errorf("parse pull: %w", err)
+	}
+	pr := PR{
+		PRRef: PRRef{Repo: p.Base.Repo.FullName, Number: p.Number},
+		URL:   p.HTMLURL, Title: p.Title, Author: p.User.Login,
+		State: p.State, Merged: p.Merged, Draft: p.Draft,
+		HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA,
+	}
+	if p.Head.Repo != nil {
+		pr.HeadRepo = p.Head.Repo.FullName
+	}
+
+	var rs []struct {
+		User        ghUser    `json:"user"`
+		State       string    `json:"state"`
+		Body        string    `json:"body"`
+		SubmittedAt time.Time `json:"submitted_at"`
+	}
+	if err := json.Unmarshal(reviews, &rs); err != nil {
+		return PR{}, fmt.Errorf("parse reviews: %w", err)
+	}
+	for _, r := range rs {
+		pr.Reviews = append(pr.Reviews, Review{User: r.User.Login, Bot: r.User.Type == "Bot",
+			State: r.State, Body: r.Body, SubmittedAt: r.SubmittedAt})
+	}
+
+	for _, raw := range [][]byte{reviewComments, issueComments} {
+		var cs []struct {
+			User      ghUser    `json:"user"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		if err := json.Unmarshal(raw, &cs); err != nil {
+			return PR{}, fmt.Errorf("parse comments: %w", err)
+		}
+		for _, c := range cs {
+			pr.Comments = append(pr.Comments, Comment{User: c.User.Login, Bot: c.User.Type == "Bot", CreatedAt: c.CreatedAt})
+		}
+	}
+	return pr, nil
 }

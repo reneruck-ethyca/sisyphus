@@ -7,17 +7,19 @@ import (
 
 func at(m int) time.Time { return time.Date(2026, 10, 20, 12, m, 0, 0, time.UTC) }
 
-func rv(user, state string, m int) Review { return Review{User: user, State: state, SubmittedAt: at(m)} }
+func rv(user, state string, m int) Review {
+	return Review{User: user, State: state, SubmittedAt: at(m)}
+}
 
 func TestDropReason(t *testing.T) {
 	open := func(rs ...Review) PR { return PR{State: "open", Reviews: rs} }
 	bot := rv("ci", "APPROVED", 1)
 	bot.Bot = true
 	cases := []struct {
-		name          string
-		pr            PR
-		cand, drafts  bool
-		want          string
+		name         string
+		pr           PR
+		cand, drafts bool
+		want         string
 	}{
 		{"open candidate", open(), true, false, ""},
 		{"merged", PR{State: "closed", Merged: true}, true, false, "merged"},
