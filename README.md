@@ -8,9 +8,9 @@ On each tick it:
 2. **updates** tracked PRs: logs new commits / new replies, sets `pending_updates`, syncs the worktree,
 3. **cleans up** PRs that are done: removes worktrees it created, forgets reused ones.
 
-It does not run reviews yet. `onTracked` / `onUpdated` in `tracker.go` are the hooks for that.
+It does not run reviews yet. `onTracked` / `onUpdated` in `internal/tracker` are the hooks for that.
 
-UIs talk to `Service` (`service.go`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`, `Logs()`, `SubscribeLogs()`. It owns
+UIs talk to `app.Service` (`internal/app`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`, `Logs()`, `SubscribeLogs()`. It owns
 the run loop and hands out copies of state, so a UI or API never races a running tick.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process.

@@ -1,8 +1,12 @@
-package main
+package tracker
 
 import (
 	"context"
 	"errors"
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/gittest"
+	"github.com/reneruck/waterboy/internal/worktree"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,27 +14,10 @@ import (
 	"time"
 )
 
-type fakeGitHub struct {
-	cands   []PRRef
-	candErr error
-	prs     map[string]PR
-	prErr   error
-	prCalls int
-}
-
-func (f *fakeGitHub) CurrentUser(context.Context) (string, error) { return "me", nil }
-func (f *fakeGitHub) Candidates(context.Context, string, string) ([]PRRef, error) {
-	return f.cands, f.candErr
-}
-func (f *fakeGitHub) PR(_ context.Context, ref PRRef) (PR, error) {
-	f.prCalls++
-	return f.prs[ref.Key()], f.prErr
-}
-
-func newTestTracker(t *testing.T, gh GitHub, tracked ...*Tracked) *Tracker {
+func newTestTracker(t *testing.T, gh github.Client, tracked ...*Tracked) *Tracker {
 	t.Helper()
 	dir := t.TempDir()
-	cfg := Config{User: "me", Org: "ethyca", ReposRoot: filepath.Join(dir, "repos"), StateFile: filepath.Join(dir, "state.json")}
+	cfg := config.Config{User: "me", Org: "ethyca", ReposRoot: filepath.Join(dir, "repos"), StateFile: filepath.Join(dir, "state.json")}
 	os.Mkdir(cfg.ReposRoot, 0o755)
 	st := &State{PRs: map[string]*Tracked{}}
 	for _, tr := range tracked {
@@ -39,24 +26,24 @@ func newTestTracker(t *testing.T, gh GitHub, tracked ...*Tracked) *Tracker {
 		}
 		st.PRs[tr.Key()] = tr
 	}
-	return NewTracker(cfg, gh, st)
+	return New(cfg, gh, st)
 }
 
-var refA = PRRef{"ethyca/a", 1}
+var refA = github.PRRef{Repo: "ethyca/a", Number: 1}
 
 func TestTickCandidatesErrorDropsNothing(t *testing.T) {
-	gh := &fakeGitHub{candErr: errors.New("offline")}
+	gh := &github.Fake{CandErr: errors.New("offline")}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, CreatedWorktree: true})
 	if err := tr.Tick(context.Background()); err == nil {
 		t.Fatal("want error")
 	}
-	if tr.state.PRs[refA.Key()] == nil || gh.prCalls != 0 {
-		t.Fatalf("state touched: %+v calls=%d", tr.state.PRs, gh.prCalls)
+	if tr.state.PRs[refA.Key()] == nil || gh.PRCalls != 0 {
+		t.Fatalf("state touched: %+v calls=%d", tr.state.PRs, gh.PRCalls)
 	}
 }
 
 func TestTickPRErrorKeepsTracked(t *testing.T) {
-	gh := &fakeGitHub{prErr: errors.New("502")}
+	gh := &github.Fake{PRErr: errors.New("502")}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, CreatedWorktree: true})
 	tr.Tick(context.Background())
 	got := tr.state.PRs[refA.Key()]
@@ -66,7 +53,7 @@ func TestTickPRErrorKeepsTracked(t *testing.T) {
 }
 
 func TestTickDropsClosedReused(t *testing.T) {
-	gh := &fakeGitHub{cands: []PRRef{refA}, prs: map[string]PR{refA.Key(): {PRRef: refA, State: "closed"}}}
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): {PRRef: refA, State: "closed"}}}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, CreatedWorktree: false})
 	if err := tr.Tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -78,9 +65,9 @@ func TestTickDropsClosedReused(t *testing.T) {
 }
 
 func TestTickSkipsForkAndMissingClone(t *testing.T) {
-	fork := PRRef{"ethyca/fidesplus", 2}
-	noClone := PRRef{"ethyca/absent", 3}
-	gh := &fakeGitHub{cands: []PRRef{fork, noClone}, prs: map[string]PR{
+	fork := github.PRRef{Repo: "ethyca/fidesplus", Number: 2}
+	noClone := github.PRRef{Repo: "ethyca/absent", Number: 3}
+	gh := &github.Fake{Cands: []github.PRRef{fork, noClone}, PRs: map[string]github.PR{
 		fork.Key():    {PRRef: fork, State: "open", HeadRepo: "x/fidesplus"},
 		noClone.Key(): {PRRef: noClone, State: "open", HeadRepo: "ethyca/absent"},
 	}}
@@ -95,9 +82,9 @@ func TestTickSkipsForkAndMissingClone(t *testing.T) {
 }
 
 func TestTickRecordsNewReply(t *testing.T) {
-	gh := &fakeGitHub{cands: []PRRef{refA}, prs: map[string]PR{refA.Key(): {
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): {
 		PRRef: refA, State: "open", HeadRepo: "ethyca/a", HeadSHA: "a",
-		Comments: []Comment{{User: "alice", CreatedAt: at(2)}},
+		Comments: []github.Comment{{User: "alice", CreatedAt: at(2)}},
 	}}}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", LastSeenAt: at(1)})
 	if err := tr.Tick(context.Background()); err != nil {
@@ -110,7 +97,7 @@ func TestTickRecordsNewReply(t *testing.T) {
 }
 
 func TestTickKeepsRequestedPRMissingFromSearch(t *testing.T) {
-	gh := &fakeGitHub{prs: map[string]PR{refA.Key(): {PRRef: refA, State: "open", HeadSHA: "a", RequestedReviewers: []string{"me"}}}}
+	gh := &github.Fake{PRs: map[string]github.PR{refA.Key(): {PRRef: refA, State: "open", HeadSHA: "a", RequestedReviewers: []string{"me"}}}}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", CreatedWorktree: true})
 	tr.Tick(context.Background())
 	if tr.state.PRs[refA.Key()] == nil {
@@ -118,14 +105,14 @@ func TestTickKeepsRequestedPRMissingFromSearch(t *testing.T) {
 	}
 }
 
-// Review #4: a persistent conflict runs the hook once per PR head, not every tick.
+// github.Review #4: a persistent conflict runs the hook once per github.PR head, not every tick.
 func TestSyncHookOncePerHead(t *testing.T) {
-	_, clone := setup(t)
+	_, clone := gittest.Setup(t)
 	os.WriteFile(filepath.Join(clone, "a.txt"), []byte("dirty"), 0o644)
 	runs := filepath.Join(t.TempDir(), "runs")
-	tr := newTestTracker(t, &fakeGitHub{})
+	tr := newTestTracker(t, &github.Fake{})
 	tr.cfg.Hooks = map[string]string{"on_conflict": "echo x >> " + runs}
-	tr.cfg.HookTimeout = Duration{time.Minute}
+	tr.cfg.HookTimeout = config.Duration{Duration: time.Minute}
 	tracked := &Tracked{PRRef: refA, HeadRef: "feature/x", HeadSHA: "h1", Worktree: clone}
 	count := func() int { b, _ := os.ReadFile(runs); return strings.Count(string(b), "x") }
 	tr.sync(context.Background(), tracked)
@@ -141,37 +128,37 @@ func TestSyncHookOncePerHead(t *testing.T) {
 }
 
 // A worktree the user deleted by hand is forgotten (and our branch removed if it
-// holds nothing unpushed) instead of leaving the PR stuck; discover re-tracks it.
+// holds nothing unpushed) instead of leaving the github.PR stuck; discover re-tracks it.
 func TestTickForgetsManuallyDeletedWorktree(t *testing.T) {
-	_, clone := setup(t)
-	gh := &fakeGitHub{}
+	_, clone := gittest.Setup(t)
+	gh := &github.Fake{}
 	tr := newTestTracker(t, gh)
 	tr.cfg.ReposRoot = filepath.Dir(clone)
-	ref := PRRef{"ethyca/clone", 1}
+	ref := github.PRRef{Repo: "ethyca/clone", Number: 1}
 	wt := filepath.Join(t.TempDir(), "wt")
-	git(t, clone, "worktree", "add", "-q", "-b", "pr-branch", wt)
+	gittest.Git(t, clone, "worktree", "add", "-q", "-b", "pr-branch", wt)
 	os.RemoveAll(wt)
 	tr.state.PRs[ref.Key()] = &Tracked{PRRef: ref, HeadRef: "pr-branch", Worktree: wt, CreatedWorktree: true, CreatedBranch: true}
 
 	if err := tr.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(tr.state.PRs) != 0 || gh.prCalls != 0 {
-		t.Fatalf("still tracked: %+v calls=%d", tr.state.PRs, gh.prCalls)
+	if len(tr.state.PRs) != 0 || gh.PRCalls != 0 {
+		t.Fatalf("still tracked: %+v calls=%d", tr.state.PRs, gh.PRCalls)
 	}
-	if branchExists(context.Background(), clone, "pr-branch") {
+	if worktree.BranchExists(context.Background(), clone, "pr-branch") {
 		t.Fatal("created branch with nothing unpushed should be deleted")
 	}
 }
 
 func TestTickKeepsUnpushedBranchOfDeletedWorktree(t *testing.T) {
-	_, clone := setup(t)
-	tr := newTestTracker(t, &fakeGitHub{})
+	_, clone := gittest.Setup(t)
+	tr := newTestTracker(t, &github.Fake{})
 	tr.cfg.ReposRoot = filepath.Dir(clone)
-	ref := PRRef{"ethyca/clone", 1}
+	ref := github.PRRef{Repo: "ethyca/clone", Number: 1}
 	wt := filepath.Join(t.TempDir(), "wt")
-	git(t, clone, "worktree", "add", "-q", "-b", "pr-branch", wt)
-	commit(t, wt, "local.txt", "unpushed review notes")
+	gittest.Git(t, clone, "worktree", "add", "-q", "-b", "pr-branch", wt)
+	gittest.Commit(t, wt, "local.txt", "unpushed review notes")
 	os.RemoveAll(wt)
 	tr.state.PRs[ref.Key()] = &Tracked{PRRef: ref, HeadRef: "pr-branch", Worktree: wt, CreatedWorktree: true, CreatedBranch: true}
 
@@ -179,7 +166,7 @@ func TestTickKeepsUnpushedBranchOfDeletedWorktree(t *testing.T) {
 	if len(tr.state.PRs) != 0 {
 		t.Fatalf("still tracked: %+v", tr.state.PRs)
 	}
-	if !branchExists(context.Background(), clone, "pr-branch") {
+	if !worktree.BranchExists(context.Background(), clone, "pr-branch") {
 		t.Fatal("branch with unpushed commits must be kept")
 	}
 }

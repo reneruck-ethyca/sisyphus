@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -38,12 +38,12 @@ type Config struct {
 	HTTPAddr      string            `json:"http_addr"` // dashboard + JSON API
 }
 
-func defaultConfigPath() string {
+func DefaultPath() string {
 	return expandHome("~/.config/waterboy/config.json")
 }
 
-// LoadConfig reads path over the defaults. A missing file means all defaults.
-func LoadConfig(path string) (Config, error) {
+// Load reads path over the defaults. A missing file means all defaults.
+func Load(path string) (Config, error) {
 	cfg := Config{
 		Org:         "ethyca",
 		Interval:    Duration{10 * time.Minute},

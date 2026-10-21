@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"github.com/reneruck/waterboy/internal/app"
 	"html/template"
 	"log/slog"
 	"net"
@@ -24,9 +25,9 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	},
 }).ParseFS(webFS, "web/*.html"))
 
-// startHTTP serves the dashboard and JSON API on addr. Only Service is used, so
+// startHTTP serves the dashboard and JSON API on addr. Only app.Service is used, so
 // the handlers see the same snapshots as the tray.
-func startHTTP(addr string, svc *Service) (string, error) {
+func startHTTP(addr string, svc *app.Service) (string, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return "", err
@@ -39,7 +40,7 @@ func startHTTP(addr string, svc *Service) (string, error) {
 	return "http://" + ln.Addr().String() + "/", nil
 }
 
-func newHandler(svc *Service) http.Handler {
+func newHandler(svc *app.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, svc.Status())
@@ -81,14 +82,14 @@ func newHandler(svc *Service) http.Handler {
 
 // streamLogs sends the backlog, then every new entry, as server-sent events
 // until the client goes away.
-func streamLogs(w http.ResponseWriter, r *http.Request, svc *Service) {
+func streamLogs(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 	live, cancel := svc.SubscribeLogs() // before the backlog, so nothing falls in between
 	defer cancel()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	rc := http.NewResponseController(w)
 	var last uint64
-	send := func(e LogEntry) bool {
+	send := func(e app.LogEntry) bool {
 		if e.Seq <= last {
 			return true // already sent with the backlog
 		}
@@ -117,7 +118,7 @@ func streamLogs(w http.ResponseWriter, r *http.Request, svc *Service) {
 	}
 }
 
-// prID rebuilds the Service ID ("owner/repo#n") from the path.
+// prID rebuilds the app.Service ID ("owner/repo#n") from the path.
 func prID(r *http.Request) string {
 	return r.PathValue("owner") + "/" + r.PathValue("repo") + "#" + r.PathValue("number")
 }

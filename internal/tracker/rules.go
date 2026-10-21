@@ -1,14 +1,15 @@
-package main
+package tracker
 
 import (
+	"github.com/reneruck/waterboy/internal/github"
 	"sort"
 	"time"
 )
 
 // latestStates returns each human reviewer's effective review state, the way
-// GitHub computes it: COMMENTED and PENDING never override an earlier verdict.
-func latestStates(reviews []Review) map[string]string {
-	rs := append([]Review(nil), reviews...)
+// github.Client computes it: COMMENTED and PENDING never override an earlier verdict.
+func latestStates(reviews []github.Review) map[string]string {
+	rs := append([]github.Review(nil), reviews...)
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].SubmittedAt.Before(rs[j].SubmittedAt) })
 	states := map[string]string{}
 	for _, r := range rs {
@@ -20,8 +21,8 @@ func latestStates(reviews []Review) map[string]string {
 	return states
 }
 
-// dropReason says why a PR should not be (or no longer be) tracked; "" = keep.
-func dropReason(pr PR, me string, isCandidate, includeDrafts bool) string {
+// dropReason says why a github.PR should not be (or no longer be) tracked; "" = keep.
+func dropReason(pr github.PR, me string, isCandidate, includeDrafts bool) string {
 	if pr.Merged {
 		return "merged"
 	}
@@ -53,9 +54,9 @@ func dropReason(pr PR, me string, isCandidate, includeDrafts bool) string {
 	return ""
 }
 
-// stillMine reports whether the PR payload itself says it awaits me: I'm a
+// stillMine reports whether the github.PR payload itself says it awaits me: I'm a
 // requested reviewer or have reviewed. Guards against search lag/incomplete results.
-func stillMine(pr PR, me string) bool {
+func stillMine(pr github.PR, me string) bool {
 	for _, u := range pr.RequestedReviewers {
 		if u == me {
 			return true
@@ -70,9 +71,9 @@ func stillMine(pr PR, me string) bool {
 }
 
 // newReplies counts human comments and review bodies not by me that are newer
-// than since. latest is the newest timestamp seen on the PR (or since), used to
+// than since. latest is the newest timestamp seen on the github.PR (or since), used to
 // advance the cursor.
-func newReplies(pr PR, me string, since time.Time) (count int, latest time.Time) {
+func newReplies(pr github.PR, me string, since time.Time) (count int, latest time.Time) {
 	latest = since
 	consider := func(user string, bot bool, ts time.Time, counts bool) {
 		if ts.After(latest) {

@@ -1,8 +1,9 @@
-package main
+package tracker
 
 import (
 	"context"
 	"errors"
+	"github.com/reneruck/waterboy/internal/worktree"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestSyncWithRetry(t *testing.T) {
-	conflict := &ConflictError{Reason: "dirty"}
+	conflict := &worktree.ConflictError{Reason: "dirty"}
 	boom := errors.New("boom")
 	cases := []struct {
 		name         string

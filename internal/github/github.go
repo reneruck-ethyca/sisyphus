@@ -1,13 +1,11 @@
-package main
+package github
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"github.com/reneruck/waterboy/internal/proc"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -45,43 +43,25 @@ type PR struct {
 	Comments           []Comment // issue + inline review comments
 }
 
-// GitHub is everything waterboy needs from GitHub; swap the gh CLI out here.
-type GitHub interface {
+// Client is everything waterboy needs from Client; swap the gh CLI out here.
+type Client interface {
 	CurrentUser(ctx context.Context) (string, error)
 	Candidates(ctx context.Context, org, user string) ([]PRRef, error)
 	PR(ctx context.Context, ref PRRef) (PR, error)
 }
 
-// cmdTimeout bounds every gh/git/wtp call so a hung network call can't stall
-// the tick loop. Generous because `wtp add` runs dependency-install hooks.
-var cmdTimeout = 15 * time.Minute
+// CLI implements Client by shelling out to an authenticated `gh`.
+type CLI struct{}
 
-// run executes a command in dir and returns trimmed stdout; errors carry stderr.
-func run(ctx context.Context, dir, name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(stdout.String()), nil
+func (CLI) CurrentUser(ctx context.Context) (string, error) {
+	return proc.Run(ctx, "", "gh", "api", "user", "-q", ".login")
 }
 
-// ghCLI implements GitHub by shelling out to an authenticated `gh`.
-type ghCLI struct{}
-
-func (ghCLI) CurrentUser(ctx context.Context) (string, error) {
-	return run(ctx, "", "gh", "api", "user", "-q", ".login")
-}
-
-func (ghCLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
+func (CLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
 	seen := map[string]bool{}
 	var refs []PRRef
 	for _, filter := range []string{"--review-requested=" + user, "--reviewed-by=" + user} {
-		out, err := run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, filter,
+		out, err := proc.Run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, filter,
 			"--json", "repository,number", "--limit", "200")
 		if err != nil {
 			return nil, err
@@ -102,7 +82,7 @@ func (ghCLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) 
 }
 
 // ponytail: per_page=100, no pagination — same ceiling as pr-review-queue.sh.
-func (ghCLI) PR(ctx context.Context, ref PRRef) (PR, error) {
+func (CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
 	base := fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number)
 	paths := []string{
 		base,
@@ -112,7 +92,7 @@ func (ghCLI) PR(ctx context.Context, ref PRRef) (PR, error) {
 	}
 	bodies := make([][]byte, len(paths))
 	for i, p := range paths {
-		out, err := run(ctx, "", "gh", "api", p)
+		out, err := proc.Run(ctx, "", "gh", "api", p)
 		if err != nil {
 			return PR{}, err
 		}

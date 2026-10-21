@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 func TestLoadConfigDefaults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(filepath.Join(home, "nope.json"))
+	cfg, err := Load(filepath.Join(home, "nope.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv("HOME", home)
 	p := filepath.Join(home, "c.json")
 	os.WriteFile(p, []byte(`{"interval":"2m","repos_root":"~/src","include_drafts":true,"hooks":{"on_conflict":"echo hi"}}`), 0o644)
-	cfg, err := LoadConfig(p)
+	cfg, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 func TestLoadConfigBadInterval(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.json")
 	os.WriteFile(p, []byte(`{"interval":"soon"}`), 0o644)
-	if _, err := LoadConfig(p); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("want error")
 	}
 }

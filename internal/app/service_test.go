@@ -1,14 +1,17 @@
-package main
+package app
 
 import (
 	"context"
 	"errors"
+	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/testkit"
+	"github.com/reneruck/waterboy/internal/tracker"
 	"testing"
 	"time"
 )
 
 func TestHealth(t *testing.T) {
-	for want, tr := range map[string]Tracked{
+	for want, tr := range map[string]tracker.Tracked{
 		"conflict": {HeadSHA: "b", ConflictHeadSHA: "b", LastError: "conflict", PendingUpdates: true},
 		"error":    {HeadSHA: "b", ConflictHeadSHA: "a", LastError: "502", PendingUpdates: true},
 		"pending":  {HeadSHA: "b", PendingUpdates: true},
@@ -21,58 +24,58 @@ func TestHealth(t *testing.T) {
 }
 
 func TestServiceSnapshot(t *testing.T) {
-	refB := PRRef{"ethyca/b", 2}
-	gh := &fakeGitHub{cands: []PRRef{refA, refB}, prs: map[string]PR{
-		refA.Key(): {PRRef: refA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}},
-		refB.Key(): {PRRef: refB, State: "open", HeadSHA: "y", RequestedReviewers: []string{"me"}},
+	refB := github.PRRef{Repo: "ethyca/b", Number: 2}
+	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA, refB}, PRs: map[string]github.PR{
+		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}},
+		refB.Key():         {PRRef: refB, State: "open", HeadSHA: "y", RequestedReviewers: []string{"me"}},
 	}}
-	tr := newTestTracker(t, gh,
-		&Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y", PendingUpdates: true},
-		&Tracked{PRRef: refA, HeadSHA: "x", SyncedSHA: "x"},
+	a := &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"}
+	cfg, tr := testkit.Tracker(t, gh,
+		&tracker.Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y", PendingUpdates: true},
+		a,
 	)
-	s := NewService(tr.cfg, tr, NewLogBuffer(10))
+	s := NewService(cfg, tr, NewLogBuffer(10))
 	var changes int
 	s.OnChange(func(Status) { changes++ })
 
-	s.tick(context.Background())
+	s.RunOnce(context.Background())
 
 	st := s.Status()
 	if st.Running || st.LastRun.IsZero() || st.LastError != "" || changes == 0 {
 		t.Fatalf("status = %+v, changes = %d", st, changes)
 	}
-	if len(st.PRs) != 2 || st.PRs[0].ID != refA.Key() || st.PRs[1].ID != refB.Key() {
+	if len(st.PRs) != 2 || st.PRs[0].ID != testkit.RefA.Key() || st.PRs[1].ID != refB.Key() {
 		t.Fatalf("PRs not sorted by ID: %+v", st.PRs)
 	}
 	if st.Summary() != "2 tracked · 1 pending" {
 		t.Fatalf("summary = %q", st.Summary())
 	}
 	if pr, ok := s.PR(refB.Key()); !ok || pr.Health != "pending" {
-		t.Fatalf("PR(b) = %+v, %v", pr, ok)
+		t.Fatalf("github.PR(b) = %+v, %v", pr, ok)
 	}
 	if _, ok := s.PR("ethyca/nope#9"); ok {
-		t.Fatal("unknown PR found")
+		t.Fatal("unknown github.PR found")
 	}
 
 	// Snapshots are copies: mutating tracker state doesn't leak into them.
-	tr.state.PRs[refA.Key()].Title = "changed"
+	a.Title = "changed"
 	if s.Status().PRs[0].Title != "" {
 		t.Fatal("snapshot aliases tracker state")
 	}
 }
 
 func TestServiceTickError(t *testing.T) {
-	tr := newTestTracker(t, &fakeGitHub{candErr: errors.New("offline")})
-	s := NewService(tr.cfg, tr, NewLogBuffer(10))
-	s.tick(context.Background())
+	cfg, tr := testkit.Tracker(t, &github.Fake{CandErr: errors.New("offline")})
+	s := NewService(cfg, tr, NewLogBuffer(10))
+	s.RunOnce(context.Background())
 	if st := s.Status(); st.LastError == "" || st.LastRun.IsZero() {
 		t.Fatalf("status = %+v", st)
 	}
 }
 
 func TestServiceRunNow(t *testing.T) {
-	tr := newTestTracker(t, &fakeGitHub{})
-	tr.cfg.Interval = Duration{time.Hour}
-	s := NewService(tr.cfg, tr, NewLogBuffer(10))
+	cfg, tr := testkit.Tracker(t, &github.Fake{})
+	s := NewService(cfg, tr, NewLogBuffer(10))
 	ticks := make(chan struct{}, 10)
 	s.OnChange(func(st Status) {
 		if !st.Running && !st.LastRun.IsZero() {

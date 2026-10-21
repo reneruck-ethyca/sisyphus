@@ -1,9 +1,13 @@
 package main
 
 import (
+	"github.com/reneruck/waterboy/internal/github"
 	"bufio"
 	"context"
 	"encoding/json"
+	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/testkit"
+	"github.com/reneruck/waterboy/internal/tracker"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,14 +16,15 @@ import (
 	"testing"
 )
 
-func newTestServer(t *testing.T) (*httptest.Server, *Service) {
+func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer) {
 	t.Helper()
-	tr := newTestTracker(t, &fakeGitHub{},
-		&Tracked{PRRef: refA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x", PendingUpdates: true})
-	svc := NewService(tr.cfg, tr, NewLogBuffer(10))
+	cfg, tr := testkit.Tracker(t, &github.Fake{},
+		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x", PendingUpdates: true})
+	logs := app.NewLogBuffer(10)
+	svc := app.NewService(cfg, tr, logs)
 	srv := httptest.NewServer(newHandler(svc))
 	t.Cleanup(srv.Close)
-	return srv, svc
+	return srv, svc, logs
 }
 
 func get(t *testing.T, url string) (int, string) {
@@ -34,22 +39,22 @@ func get(t *testing.T, url string) (int, string) {
 }
 
 func TestHTTPStatus(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	code, body := get(t, srv.URL+"/api/status")
-	var st Status
+	var st app.Status
 	if err := json.Unmarshal([]byte(body), &st); code != 200 || err != nil {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
-	if st.User != "me" || len(st.PRs) != 1 || st.PRs[0].ID != refA.Key() || st.PRs[0].Health != "pending" {
+	if st.User != "me" || len(st.PRs) != 1 || st.PRs[0].ID != testkit.RefA.Key() || st.PRs[0].Health != "pending" {
 		t.Fatalf("status = %+v", st)
 	}
 }
 
 func TestHTTPPR(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	code, body := get(t, srv.URL+"/api/prs/ethyca/a/1")
-	var pr PRView
-	if err := json.Unmarshal([]byte(body), &pr); code != 200 || err != nil || pr.ID != refA.Key() {
+	var pr app.PRView
+	if err := json.Unmarshal([]byte(body), &pr); code != 200 || err != nil || pr.ID != testkit.RefA.Key() {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
 	for _, path := range []string{"/api/prs/ethyca/a/2", "/prs/ethyca/a/2"} {
@@ -60,18 +65,18 @@ func TestHTTPPR(t *testing.T) {
 }
 
 func TestHTTPRun(t *testing.T) {
-	srv, svc := newTestServer(t)
+	srv, svc, _ := newTestServer(t)
 	resp, err := http.Post(srv.URL+"/api/run", "", nil)
 	if err != nil || resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("%v %v", resp, err)
 	}
-	if len(svc.runNow) != 1 {
+	if !svc.RunQueued() {
 		t.Fatal("tick not queued")
 	}
 }
 
 func TestHTTPPages(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{
 		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "1 tracked · 1 pending", "Last run never"},
 		"/prs/ethyca/a/1": {"ethyca/a#1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `class="health pending"`},
@@ -89,7 +94,7 @@ func TestHTTPPages(t *testing.T) {
 }
 
 func TestHTTPRejectsForeignHostAndOrigin(t *testing.T) {
-	srv, svc := newTestServer(t)
+	srv, svc, _ := newTestServer(t)
 	req, _ := http.NewRequest("GET", srv.URL+"/api/status", nil)
 	req.Host = "evil.example:7465" // DNS rebinding
 	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
@@ -98,18 +103,18 @@ func TestHTTPRejectsForeignHostAndOrigin(t *testing.T) {
 	req, _ = http.NewRequest("POST", srv.URL+"/api/run", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden || len(svc.runNow) != 0 {
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden || svc.RunQueued() {
 		t.Fatalf("cross-origin run: %v %v", resp, err)
 	}
 }
 
 func TestHTTPLogs(t *testing.T) {
-	srv, svc := newTestServer(t)
-	log := slog.New(svc.logs.Handler(slog.NewTextHandler(io.Discard, nil)))
-	log.Warn("fetching <PR>", "pr", refA.Key())
+	srv, _, logs := newTestServer(t)
+	log := slog.New(logs.Handler(slog.NewTextHandler(io.Discard, nil)))
+	log.Warn("fetching <PR>", "pr", testkit.RefA.Key())
 
 	code, body := get(t, srv.URL+"/api/logs")
-	var entries []LogEntry
+	var entries []app.LogEntry
 	if err := json.Unmarshal([]byte(body), &entries); code != 200 || err != nil || len(entries) != 1 || entries[0].Msg != "fetching <PR>" {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
@@ -120,8 +125,8 @@ func TestHTTPLogs(t *testing.T) {
 }
 
 func TestHTTPLogStream(t *testing.T) {
-	srv, svc := newTestServer(t)
-	log := slog.New(svc.logs.Handler(slog.NewTextHandler(io.Discard, nil)))
+	srv, _, logs := newTestServer(t)
+	log := slog.New(logs.Handler(slog.NewTextHandler(io.Discard, nil)))
 	log.Info("backlog")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -136,10 +141,10 @@ func TestHTTPLogStream(t *testing.T) {
 		t.Fatalf("content type %q", ct)
 	}
 	sc := bufio.NewScanner(resp.Body)
-	next := func() LogEntry {
+	next := func() app.LogEntry {
 		for sc.Scan() {
 			if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
-				var e LogEntry
+				var e app.LogEntry
 				if err := json.Unmarshal([]byte(data), &e); err != nil {
 					t.Fatal(err)
 				}
@@ -147,7 +152,7 @@ func TestHTTPLogStream(t *testing.T) {
 			}
 		}
 		t.Fatalf("stream ended: %v", sc.Err())
-		return LogEntry{}
+		return app.LogEntry{}
 	}
 	if e := next(); e.Msg != "backlog" {
 		t.Fatalf("first event %+v", e)

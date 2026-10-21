@@ -1,37 +1,38 @@
-package main
+package tracker
 
 import (
+	"github.com/reneruck/waterboy/internal/github"
 	"testing"
 	"time"
 )
 
 func at(m int) time.Time { return time.Date(2026, 10, 20, 12, m, 0, 0, time.UTC) }
 
-func rv(user, state string, m int) Review {
-	return Review{User: user, State: state, SubmittedAt: at(m)}
+func rv(user, state string, m int) github.Review {
+	return github.Review{User: user, State: state, SubmittedAt: at(m)}
 }
 
 func TestDropReason(t *testing.T) {
-	open := func(rs ...Review) PR { return PR{State: "open", Reviews: rs} }
+	open := func(rs ...github.Review) github.PR { return github.PR{State: "open", Reviews: rs} }
 	bot := rv("ci", "APPROVED", 1)
 	bot.Bot = true
 	cases := []struct {
 		name         string
-		pr           PR
+		pr           github.PR
 		cand, drafts bool
 		want         string
 	}{
 		{"open candidate", open(), true, false, ""},
-		{"merged", PR{State: "closed", Merged: true}, true, false, "merged"},
-		{"closed", PR{State: "closed"}, true, false, "closed"},
+		{"merged", github.PR{State: "closed", Merged: true}, true, false, "merged"},
+		{"closed", github.PR{State: "closed"}, true, false, "closed"},
 		{"approved by me", open(rv("me", "APPROVED", 1)), true, false, "approved by you"},
 		{"approved then commented", open(rv("me", "APPROVED", 1), rv("me", "COMMENTED", 2)), true, false, "approved by you"},
 		{"other approved", open(rv("alice", "APPROVED", 1)), true, false, "approved by alice"},
 		{"other approved, I requested changes", open(rv("me", "CHANGES_REQUESTED", 1), rv("alice", "APPROVED", 2)), true, false, ""},
 		{"other approval dismissed", open(rv("alice", "APPROVED", 1), rv("alice", "DISMISSED", 2)), true, false, ""},
 		{"bot approval ignored", open(bot), true, false, ""},
-		{"draft excluded", PR{State: "open", Draft: true}, true, false, "draft"},
-		{"draft included", PR{State: "open", Draft: true}, true, true, ""},
+		{"draft excluded", github.PR{State: "open", Draft: true}, true, false, "draft"},
+		{"draft included", github.PR{State: "open", Draft: true}, true, true, ""},
 		{"no longer candidate", open(), false, false, "no longer requested"},
 	}
 	for _, c := range cases {
@@ -44,10 +45,10 @@ func TestDropReason(t *testing.T) {
 func TestNewReplies(t *testing.T) {
 	nit := rv("bob", "COMMENTED", 4)
 	nit.Body = "nit"
-	pr := PR{
-		Comments: []Comment{{User: "alice", CreatedAt: at(1)}, {User: "alice", CreatedAt: at(5)},
+	pr := github.PR{
+		Comments: []github.Comment{{User: "alice", CreatedAt: at(1)}, {User: "alice", CreatedAt: at(5)},
 			{User: "me", CreatedAt: at(6)}, {User: "ci", Bot: true, CreatedAt: at(7)}},
-		Reviews: []Review{nit, rv("bob", "APPROVED", 8)},
+		Reviews: []github.Review{nit, rv("bob", "APPROVED", 8)},
 	}
 	check := func(since time.Time, wantN int, wantLatest time.Time) {
 		t.Helper()
@@ -61,15 +62,15 @@ func TestNewReplies(t *testing.T) {
 	check(time.Time{}, 3, at(8))
 }
 
-// Review #3: search lag must not drop a PR the payload still shows as ours.
+// github.Review #3: search lag must not drop a github.PR the payload still shows as ours.
 func TestStillMine(t *testing.T) {
-	if !stillMine(PR{RequestedReviewers: []string{"me"}}, "me") {
+	if !stillMine(github.PR{RequestedReviewers: []string{"me"}}, "me") {
 		t.Error("requested reviewer")
 	}
-	if !stillMine(PR{Reviews: []Review{rv("me", "COMMENTED", 1)}}, "me") {
+	if !stillMine(github.PR{Reviews: []github.Review{rv("me", "COMMENTED", 1)}}, "me") {
 		t.Error("reviewed by me")
 	}
-	if stillMine(PR{RequestedReviewers: []string{"alice"}, Reviews: []Review{rv("alice", "COMMENTED", 1)}}, "me") {
+	if stillMine(github.PR{RequestedReviewers: []string{"alice"}, Reviews: []github.Review{rv("alice", "COMMENTED", 1)}}, "me") {
 		t.Error("not mine")
 	}
 }

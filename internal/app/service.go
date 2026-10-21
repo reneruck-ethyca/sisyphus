@@ -1,11 +1,12 @@
-package main
+package app
 
 import (
 	"cmp"
 	"context"
 	"fmt"
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/tracker"
 	"log/slog"
-	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -34,12 +35,12 @@ func (s Status) Summary() string {
 
 // PRView is a tracked PR as UIs see it: a copy of its state plus derived fields.
 type PRView struct {
-	Tracked
+	tracker.Tracked
 	ID     string `json:"id"`     // "owner/repo#n"
 	Health string `json:"health"` // "conflict" | "error" | "pending" | "ok"
 }
 
-func health(tr Tracked) string {
+func health(tr tracker.Tracked) string {
 	switch {
 	case tr.ConflictHeadSHA != "" && tr.ConflictHeadSHA == tr.HeadSHA:
 		return "conflict"
@@ -54,8 +55,8 @@ func health(tr Tracked) string {
 // Service is the boundary every UI (tray, web, Wails, a future API) talks to. It
 // owns the run loop and hands out copies, so callers never race a running tick.
 type Service struct {
-	cfg     Config
-	tracker *Tracker
+	cfg     config.Config
+	tracker *tracker.Tracker
 	logs    *LogBuffer
 	runNow  chan struct{}
 
@@ -64,10 +65,10 @@ type Service struct {
 	subs   []func(Status)
 }
 
-func NewService(cfg Config, tracker *Tracker, logs *LogBuffer) *Service {
-	s := &Service{cfg: cfg, tracker: tracker, logs: logs, runNow: make(chan struct{}, 1)}
+func NewService(cfg config.Config, tr *tracker.Tracker, logs *LogBuffer) *Service {
+	s := &Service{cfg: cfg, tracker: tr, logs: logs, runNow: make(chan struct{}, 1)}
 	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String()}
-	tracker.onSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
+	tr.OnSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
 	s.refreshPRs()
 	return s
 }
@@ -110,13 +111,16 @@ func (s *Service) RunNow() {
 	}
 }
 
+// RunQueued reports whether a RunNow is waiting for the loop to pick it up.
+func (s *Service) RunQueued() bool { return len(s.runNow) > 0 }
+
 // Run ticks immediately, then every interval or on RunNow, until ctx is done.
 // Ticks never overlap.
 func (s *Service) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.Interval.Duration)
 	defer ticker.Stop()
 	for {
-		s.tick(ctx)
+		s.RunOnce(ctx)
 		select {
 		case <-ticker.C:
 		case <-s.runNow:
@@ -126,7 +130,8 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-func (s *Service) tick(ctx context.Context) {
+// RunOnce runs a single tick (for -once).
+func (s *Service) RunOnce(ctx context.Context) {
 	s.update(func(st *Status) { st.Running = true })
 	err := s.tracker.Tick(ctx)
 	if err != nil {
@@ -142,10 +147,9 @@ func (s *Service) tick(ctx context.Context) {
 
 // refreshPRs copies tracker state. It must run on the goroutine that ticks.
 func (s *Service) refreshPRs() {
-	prs := make([]PRView, 0, len(s.tracker.state.PRs))
-	for _, id := range slices.Sorted(maps.Keys(s.tracker.state.PRs)) {
-		tr := *s.tracker.state.PRs[id]
-		prs = append(prs, PRView{Tracked: tr, ID: id, Health: health(tr)})
+	var prs []PRView
+	for _, tr := range s.tracker.Snapshot() {
+		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr)})
 	}
 	s.update(func(st *Status) { st.PRs = prs })
 }

@@ -1,6 +1,7 @@
-package main
+package tracker
 
 import (
+	"github.com/reneruck/waterboy/internal/github"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,7 +11,7 @@ import (
 func TestStateRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "sub", "state.json")
 	s := &State{PRs: map[string]*Tracked{"ethyca/a#1": {
-		PRRef: PRRef{"ethyca/a", 1}, HeadRef: "feature/x", HeadSHA: "abc", SyncedSHA: "abc",
+		PRRef: github.PRRef{Repo: "ethyca/a", Number: 1}, HeadRef: "feature/x", HeadSHA: "abc", SyncedSHA: "abc",
 		Worktree: "/w", CreatedWorktree: true, CreatedBranch: true, TrackedAt: at(1), LastSeenAt: at(2),
 		PendingUpdates: true, LastError: "boom",
 	}}}

@@ -1,20 +1,21 @@
-package main
+package tracker
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/reneruck/waterboy/internal/github"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 type Tracked struct {
-	PRRef
+	github.PRRef
 	URL             string    `json:"url"`
 	Title           string    `json:"title"`
 	HeadRef         string    `json:"head_ref"`
-	HeadSHA         string    `json:"head_sha"`   // last head seen on GitHub
+	HeadSHA         string    `json:"head_sha"`   // last head seen on github.Client
 	SyncedSHA       string    `json:"synced_sha"` // worktree HEAD after our last sync; "" = never hard-reset
 	Worktree        string    `json:"worktree"`
 	CreatedWorktree bool      `json:"created_worktree"`
@@ -27,7 +28,7 @@ type Tracked struct {
 }
 
 type State struct {
-	PRs map[string]*Tracked `json:"prs"` // key = PRRef.Key()
+	PRs map[string]*Tracked `json:"prs"` // key = github.PRRef.Key()
 }
 
 // LoadState reads the state file. Missing = empty; corrupt = error, never a

@@ -1,8 +1,9 @@
-package main
+package worktree
 
 import (
 	"context"
 	"fmt"
+	"github.com/reneruck/waterboy/internal/proc"
 	"strings"
 )
 
@@ -27,41 +28,41 @@ func parseWorktreeList(porcelain, branch string) string {
 	return ""
 }
 
-// validBranch rejects branch names (from GitHub, i.e. untrusted) that git
+// ValidBranch rejects branch names (from GitHub, i.e. untrusted) that git
 // wouldn't accept or that could be parsed as a flag by git/wtp.
-func validBranch(ctx context.Context, name string) bool {
+func ValidBranch(ctx context.Context, name string) bool {
 	if name == "" || strings.HasPrefix(name, "-") {
 		return false
 	}
-	_, err := run(ctx, "", "git", "check-ref-format", "--branch", name)
+	_, err := proc.Run(ctx, "", "git", "check-ref-format", "--branch", name)
 	return err == nil
 }
 
-func findWorktree(ctx context.Context, repoDir, branch string) (string, error) {
-	out, err := run(ctx, repoDir, "git", "worktree", "list", "--porcelain")
+func Find(ctx context.Context, repoDir, branch string) (string, error) {
+	out, err := proc.Run(ctx, repoDir, "git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return "", err
 	}
 	return parseWorktreeList(out, branch), nil
 }
 
-func branchExists(ctx context.Context, repoDir, branch string) bool {
-	_, err := run(ctx, repoDir, "git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+func BranchExists(ctx context.Context, repoDir, branch string) bool {
+	_, err := proc.Run(ctx, repoDir, "git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	return err == nil
 }
 
-func fetchBranch(ctx context.Context, dir, branch string) error {
-	_, err := run(ctx, dir, "git", "fetch", "--quiet", "origin",
+func fetch(ctx context.Context, dir, branch string) error {
+	_, err := proc.Run(ctx, dir, "git", "fetch", "--quiet", "origin",
 		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch))
 	return err
 }
 
-// createWorktree checks the PR branch out via wtp, which also runs .wtp.yml hooks.
-func createWorktree(ctx context.Context, repoDir, branch string) (string, error) {
-	if err := fetchBranch(ctx, repoDir, branch); err != nil {
+// Create checks the PR branch out via wtp, which also runs .wtp.yml hooks.
+func Create(ctx context.Context, repoDir, branch string) (string, error) {
+	if err := fetch(ctx, repoDir, branch); err != nil {
 		return "", err
 	}
-	out, err := run(ctx, repoDir, "wtp", "add", branch, "--quiet")
+	out, err := proc.Run(ctx, repoDir, "wtp", "add", branch, "--quiet")
 	if err != nil {
 		return "", err
 	}
@@ -74,31 +75,31 @@ func createWorktree(ctx context.Context, repoDir, branch string) (string, error)
 	return path, nil
 }
 
-// removeWorktree force-removes a worktree we created; wtp names worktrees after the branch.
-func removeWorktree(ctx context.Context, repoDir, branch string, deleteBranch bool) error {
+// Remove force-removes a worktree we created; wtp names worktrees after the branch.
+func Remove(ctx context.Context, repoDir, branch string, deleteBranch bool) error {
 	args := []string{"remove", "-f"}
 	if deleteBranch {
 		args = append(args, "--with-branch", "--force-branch")
 	}
-	_, err := run(ctx, repoDir, "wtp", append(args, branch)...)
+	_, err := proc.Run(ctx, repoDir, "wtp", append(args, branch)...)
 	return err
 }
 
-func headSHA(ctx context.Context, dir string) (string, error) {
-	return run(ctx, dir, "git", "rev-parse", "HEAD")
+func HeadSHA(ctx context.Context, dir string) (string, error) {
+	return proc.Run(ctx, dir, "git", "rev-parse", "HEAD")
 }
 
-// syncWorktree brings dir up to origin/branch and returns the new HEAD.
+// Sync brings dir up to origin/branch and returns the new HEAD.
 //   - behind: fast-forward (a collision with untracked files is a conflict)
 //   - ahead (local unpushed commits): conflict, never recorded as synced
 //   - diverged: hard-reset only if HEAD is still exactly where we last synced it
 //     (a force-push with no local work); otherwise conflict.
-func syncWorktree(ctx context.Context, dir, branch, syncedSHA string) (string, error) {
-	if err := fetchBranch(ctx, dir, branch); err != nil {
+func Sync(ctx context.Context, dir, branch, syncedSHA string) (string, error) {
+	if err := fetch(ctx, dir, branch); err != nil {
 		return "", err
 	}
 	// Untracked files don't count: wtp hooks copy untracked config into worktrees.
-	status, err := run(ctx, dir, "git", "status", "--porcelain", "--untracked-files=no")
+	status, err := proc.Run(ctx, dir, "git", "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return "", err
 	}
@@ -106,33 +107,33 @@ func syncWorktree(ctx context.Context, dir, branch, syncedSHA string) (string, e
 		return "", &ConflictError{Reason: "dirty"}
 	}
 	remote := "origin/" + branch
-	head, err := headSHA(ctx, dir)
+	head, err := HeadSHA(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	remoteSHA, err := run(ctx, dir, "git", "rev-parse", remote)
+	remoteSHA, err := proc.Run(ctx, dir, "git", "rev-parse", remote)
 	if err != nil {
 		return "", err
 	}
 	isAncestor := func(a, b string) bool {
-		_, err := run(ctx, dir, "git", "merge-base", "--is-ancestor", a, b)
+		_, err := proc.Run(ctx, dir, "git", "merge-base", "--is-ancestor", a, b)
 		return err == nil
 	}
 	switch {
 	case head == remoteSHA:
 		return head, nil
 	case isAncestor(head, remoteSHA):
-		if _, err := run(ctx, dir, "git", "merge", "--ff-only", "--quiet", remote); err != nil {
+		if _, err := proc.Run(ctx, dir, "git", "merge", "--ff-only", "--quiet", remote); err != nil {
 			return "", &ConflictError{Reason: "untracked-collision"}
 		}
-		return headSHA(ctx, dir)
+		return HeadSHA(ctx, dir)
 	case isAncestor(remoteSHA, head):
 		return "", &ConflictError{Reason: "ahead"}
 	case syncedSHA != "" && head == syncedSHA:
-		if _, err := run(ctx, dir, "git", "reset", "--hard", "--quiet", remote); err != nil {
+		if _, err := proc.Run(ctx, dir, "git", "reset", "--hard", "--quiet", remote); err != nil {
 			return "", err
 		}
-		return headSHA(ctx, dir)
+		return HeadSHA(ctx, dir)
 	default:
 		return "", &ConflictError{Reason: "diverged"}
 	}
