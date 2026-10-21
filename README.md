@@ -47,10 +47,11 @@ API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `
 `GET /api/logs` (last 1000 ops log lines) and `GET /api/logs/stream` (server-sent events: backlog,
 then live). If the port is taken it logs and runs without it. Both the dashboard (`/logs`) and the
 window ("Logs") have a live log viewer. PR pages list review runs; a run's files are served at
-`/prs/{owner}/{repo}/{number}/runs/{run}/` (`log`, `run.json`, `out/`).
+`/prs/{owner}/{repo}/{number}/runs/{run}/` (`log`, `run.json`, `out/`). Run files are served sandboxed (CSP `sandbox`,
+`nosniff`), so HTML a reviewer writes can't script the dashboard.
 
 Requires `gh` (authenticated), `git`, and `wtp` on PATH, and Docker for reviews (if it's down,
-reviews wait in the queue and are retried every minute). `install-agent` bakes your current
+reviews wait in the queue and are retried every minute; at login, re-attaching waits for it too). `install-agent` bakes your current
 shell's PATH into the LaunchAgent.
 
 ## Config
@@ -100,8 +101,10 @@ PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and 
 which holds the PR's worktree lock: the tracker doesn't sync or remove that worktree meanwhile, asks
 for it back instead, and catches up on the next tick.
 
-The container gets the worktree and the clone's `.git` mounted read/write at their own paths (a
-worktree's `.git` points into the clone), `/out` for results, the worktree as cwd, and
+The container gets the worktree mounted read/write at its own path (so a reviewer can change code
+to verify an issue), its `.git` and the clone's `.git` read-only at their own paths (a worktree's
+`.git` points into the clone; read-only so a container can't plant hooks or config that host-side git
+would run, which also means no `git commit` inside), `/out` for results, the worktree as cwd, and
 `WATERBOY_RUN_ID`, `WATERBOY_REASON`, `WATERBOY_PR_URL`, `WATERBOY_REPO`, `WATERBOY_PR_NUMBER`,
 `WATERBOY_BRANCH`, `WATERBOY_HEAD_SHA`, `WATERBOY_WORKTREE`, `WATERBOY_OUT`. With `review.cleanup`,
 worktrees waterboy created are reset to the reviewed head afterwards (tracked changes, commits on top

@@ -70,6 +70,12 @@ func (p PRStatus) Latest() *Run {
 
 const keepRuns = 10 // records per PR in reviews.json; run dirs stay on disk
 
+// Tunables (vars so tests can shorten them).
+var (
+	retryEvery = time.Minute     // re-check an unavailable container runtime
+	logGrace   = 5 * time.Second // let the log stream drain after the container is done
+)
+
 var (
 	errSuperseded = errors.New("superseded by new commits")
 	errReclaimed  = errors.New("worktree reclaimed by the tracker")
@@ -96,6 +102,7 @@ type Reviewer struct {
 	active      map[string]context.CancelCauseFunc // running, by PR ID
 	wake        chan struct{}
 	unavailable string // why the runtime can't start containers right now
+	retrying    bool   // a runtime re-check is scheduled
 }
 
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
@@ -171,7 +178,8 @@ func (r *Reviewer) cancel(id string, why error) {
 // --- running ---
 
 // Reattach picks up runs a previous process left running. Call it before the
-// first tick: it takes the worktree locks those containers still use.
+// first tick: it takes the worktree locks those containers still use, even while
+// the runtime isn't up yet (as at login), and re-attaches once it is.
 func (r *Reviewer) Reattach(ctx context.Context) {
 	r.mu.Lock()
 	var left []Run
@@ -183,38 +191,91 @@ func (r *Reviewer) Reattach(ctx context.Context) {
 		}
 	}
 	r.mu.Unlock()
-	known := map[string]bool{}
 	for _, run := range left {
-		infos, err := r.rt.List(ctx, map[string]string{"waterboy.run": run.ID})
-		unlock, locked := r.locks.TryLock(run.Job.PR.Key())
-		if err != nil || len(infos) != 1 || !locked {
-			for _, c := range infos {
-				r.rt.Remove(ctx, c.ID)
-			}
-			if locked {
-				unlock()
-			}
-			r.lose(run, fmt.Errorf("couldn't re-attach after restart (containers %d, err %v)", len(infos), err))
+		id := run.Job.PR.Key()
+		unlock, ok := r.locks.TryLock(id)
+		if !ok {
+			r.lose(run, errors.New("worktree busy at start"))
 			continue
 		}
-		known[infos[0].ID] = true
-		run.Container = infos[0].ID
 		runCtx, cancel := context.WithCancelCause(ctx)
 		r.mu.Lock()
-		r.active[run.Job.PR.Key()] = cancel
+		r.active[id] = cancel
 		r.mu.Unlock()
-		slog.Info("re-attached review", "pr", run.Job.PR.Key(), "run", run.ID, "container", run.Container)
-		go r.follow(ctx, runCtx, run, unlock, true)
+		go r.reattach(ctx, runCtx, run, unlock)
 	}
-	// Containers with no running record (we died between start and saving it).
-	if orphans, err := r.rt.List(ctx, map[string]string{"waterboy": "1"}); err == nil {
-		for _, c := range orphans {
-			if !known[c.ID] {
-				slog.Warn("removing orphaned review container", "container", c.ID, "run", c.Labels["waterboy.run"])
-				r.rt.Remove(ctx, c.ID)
-			}
+	go r.sweepOrphans(ctx)
+}
+
+func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func()) {
+	id := run.Job.PR.Key()
+	giveUp := func(err error) {
+		if appCtx.Err() != nil {
+			return // shutting down again; try next start
+		}
+		unlock()
+		r.mu.Lock()
+		delete(r.active, id)
+		r.mu.Unlock()
+		r.lose(run, err)
+		if errors.Is(err, errReclaimed) && r.Kick != nil {
+			r.Kick()
+		}
+		r.poke()
+	}
+	if err := r.waitRuntime(runCtx); err != nil {
+		giveUp(context.Cause(runCtx))
+		return
+	}
+	infos, err := r.rt.List(runCtx, map[string]string{"waterboy.run": run.ID})
+	if err != nil || len(infos) != 1 {
+		for _, c := range infos {
+			r.rt.Remove(context.WithoutCancel(appCtx), c.ID)
+		}
+		giveUp(fmt.Errorf("couldn't re-attach after restart (containers %d, err %v)", len(infos), err))
+		return
+	}
+	run.Container = infos[0].ID
+	slog.Info("re-attached review", "pr", id, "run", run.ID, "container", run.Container, "running", infos[0].Running)
+	r.follow(appCtx, runCtx, run, unlock, true, !infos[0].Running)
+}
+
+// sweepOrphans removes review containers with no running record (we died
+// between starting one and saving its record, or gave up re-attaching).
+func (r *Reviewer) sweepOrphans(ctx context.Context) {
+	if r.waitRuntime(ctx) != nil {
+		return
+	}
+	cs, err := r.rt.List(ctx, map[string]string{"waterboy": "1"})
+	if err != nil {
+		return
+	}
+	r.mu.Lock()
+	running := map[string]bool{}
+	for _, runs := range r.st.Runs {
+		for _, run := range runs {
+			running[run.ID] = run.Status == Running
 		}
 	}
+	r.mu.Unlock()
+	for _, c := range cs {
+		if !running[c.Labels["waterboy.run"]] {
+			slog.Warn("removing orphaned review container", "container", c.ID, "run", c.Labels["waterboy.run"])
+			r.rt.Remove(ctx, c.ID)
+		}
+	}
+}
+
+// waitRuntime blocks until the container runtime answers or ctx ends.
+func (r *Reviewer) waitRuntime(ctx context.Context) error {
+	for r.rt.Available(ctx) != nil {
+		select {
+		case <-time.After(retryEvery):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // lose marks a run that can't be followed any more and queues its job again.
@@ -248,11 +309,19 @@ func (r *Reviewer) RuntimeError() string {
 func (r *Reviewer) checkRuntime(ctx context.Context) bool {
 	err := r.rt.Available(ctx)
 	msg := ""
+	r.mu.Lock()
 	if err != nil {
 		msg = err.Error()
-		time.AfterFunc(time.Minute, r.poke)
+		if !r.retrying { // one pending retry, however often we're poked meanwhile
+			r.retrying = true
+			time.AfterFunc(retryEvery, func() {
+				r.mu.Lock()
+				r.retrying = false
+				r.mu.Unlock()
+				r.poke()
+			})
+		}
 	}
-	r.mu.Lock()
 	was := r.unavailable
 	r.unavailable = msg
 	r.mu.Unlock()
@@ -312,16 +381,10 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 	id := tr.Key()
 	unlock, err := r.locks.Lock(runCtx, id)
 	if err != nil {
-		if appCtx.Err() != nil {
-			return // shutting down; the record stays "running" and is requeued as lost on restart
-		}
-		r.finish(run, Cancelled, 0, context.Cause(runCtx), nil)
+		r.endEarly(appCtx, runCtx, run, err, nil)
 		return
 	}
-	fail := func(err error) {
-		slog.Warn("review not started", "pr", id, "run", run.ID, "err", err)
-		r.finish(run, Errored, 0, err, unlock)
-	}
+	fail := func(err error) { r.endEarly(appCtx, runCtx, run, err, unlock) }
 	if head, err := worktree.HeadSHA(runCtx, tr.Worktree); err != nil {
 		fail(err)
 		return
@@ -336,13 +399,41 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 	}
 	cid, err := r.rt.Start(runCtx, spec)
 	if err != nil {
+		if appCtx.Err() == nil {
+			// `docker run` failing doesn't mean the daemon didn't start it.
+			r.removeRun(context.WithoutCancel(appCtx), run.ID)
+		}
 		fail(err)
 		return
 	}
 	run.Container = cid
 	r.record(id, run.ID, func(x *Run) { x.Container = cid })
 	slog.Info("review started", "pr", id, "run", run.ID, "reason", run.Job.Reason, "container", cid)
-	r.follow(appCtx, runCtx, run, unlock, false)
+	r.follow(appCtx, runCtx, run, unlock, false, false)
+}
+
+// endEarly settles a run that ended before its container was up.
+func (r *Reviewer) endEarly(appCtx, runCtx context.Context, run Run, err error, unlock func()) {
+	if appCtx.Err() != nil {
+		return // shutting down: the record stays "running" and is requeued as lost on restart
+	}
+	if runCtx.Err() != nil { // superseded, reclaimed or dropped while starting
+		why := context.Cause(runCtx)
+		r.finish(run, Cancelled, 0, why, unlock)
+		if errors.Is(why, errReclaimed) && r.Kick != nil {
+			r.Kick()
+		}
+		return
+	}
+	slog.Warn("review not started", "pr", run.Job.PR.Key(), "run", run.ID, "err", err)
+	r.finish(run, Errored, 0, err, unlock)
+}
+
+func (r *Reviewer) removeRun(ctx context.Context, runID string) {
+	cs, _ := r.rt.List(ctx, map[string]string{"waterboy.run": runID})
+	for _, c := range cs {
+		r.rt.Remove(ctx, c.ID)
+	}
 }
 
 func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
@@ -351,15 +442,19 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return container.Spec{}, err
 	}
-	// The worktree's .git is a pointer into the clone's .git; mount both at the
-	// same paths so the pointer resolves inside the container.
-	mounts := []container.Mount{{Source: tr.Worktree, Target: tr.Worktree}}
+	// Sources are read/write; git metadata is read-only. Host-side git (sync,
+	// cleanup) runs in this worktree, so a container that could write hooks or
+	// config (core.fsmonitor, …), or re-point the worktree's .git file, could run
+	// commands on the host. The worktree's .git points into the clone's .git;
+	// both are mounted at their own paths so the pointer resolves.
+	dotGit := filepath.Join(tr.Worktree, ".git")
+	mounts := []container.Mount{{Source: tr.Worktree, Target: tr.Worktree}, {Source: dotGit, Target: dotGit, ReadOnly: true}}
 	gitDir, err := worktree.CommonDir(ctx, tr.Worktree)
 	if err != nil {
 		return container.Spec{}, err
 	}
-	if real, _ := filepath.EvalSymlinks(tr.Worktree); !strings.HasPrefix(gitDir+"/", real+"/") {
-		mounts = append(mounts, container.Mount{Source: gitDir, Target: gitDir})
+	if real, _ := filepath.EvalSymlinks(dotGit); gitDir != real {
+		mounts = append(mounts, container.Mount{Source: gitDir, Target: gitDir, ReadOnly: true})
 	}
 	mounts = append(mounts, container.Mount{Source: out, Target: "/out"})
 	env := map[string]string{
@@ -386,12 +481,29 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 // follow streams the container's log into the run dir, waits for it to exit
 // (stopping it on cancel or timeout), then records the result. On shutdown it
 // returns without touching the container, which a restart re-attaches to.
-func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func(), reattached bool) {
+// exited: a re-attached container had already finished, so its timeout doesn't apply.
+func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func(), reattached, exited bool) {
 	id := run.Job.PR.Key()
-	runCtx, cancelTimeout := context.WithDeadlineCause(runCtx, run.Started.Add(r.cfg.Timeout.Duration), errTimeout)
+	deadline := run.Started.Add(r.cfg.Timeout.Duration)
+	if exited {
+		deadline = time.Now().Add(time.Minute)
+	}
+	runCtx, cancelTimeout := context.WithDeadlineCause(runCtx, deadline, errTimeout)
 	defer cancelTimeout()
 
+	// Logs follows until the container exits; it gets its own context so a
+	// container we failed to wait for or stop can't hold this run forever.
+	logsCtx, cancelLogs := context.WithCancel(appCtx)
+	defer cancelLogs()
 	logsDone := make(chan struct{})
+	drainLogs := func() {
+		select {
+		case <-logsDone:
+		case <-time.After(logGrace):
+			cancelLogs()
+			<-logsDone
+		}
+	}
 	logf, err := os.Create(filepath.Join(run.Dir, "log")) // docker replays from the start, so truncate
 	if err != nil {
 		slog.Warn("creating run log", "run", run.ID, "err", err)
@@ -400,7 +512,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		go func() {
 			defer close(logsDone)
 			defer logf.Close()
-			r.rt.Logs(appCtx, run.Container, logf)
+			r.rt.Logs(logsCtx, run.Container, logf)
 		}()
 	}
 
@@ -421,9 +533,9 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.rt.Stop(bg, run.Container)
 		code, _ = r.rt.Wait(bg, run.Container)
 		cancel()
-	case err != nil:
-		<-logsDone
+	case err != nil: // couldn't wait for it: don't trust it to ever exit
 		r.rt.Remove(context.WithoutCancel(appCtx), run.Container)
+		drainLogs()
 		if reattached {
 			unlock()
 			r.mu.Lock()
@@ -436,7 +548,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.finish(run, Errored, 0, err, unlock)
 		return
 	}
-	<-logsDone
+	drainLogs()
 	bg := context.WithoutCancel(appCtx)
 	if err := r.rt.Remove(bg, run.Container); err != nil {
 		slog.Warn("removing review container", "run", run.ID, "err", err)

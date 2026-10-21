@@ -228,6 +228,11 @@ func TestHTTPReviewRuns(t *testing.T) {
 	if resp, _ := http.Get(base + "/log"); resp.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
 		t.Errorf("log content type %q", resp.Header.Get("Content-Type"))
 	}
+	// Files a reviewer wrote must not run script on the dashboard's origin.
+	if resp, _ := http.Get(base + "/out/review.md"); resp.Header.Get("Content-Security-Policy") != "sandbox" ||
+		resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("run file headers: %v", resp.Header)
+	}
 	for _, path := range []string{"/out/escape", "/../../../../../../etc/hosts", "-nope/log"} {
 		if code, body := get(t, base+path); code == 200 {
 			t.Errorf("%s served: %.80s", path, body)

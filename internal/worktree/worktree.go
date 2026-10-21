@@ -147,7 +147,8 @@ func CommonDir(ctx context.Context, dir string) (string, error) {
 }
 
 // Reset puts dir back at sha: drops tracked changes and commits made on top,
-// and deletes untracked files. Ignored files (installed deps, copied config) stay.
+// and deletes untracked files, including untracked config a .wtp.yml hook copied
+// in unless it's gitignored. Ignored files (installed deps, …) stay.
 func Reset(ctx context.Context, dir, sha string) error {
 	if _, err := proc.Run(ctx, dir, "git", "reset", "--hard", "--quiet", sha); err != nil {
 		return err

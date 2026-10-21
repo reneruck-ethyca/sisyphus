@@ -16,6 +16,27 @@ type Fake struct {
 	cs          map[string]*fakeContainer
 	unavailable error
 	started     []Spec
+	available   int // Available calls
+
+	// OnStart, if set, runs inside Start after the container exists (as if the
+	// daemon had started it); an error makes Start fail anyway.
+	OnStart func(ctx context.Context, id string) error
+}
+
+// AvailableCalls counts Available calls.
+func (f *Fake) AvailableCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.available
+}
+
+// FailWait makes Wait on id return an error while the container keeps running.
+func (f *Fake) FailWait(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c := f.cs[id]; c != nil {
+		close(c.waitFail)
+	}
 }
 
 // SetUnavailable makes Available fail with err (nil = available again).
@@ -33,23 +54,36 @@ func (f *Fake) Started() []Spec {
 }
 
 type fakeContainer struct {
-	labels map[string]string
-	done   chan struct{}
-	code   int
-	out    string
+	labels   map[string]string
+	done     chan struct{}
+	waitFail chan struct{}
+	code     int
+	out      string
 }
 
 func (f *Fake) Available(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.available++
 	return f.unavailable
 }
 
-func (f *Fake) Start(_ context.Context, s Spec) (string, error) {
+func (f *Fake) Start(ctx context.Context, s Spec) (string, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	if f.unavailable != nil {
+		f.mu.Unlock()
+		return "", f.unavailable
+	}
 	f.started = append(f.started, s)
-	return f.add(s.Labels), nil
+	id := f.add(s.Labels)
+	hook := f.OnStart
+	f.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx, id); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
 }
 
 func (f *Fake) add(labels map[string]string) string {
@@ -58,7 +92,7 @@ func (f *Fake) add(labels map[string]string) string {
 	}
 	f.next++
 	id := fmt.Sprintf("c%d", f.next)
-	f.cs[id] = &fakeContainer{labels: labels, done: make(chan struct{})}
+	f.cs[id] = &fakeContainer{labels: labels, done: make(chan struct{}), waitFail: make(chan struct{})}
 	return id
 }
 
@@ -120,6 +154,8 @@ func (f *Fake) Wait(ctx context.Context, id string) (int, error) {
 	select {
 	case <-c.done:
 		return c.code, nil
+	case <-c.waitFail:
+		return 0, errors.New("docker wait: connection reset")
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
@@ -141,6 +177,9 @@ func (f *Fake) Remove(_ context.Context, id string) error {
 func (f *Fake) List(_ context.Context, labels map[string]string) ([]Info, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.unavailable != nil {
+		return nil, f.unavailable
+	}
 	var out []Info
 	for id, c := range f.cs {
 		match := true

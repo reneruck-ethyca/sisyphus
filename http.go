@@ -141,6 +141,9 @@ func serveRunFile(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 	if name == "" {
 		name = "."
 	}
+	// Whatever a reviewer wrote must not run script on the dashboard's origin.
+	w.Header().Set("Content-Security-Policy", "sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if name == "log" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	}

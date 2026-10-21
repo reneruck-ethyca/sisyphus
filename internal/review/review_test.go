@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +20,12 @@ import (
 )
 
 var refA = github.PRRef{Repo: "ethyca/a", Number: 1}
+
+func init() {
+	// Set once: background goroutines of earlier tests still read these.
+	retryEvery = 20 * time.Millisecond
+	logGrace = 10 * time.Millisecond
+}
 
 type fixture struct {
 	r     *Reviewer
@@ -104,8 +111,11 @@ func TestTrackedRunsReview(t *testing.T) {
 	if s.Env["WATERBOY_REASON"] != "new" || s.Env["WATERBOY_HEAD_SHA"] != f.tr.HeadSHA || s.Env["WATERBOY_OUT"] != "/out" || s.Env["WB_TEST_TOKEN"] != "t0k" {
 		t.Fatalf("env = %v", s.Env)
 	}
-	// A clone's .git lives inside the worktree, so only the worktree and /out are mounted here.
-	if len(s.Mounts) != 2 || s.Mounts[0] != (container.Mount{Source: f.tr.Worktree, Target: f.tr.Worktree}) || s.Mounts[1].Target != "/out" {
+	// A clone's .git lives inside the (read/write) worktree; it's overlaid read-only
+	// so the container can't plant hooks or config that host-side git would run.
+	dotGit := filepath.Join(f.tr.Worktree, ".git")
+	if len(s.Mounts) != 3 || s.Mounts[0] != (container.Mount{Source: f.tr.Worktree, Target: f.tr.Worktree}) ||
+		s.Mounts[1] != (container.Mount{Source: dotGit, Target: dotGit, ReadOnly: true}) || s.Mounts[2].Target != "/out" {
 		t.Fatalf("mounts = %+v (git dir %s)", s.Mounts, gitDir)
 	}
 	if st := f.r.Status()[refA.Key()]; st.State != "running" {
@@ -136,16 +146,18 @@ func TestMountsCloneGitDirForLinkedWorktree(t *testing.T) {
 	f := newFixture(t)
 	wt := filepath.Join(t.TempDir(), "wt")
 	gittest.Git(t, f.tr.Worktree, "worktree", "add", "-q", "-b", "pr", wt)
+	common, _ := filepath.EvalSymlinks(filepath.Join(f.tr.Worktree, ".git"))
 	f.tr.Worktree = wt
 	f.start(t)
 	f.r.Tracked(f.tr)
 	waitFor(t, "container start", f.started(1))
-	var targets []string
+	var got []string
 	for _, m := range f.rt.Started()[0].Mounts {
-		targets = append(targets, m.Target)
+		got = append(got, fmt.Sprintf("%s ro=%v", m.Target, m.ReadOnly))
 	}
-	if len(targets) != 3 || targets[0] != wt || !strings.HasSuffix(targets[1], "/.git") || targets[2] != "/out" {
-		t.Fatalf("mount targets = %q", targets)
+	want := []string{wt + " ro=false", wt + "/.git ro=true", common + " ro=true", "/out ro=false"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("mounts\n got %q\nwant %q", got, want)
 	}
 }
 
@@ -305,12 +317,13 @@ func TestReattachLostRunIsRequeued(t *testing.T) {
 		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "r1")}}
 	orphan := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "zz"}, true, 0, "")
 	f.r.Reattach(context.Background())
-	if st := f.r.Status()[refA.Key()]; st.State != "queued" || st.Runs[0].Status != Lost {
-		t.Fatalf("status = %+v", st)
-	}
-	if slices.ContainsFunc(f.containers(), func(c container.Info) bool { return c.ID == orphan }) {
-		t.Fatal("orphaned container not removed")
-	}
+	waitFor(t, "lost and requeued", func() bool {
+		st := f.r.Status()[refA.Key()]
+		return st.State == "queued" && st.Runs[0].Status == Lost
+	})
+	waitFor(t, "orphan removed", func() bool {
+		return !slices.ContainsFunc(f.containers(), func(c container.Info) bool { return c.ID == orphan })
+	})
 	f.start(t)
 	waitFor(t, "requeued run", f.started(1))
 	if f.rt.Started()[0].Env["WATERBOY_REASON"] != "commits" {
@@ -341,5 +354,133 @@ func TestJobsWaitForRuntime(t *testing.T) {
 	waitFor(t, "container start", f.started(1))
 	if f.r.RuntimeError() != "" {
 		t.Fatal("runtime error not cleared")
+	}
+}
+
+// A broken `docker wait` must not hold the worktree (and the only run slot) until
+// the container happens to exit.
+func TestWaitErrorReleasesWorktree(t *testing.T) {
+	f := newFixture(t)
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	f.rt.FailWait(f.containers()[0].ID)
+	waitFor(t, "run to error", f.lastStatus(Errored))
+	if u, ok := f.locks.TryLock(refA.Key()); !ok {
+		t.Fatal("worktree still locked")
+	} else {
+		u()
+	}
+	if len(f.containers()) != 0 {
+		t.Fatal("container left running")
+	}
+}
+
+// The daemon may have created the container even though `docker run` failed.
+func TestStartFailureRemovesContainer(t *testing.T) {
+	f := newFixture(t)
+	f.rt.OnStart = func(context.Context, string) error { return errors.New("docker run: context deadline exceeded") }
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "run to error", f.lastStatus(Errored))
+	if len(f.containers()) != 0 {
+		t.Fatalf("orphan left: %+v", f.containers())
+	}
+}
+
+// blockStart makes Start hang until its context ends, like a slow image pull.
+func blockStart(f *fixture) chan struct{} {
+	entered := make(chan struct{}, 1)
+	f.rt.OnStart = func(ctx context.Context, _ string) error {
+		entered <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return entered
+}
+
+// Quitting while the container is being started leaves the run "running" (not
+// errored), so the next start re-attaches to whatever the daemon started.
+func TestShutdownDuringStartReattaches(t *testing.T) {
+	f := newFixture(t)
+	entered := blockStart(f)
+	ctx, cancel := context.WithCancel(context.Background())
+	go f.r.Run(ctx)
+	f.r.Tracked(f.tr)
+	<-entered
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	if rs := f.runs(); len(rs) != 1 || rs[0].Status != Running {
+		t.Fatalf("runs = %+v", rs)
+	}
+	f.rt.OnStart = nil
+	f.locks = &tracker.Locks{}
+	f.r = f.newReviewer(t, f.r.cfg)
+	f.r.Reattach(context.Background())
+	waitFor(t, "re-attached", func() bool { return f.r.Status()[refA.Key()].State == "running" })
+	f.rt.Finish(f.containers()[0].ID, 0, "")
+	waitFor(t, "finished", f.lastStatus(Succeeded))
+}
+
+func TestReclaimBeforeStartCancelsAndKicks(t *testing.T) {
+	f := newFixture(t)
+	entered := blockStart(f)
+	f.start(t)
+	f.r.Tracked(f.tr)
+	<-entered
+	f.r.Reclaim(f.tr)
+	waitFor(t, "cancelled", f.lastStatus(Cancelled))
+	waitFor(t, "tick request", func() bool { return f.kicks.Load() == 1 })
+}
+
+// While the runtime is down, each poke must not start another retry loop.
+func TestRuntimeRetryDoesNotMultiply(t *testing.T) {
+	f := newFixture(t)
+	f.rt.SetUnavailable(errors.New("down"))
+	f.start(t)
+	for range 5 {
+		f.r.Tracked(f.tr)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := f.rt.AvailableCalls(); n > 30 {
+		t.Fatalf("%d Available calls in 300ms: retry timers are piling up", n)
+	}
+}
+
+// At login Docker usually isn't up yet: re-attach waits for it, holding the
+// worktree lock, instead of marking every running review lost.
+func TestReattachWaitsForRuntime(t *testing.T) {
+	f := newFixture(t)
+	id := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "r1"}, true, 0, "")
+	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
+		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "r1")}}
+	f.rt.SetUnavailable(errors.New("docker not running"))
+	f.r.Reattach(context.Background())
+	if _, ok := f.locks.TryLock(refA.Key()); ok {
+		t.Fatal("worktree unlocked while waiting to re-attach")
+	}
+	time.Sleep(60 * time.Millisecond)
+	if f.runs()[0].Status != Running {
+		t.Fatalf("run = %+v", f.runs()[0])
+	}
+	f.rt.SetUnavailable(nil)
+	f.start(t)
+	time.Sleep(60 * time.Millisecond)
+	f.rt.Finish(id, 0, "ok\n")
+	waitFor(t, "re-attached run to finish", f.lastStatus(Succeeded))
+}
+
+// A container that finished while waterboy was down is a success, even if the
+// run's timeout has passed by the time we look.
+func TestReattachExitedPastDeadline(t *testing.T) {
+	f := newFixture(t)
+	id := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "r1"}, false, 0, "done\n")
+	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
+		Started: time.Now().Add(-2 * time.Hour), Dir: filepath.Join(f.dir, "runs", "r1")}}
+	os.MkdirAll(filepath.Join(f.dir, "runs", "r1"), 0o755)
+	f.r.Reattach(context.Background())
+	waitFor(t, "run to finish", func() bool { rs := f.runs(); return rs[0].Status != Running })
+	if rs := f.runs(); rs[0].Status != Succeeded {
+		t.Fatalf("run = %+v", rs[0])
 	}
 }

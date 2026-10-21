@@ -15,12 +15,16 @@ import (
 	"time"
 )
 
+// pullTimeout bounds `docker run`, which pulls the image first if it is missing.
+const pullTimeout = 30 * time.Minute
+
 // Docker implements Runtime with the docker CLI (Docker Desktop, colima, …).
 type Docker struct{}
 
-// docker runs a short CLI call. Long-running ones (logs -f, wait) use stream.
-func (Docker) docker(ctx context.Context, env []string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute) // `run` may pull the image
+// docker runs a CLI call that should finish within timeout. Long-running ones
+// (logs -f, wait) don't go through here.
+func (Docker) docker(ctx context.Context, timeout time.Duration, env []string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = append(os.Environ(), env...)
@@ -33,7 +37,7 @@ func (Docker) docker(ctx context.Context, env []string, args ...string) (string,
 }
 
 func (d Docker) Available(ctx context.Context) error {
-	_, err := d.docker(ctx, nil, "info", "--format", "{{.ServerVersion}}")
+	_, err := d.docker(ctx, time.Minute, nil, "info", "--format", "{{.ServerVersion}}")
 	return err
 }
 
@@ -42,7 +46,7 @@ func (d Docker) Start(ctx context.Context, s Spec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return d.docker(ctx, env, args...)
+	return d.docker(ctx, pullTimeout, env, args...)
 }
 
 // runArgs builds `docker run`. Env values travel in the CLI's own environment
@@ -97,12 +101,12 @@ func (Docker) Wait(ctx context.Context, id string) (int, error) {
 }
 
 func (d Docker) Stop(ctx context.Context, id string) error {
-	_, err := d.docker(ctx, nil, "stop", "--time", "10", id)
+	_, err := d.docker(ctx, time.Minute, nil, "stop", "--time", "10", id)
 	return err
 }
 
 func (d Docker) Remove(ctx context.Context, id string) error {
-	_, err := d.docker(ctx, nil, "rm", "--force", id)
+	_, err := d.docker(ctx, time.Minute, nil, "rm", "--force", id)
 	return err
 }
 
@@ -111,11 +115,11 @@ func (d Docker) List(ctx context.Context, labels map[string]string) ([]Info, err
 	for _, k := range slices.Sorted(maps.Keys(labels)) {
 		args = append(args, "--filter", "label="+k+"="+labels[k])
 	}
-	ids, err := d.docker(ctx, nil, args...)
+	ids, err := d.docker(ctx, time.Minute, nil, args...)
 	if err != nil || ids == "" {
 		return nil, err
 	}
-	out, err := d.docker(ctx, nil, append([]string{"inspect"}, strings.Fields(ids)...)...)
+	out, err := d.docker(ctx, time.Minute, nil, append([]string{"inspect"}, strings.Fields(ids)...)...)
 	if err != nil {
 		return nil, err
 	}
