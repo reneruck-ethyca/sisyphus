@@ -1,0 +1,42 @@
+package review
+
+import (
+	_ "embed"
+	"os"
+	"strings"
+	"text/template"
+
+	"github.com/reneruck/waterboy/internal/tracker"
+)
+
+//go:embed prompt.md
+var defaultPrompt string
+
+// PromptData is what a prompt template can use.
+type PromptData struct {
+	PR           tracker.Tracked
+	Reason       string // new | commits | replies
+	PreviousHead string // head of this PR's last successful review ("" if none)
+	Workdir      string // where the worktree is inside the container
+}
+
+// renderPrompt fills the template in file ("" = the built-in prompt).
+func renderPrompt(file string, d PromptData) (string, error) {
+	text := defaultPrompt
+	if file != "" {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return "", err
+		}
+		text = string(b)
+	}
+	t, err := template.New("prompt").Option("missingkey=error").Parse(text)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	if err := t.Execute(&sb, d); err != nil {
+		return "", err
+	}
+	return sb.String(), nil
+}

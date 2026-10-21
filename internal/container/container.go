@@ -15,14 +15,14 @@ type Mount struct {
 }
 
 type Spec struct {
-	Name    string
-	Image   string
-	Command []string          // full argv; replaces the image's entrypoint
-	Env     map[string]string // never put on the command line (ps would show secrets)
-	EnvFile string            // optional, passed through to the runtime
-	Mounts  []Mount
-	Workdir string
-	Labels  map[string]string
+	Name     string
+	Image    string
+	Command  []string          // full argv; replaces the image's entrypoint
+	Env      map[string]string // never put on the command line (ps would show secrets)
+	EnvFiles []string          // KEY=value files; later ones win
+	Mounts   []Mount
+	Workdir  string
+	Labels   map[string]string
 }
 
 type Info struct {

@@ -23,8 +23,14 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.IncludeDrafts || cfg.User != "" {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
-	if r := cfg.Review; r.Disabled || r.Image == "" || len(r.Command) == 0 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 30*time.Minute {
+	r := cfg.Review
+	if r.Disabled || r.Model != "opus" || r.MaxTurns != 100 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
+		r.EnvFile != home+"/.config/waterboy/review.env" {
 		t.Errorf("bad review defaults: %+v", r)
+	}
+	if fp := r.Repos["ethyca/fidesplus"]; fp.Image == "" || fp.Workdir != "/fidesplus" || fp.Setup == "" || len(fp.Cache) == 0 ||
+		fp.EnvFile != home+"/Dev/fidesplus/.devcontainer/devcontainer.env" {
+		t.Errorf("bad fidesplus defaults: %+v", fp)
 	}
 }
 
@@ -32,18 +38,29 @@ func TestLoadConfigReview(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	p := filepath.Join(home, "c.json")
-	os.WriteFile(p, []byte(`{"review": {"image": "me/reviewer:1", "cleanup": false, "env_file": "~/.waterboy.env"}}`), 0o644)
+	os.WriteFile(p, []byte(`{"review": {"model": "sonnet", "cleanup": false, "env_file": "~/.waterboy.env",
+		"repos": {"ethyca/fides": {"image": "me/fides-reviewer:1", "prompt_file": "~/fides.md"}}}}`), 0o644)
 	cfg, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := cfg.Review
-	if r.Image != "me/reviewer:1" || r.Cleanup || r.MaxConcurrent != 1 || len(r.Command) == 0 || r.EnvFile != home+"/.waterboy.env" {
+	if r.Model != "sonnet" || r.Cleanup || r.MaxConcurrent != 1 || r.EnvFile != home+"/.waterboy.env" {
 		t.Errorf("review = %+v", r)
 	}
-	os.WriteFile(p, []byte(`{"review": {"max_concurrent": 0}}`), 0o644)
-	if _, err := Load(p); err == nil {
-		t.Error("max_concurrent 0 should be rejected")
+	if r.Repos["ethyca/fides"].PromptFile != home+"/fides.md" || r.Repos["ethyca/fidesplus"].Image == "" {
+		t.Errorf("repos = %+v (added repos merge with the defaults)", r.Repos)
+	}
+	for _, bad := range []string{
+		`{"review": {"max_concurrent": 0}}`,
+		`{"review": {"repos": {"x/y": {"image": ""}}}}`,
+		`{"review": {"repos": {"x/y": {"image": "i", "cache": ["../outside"]}}}}`,
+		`{"review": {"repos": {"x/y": {"image": "i", "workdir": "relative"}}}}`,
+	} {
+		os.WriteFile(p, []byte(bad), 0o644)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s should be rejected", bad)
+		}
 	}
 }
 

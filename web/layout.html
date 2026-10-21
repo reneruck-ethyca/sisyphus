@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{{if ne . "Logs"}}<meta http-equiv="refresh" content="15">{{end}}
+{{if not (live .)}}<meta http-equiv="refresh" content="15">{{end}}
 <title>{{.}} · waterboy</title>
 <style>
   :root { color-scheme: light dark;
@@ -52,6 +52,20 @@
   #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
   .WARN { color: var(--warn); }
   .ERROR { color: var(--bad); }
+  .runhead { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; margin: 1.75rem 0 .25rem; }
+  .runhead h3 { margin: 0; }
+  #events { margin-top: 1rem; display: flex; flex-direction: column; gap: .35rem; }
+  .ev { white-space: pre-wrap; word-break: break-word; }
+  .ev.output, .ev.init, .ev.system { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); }
+  .ev.text { padding: .5rem .75rem; background: var(--side); border-radius: 6px; border-left: 3px solid var(--accent); }
+  .ev.tool { font-size: 13px; }
+  .ev.tool b { color: var(--accent); font-weight: 600; margin-right: .25rem; }
+  .ev.tool_result details { font-size: 12px; margin-left: 1rem; }
+  .ev.tool_result summary { color: var(--muted); cursor: pointer; }
+  .ev.tool_result pre { font: 12px/1.45 ui-monospace, monospace; background: var(--code); padding: .5rem; border-radius: 4px; max-height: 24rem; overflow: auto; white-space: pre-wrap; }
+  .ev.bad, .ev.bad summary { color: var(--bad); }
+  .ev.result { font-weight: 600; padding: .5rem .75rem; border: 1px solid var(--line); border-radius: 6px; }
+  .overdue { color: var(--warn); }
   @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; } }
 </style>
 </head>

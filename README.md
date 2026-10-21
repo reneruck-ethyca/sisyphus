@@ -11,8 +11,7 @@ review container in it. On each tick it:
 Scheduling and reviewing meet in `tracker.Events`: the tracker announces a PR (`Tracked`, `Updated`)
 only once its worktree is synced to the head it announces, asks for a worktree back (`Reclaim`) when
 it needs to sync or remove one a review is using, and reports `Dropped`. `review.Reviewer` implements
-it: a queue, review containers, and run records. The default container is a placeholder that proves
-the plumbing; the real reviewer image is the next step.
+it: a queue, review containers running Claude Code, and run records.
 
 | Package | |
 |---|---|
@@ -70,13 +69,18 @@ Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
 | `hook_timeout` | `30m` | per hook run |
 | `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; only loopback `Host`s and same-origin POSTs are accepted |
 | `review.disabled` | `false` | don't run reviews |
-| `review.image` | `alpine/git:v2.49.1` | review container image |
-| `review.command` | placeholder script | full argv, replaces the image's entrypoint |
+| `review.model` | `opus` | Claude model |
+| `review.max_turns` | `100` | Claude turn limit; hitting it fails the run |
+| `review.max_budget_usd` | `0` (none) | spend limit (only enforced with API-key auth) |
+| `review.prompt_file` | built-in | Go `text/template` prompt (see `internal/review/prompt.md`) |
+| `review.env_file` | `~/.config/waterboy/review.env` | `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN` (the agent posts reviews as that token's user) |
 | `review.env` | `[]` | names of variables copied from waterboy's environment |
-| `review.env_file` | — | `KEY=value` file for secrets (launchd gives waterboy a bare environment) |
-| `review.timeout` | `30m` | per run; the container is stopped after it |
+| `review.claude_settings` | — | a `settings.json` given to Claude in each run |
+| `review.plugins_volume` | `waterboy-claude-plugins` | Docker volume mounted as Claude's `plugins/` |
+| `review.timeout` | `60m` | runs longer than this are flagged in the UIs, never stopped |
 | `review.max_concurrent` | `1` | review containers at a time |
 | `review.cleanup` | `true` | after each run, reset worktrees waterboy created to the reviewed head |
+| `review.repos` | `ethyca/fidesplus` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`; only these repos are reviewed |
 
 ## Rules
 
@@ -99,21 +103,32 @@ A run is started when a PR is first tracked (`new`), after new commits (`commits
 run still going on the old head) and after new replies (`replies`, queued behind a running one). Each
 PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and one running container,
 which holds the PR's worktree lock: the tracker doesn't sync or remove that worktree meanwhile, asks
-for it back instead, and catches up on the next tick.
+for it back instead, and catches up on the next tick. Only repos in `review.repos` are reviewed.
 
-The container gets the worktree mounted read/write at its own path (so a reviewer can change code
-to verify an issue), its `.git` and the clone's `.git` read-only at their own paths (a worktree's
-`.git` points into the clone; read-only so a container can't plant hooks or config that host-side git
-would run, which also means no `git commit` inside), `/out` for results, the worktree as cwd, and
-`WATERBOY_RUN_ID`, `WATERBOY_REASON`, `WATERBOY_PR_URL`, `WATERBOY_REPO`, `WATERBOY_PR_NUMBER`,
-`WATERBOY_BRANCH`, `WATERBOY_HEAD_SHA`, `WATERBOY_WORKTREE`, `WATERBOY_OUT`. With `review.cleanup`,
-worktrees waterboy created are reset to the reviewed head afterwards (tracked changes, commits on top
-and untracked files go; ignored files stay). Reused worktrees are never reset: they may hold your work.
+Each run is Claude Code headless in the repo's image (`make reviewer-image` builds
+`waterboy-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default
+`~/Dev/fidesplus`, with Claude Code pinned):
 
-Runs live in `<state dir>/runs/<owner>/<repo>/<n>/<run>/` (`run.json`, `log`, `out/`); the queue and
-the last 10 runs per PR are in `<state dir>/reviews.json`. Containers keep running when waterboy
-quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
-Nothing is posted to GitHub yet.
+1. the repo's cache volumes (`waterboy-<repo>-<path>`, e.g. `.venv`, `node_modules`) are mounted over
+   the worktree and its `setup` runs (`uv sync`, `npm install`, …); a failing setup fails the run;
+2. `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`
+   gets the rendered prompt (`prompt.md` in the run dir) and reviews, runs tests, and posts its review
+   to the PR with `gh`. A fresh session each run; its transcript stays in the run's `claude/` dir.
+
+The worktree is mounted read/write at the repo's `workdir` (`/fidesplus`); its `.git` and the clone's
+`.git` are read-only (a container that could write them could plant hooks or config that host-side git
+would run; it also means no `git commit` inside). The container gets `/out`, the env files (repo's,
+then `review.env_file`), and `WATERBOY_RUN_ID`, `WATERBOY_REASON`, `WATERBOY_PR_URL`, `WATERBOY_REPO`,
+`WATERBOY_PR_NUMBER`, `WATERBOY_BRANCH`, `WATERBOY_HEAD_SHA`, `WATERBOY_WORKTREE`, `WATERBOY_OUT`. With
+`review.cleanup`, worktrees waterboy created are reset to the reviewed head afterwards; reused ones never.
+
+Both UIs stream each run live and readably (Claude's text, tool calls, collapsible tool output, the
+final result with turns and cost); the raw output is the run's `log`. Runs live in
+`<state dir>/runs/<owner>/<repo>/<n>/<run>/` (`run.json`, `prompt.md`, `log`, `claude/`, `out/`); the
+queue and the last 10 runs per PR are in `<state dir>/reviews.json`. Containers keep running when
+waterboy quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
+
+The agent may approve. An approval posted as you makes the tracker drop the PR on its next tick.
 
 ## `on_conflict` hook
 

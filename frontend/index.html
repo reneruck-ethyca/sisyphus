@@ -47,6 +47,20 @@
   .failed, .timeout, .lost { color: var(--conflict); } .cancelled { color: var(--muted); }
   pre { font: 12px/1.5 ui-monospace, monospace; background: var(--side); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
   button.link { margin: 0; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
+  .runhead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .runhead h3 { margin: 24px 0 4px; }
+  .overdue { color: var(--error); }
+  #events { margin-top: 12px; display: flex; flex-direction: column; gap: 5px; }
+  .ev { white-space: pre-wrap; word-break: break-word; }
+  .ev.output, .ev.init, .ev.system { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); }
+  .ev.text { padding: 8px 10px; background: var(--side); border-radius: 6px; border-left: 3px solid var(--accent); }
+  .ev.tool b { color: var(--accent); font-weight: 600; margin-right: 4px; }
+  .ev.tool code { font: 12px ui-monospace, monospace; }
+  .ev.tool_result details { margin-left: 14px; font-size: 12px; }
+  .ev.tool_result summary { color: var(--muted); cursor: pointer; }
+  .ev.tool_result pre { max-height: 360px; overflow: auto; }
+  .ev.bad, .ev.bad summary { color: var(--conflict); }
+  .ev.result { font-weight: 600; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 </style>
 <script type="module">
   import { Call, Events, Browser } from "/wails/runtime.js";
@@ -57,12 +71,59 @@
   const app = document.getElementById("app");
   let status, logs = [];
   const LOG_MAX = 1000;
+  // Views by hash: "#logs", "#<pr id>", "#run/<pr id>/<run id>" (ids URI-encoded).
+  let shown = null; // the run on screen: {pr, run, next, status}
+
+  const route = () => {
+    const h = location.hash.slice(1);
+    if (h === "logs") return {view: "logs"};
+    if (h.startsWith("run/")) { const [, pr, run] = h.split("/"); return {view: "run", pr: decodeURIComponent(pr), run: decodeURIComponent(run)}; }
+    return h ? {view: "pr", pr: decodeURIComponent(h)} : {view: "none"};
+  };
+  const runHash = (pr, run) => `#run/${encodeURIComponent(pr)}/${encodeURIComponent(run)}`;
 
   async function render() {
-    const id = location.hash === "#logs" ? "" : decodeURIComponent(location.hash.slice(1));
-    const main = location.hash === "#logs" ? logsView() : id ? await detail(id) : placeholder();
-    app.innerHTML = header() + sidebar(id) + `<section id="main">${notices()}${main}</section>`;
-    if (location.hash === "#logs") scrollMain();
+    const r = route();
+    shown = null;
+    const main = r.view === "logs" ? logsView() : r.view === "run" ? await runView(r.pr, r.run)
+      : r.view === "pr" ? await detail(r.pr) : placeholder();
+    app.innerHTML = header() + sidebar(r.pr) + `<section id="main">${notices()}${main}</section>`;
+    if (r.view === "logs" || r.view === "run") scrollMain();
+  }
+
+  const findRun = (s, pr, run) => s.prs.find(p => p.id === pr)?.review.runs?.find(x => x.id === run);
+
+  const evHTML = e => {
+    const cls = `ev ${esc(e.kind)}${e.is_error ? " bad" : ""}`;
+    if (e.kind === "tool") return `<div class="${cls}"><b>${esc(e.tool)}</b><code>${esc(e.text)}</code></div>`;
+    if (e.kind === "tool_result") return `<div class="${cls}"><details><summary>${e.is_error ? "error" : "result"}</summary><pre>${esc(e.text)}</pre></details></div>`;
+    return `<div class="${cls}">${esc(e.text)}</div>`;
+  };
+
+  async function runView(pr, runID) {
+    const run = findRun(status, pr, runID);
+    if (!run) return `<p class="err">No run ${esc(runID)} for ${esc(pr)}.</p>`;
+    let out;
+    try { out = await call("RunEvents", pr, runID); } catch (e) { return `<p class="err">${esc(e.message ?? e)}</p>`; }
+    shown = {pr, run: runID, next: out.next, status: run.status};
+    const c = run.claude;
+    return `<h2><a href="#${encodeURIComponent(pr)}">${esc(pr)}</a></h2>
+      <div class="runhead"><h3>Run ${esc(run.id)}</h3><span class="${esc(run.status)}">${esc(run.status)}</span>
+        ${run.overdue ? `<span class="overdue">⚠ running longer than review.timeout</span>` : ""}
+        <button class="link" data-open="${esc(run.id)}">folder</button></div>
+      <div class="muted">${esc(run.job.reason)} · head ${esc(run.job.pr.head_sha.slice(0, 12))} · started ${time(run.started)}
+        ${c ? ` · ${c.num_turns} turns · $${c.cost_usd.toFixed(2)}` : ""}</div>
+      ${run.error ? `<p class="err">${esc(run.error)}</p>` : ""}
+      <div id="events">${(out.events ?? []).map(evHTML).join("")}</div>`;
+  }
+
+  function addRunEvent(e) {
+    if (!shown || e.pr !== shown.pr || e.run !== shown.run || e.line < shown.next) return;
+    const box = document.getElementById("events");
+    if (!box) return;
+    const m = document.getElementById("main"), follow = m.scrollTop + m.clientHeight >= m.scrollHeight - 40;
+    box.insertAdjacentHTML("beforeend", evHTML(e));
+    if (follow) scrollMain();
   }
 
   const scrollMain = () => { const m = document.getElementById("main"); m.scrollTop = m.scrollHeight; };
@@ -126,33 +187,37 @@
         field("Last seen", time(p.last_seen_at)),
       ].join("")}</dl>
       <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}</h3>
-      ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th></th></tr></thead><tbody>
+      ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Started</th><th>Claude</th></tr></thead><tbody>
         ${p.review.runs.map(r => `<tr>
-          <td>${esc(r.id)}</td><td>${esc(r.job.reason)}</td><td class="muted">${esc(r.job.pr.head_sha.slice(0, 12))}</td>
+          <td><a href="${runHash(p.id, r.id)}">${esc(r.id)}</a>${r.overdue ? ` <span class="overdue" title="running longer than review.timeout">⚠</span>` : ""}</td>
+          <td>${esc(r.job.reason)}</td><td class="muted">${esc(r.job.pr.head_sha.slice(0, 12))}</td>
           <td class="${esc(r.status)}">${esc(r.status)}${r.error ? `<div class="err">${esc(r.error)}</div>` : ""}</td>
-          <td>${r.status === "running" ? "" : r.exit_code}</td><td class="muted">${time(r.started)}</td>
-          <td><button class="link" data-log="${esc(r.id)}">log</button> · <button class="link" data-open="${esc(r.id)}">folder</button></td></tr>`).join("")}
-        </tbody></table><pre id="runlog" hidden></pre>` : `<p class="muted">No reviews yet.</p>`}`;
+          <td class="muted">${time(r.started)}</td>
+          <td class="muted">${r.claude ? `${r.claude.num_turns} turns · $${r.claude.cost_usd.toFixed(2)}` : ""}</td></tr>`).join("")}
+        </tbody></table>` : `<p class="muted">No reviews yet.</p>`}`;
   }
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
-    const prID = decodeURIComponent(location.hash.slice(1));
-    if (e.target.dataset.open) return call("OpenRun", prID, e.target.dataset.open);
-    if (e.target.dataset.log) {
-      const pre = document.getElementById("runlog");
-      return call("RunLog", prID, e.target.dataset.log)
-        .then(t => { pre.textContent = t || "(empty)"; pre.hidden = false; })
-        .catch(err => { pre.textContent = String(err.message ?? err); pre.hidden = false; });
-    }
+    if (e.target.dataset.open) return call("OpenRun", route().pr, e.target.dataset.open);
     const a = e.target.closest("a[data-external]");
     if (a) { e.preventDefault(); return Browser.OpenURL(a.href); }
     const row = e.target.closest("[data-id]");
     if (row) location.hash = encodeURIComponent(row.dataset.id);
   });
   addEventListener("hashchange", render);
-  Events.On("status", e => { status = e.data; if (location.hash !== "#logs") render(); });
+  Events.On("status", e => {
+    status = e.data;
+    const r = route();
+    if (r.view === "logs") return;
+    // A run view only re-renders when that run's state changes; otherwise it would
+    // lose its scroll position on every update.
+    if (r.view === "run" && shown && findRun(status, r.pr, r.run)?.status === shown.status
+        && !findRun(status, r.pr, r.run)?.overdue) return;
+    render();
+  });
   Events.On("log", e => addLog(e.data));
+  Events.On("run-event", e => addRunEvent(e.data));
   const backlog = await call("Logs"); // merge: events may have arrived while this was in flight
   const live = logs;
   logs = backlog;

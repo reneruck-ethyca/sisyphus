@@ -1,4 +1,4 @@
-.PHONY: build test plist install-agent uninstall-agent
+.PHONY: build test plist install-agent uninstall-agent reviewer-image
 
 LABEL := com.reneruck.waterboy
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -32,3 +32,14 @@ install-agent: build plist
 uninstall-agent:
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	rm -f $(PLIST)
+
+# Review container for ethyca/fidesplus: the fidesplus devcontainer (built from the
+# local checkout, whatever is checked out there) with Claude Code pinned, plus
+# reviewer/Dockerfile on top.
+CLAUDE_CODE_VERSION := 2.1.306
+FIDESPLUS ?= $(HOME)/Dev/fidesplus
+
+reviewer-image:
+	docker build --target devcontainer --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+		-t waterboy-base:fidesplus $(FIDESPLUS)
+	docker build -t waterboy-reviewer:fidesplus reviewer

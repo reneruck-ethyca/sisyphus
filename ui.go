@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"os"
 	"os/exec"
 
 	"github.com/reneruck/waterboy/internal/app"
 	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/review"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -25,19 +25,17 @@ func (u *UI) Status() app.Status   { return u.svc.Status() }
 func (u *UI) RunNow()              { u.svc.RunNow() }
 func (u *UI) Logs() []app.LogEntry { return u.svc.Logs() }
 
-// RunLog returns a review run's container log.
-func (u *UI) RunLog(prID, runID string) (string, error) {
-	dir, ok := u.svc.RunDir(prID, runID)
-	if !ok {
-		return "", fmt.Errorf("no run %s for %s", runID, prID)
-	}
-	root, err := os.OpenRoot(dir) // a reviewer can't point us outside its run dir
-	if err != nil {
-		return "", err
-	}
-	defer root.Close()
-	b, err := root.ReadFile("log")
-	return string(b), err
+// RunOutput is a run's readable output so far; live "run-event" events with
+// line >= Next continue it.
+type RunOutput struct {
+	Events []review.Event `json:"events"`
+	Next   int            `json:"next"`
+}
+
+// RunEvents returns a review run's readable output so far.
+func (u *UI) RunEvents(prID, runID string) (RunOutput, error) {
+	evs, next, err := u.svc.RunEvents(prID, runID)
+	return RunOutput{Events: evs, Next: next}, err
 }
 
 // OpenRun opens a review run's directory (log, run.json, out/) in Finder.
@@ -111,12 +109,16 @@ func runApp(cfg config.Config, svc *app.Service) error {
 	})
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		logs, cancel := svc.SubscribeLogs()
+		runs, cancelRuns := svc.SubscribeRunEvents()
 		go func() {
 			defer cancel()
+			defer cancelRuns()
 			for {
 				select {
 				case e := <-logs:
 					wapp.Event.Emit("log", e)
+				case e := <-runs:
+					wapp.Event.Emit("run-event", e)
 				case <-wapp.Context().Done():
 					return
 				}

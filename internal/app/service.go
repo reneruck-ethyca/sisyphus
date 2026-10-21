@@ -91,6 +91,24 @@ func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, lo
 	return s
 }
 
+// RunEvents returns a review run's readable output so far, and the next line number.
+func (s *Service) RunEvents(prID, runID string) ([]review.Event, int, error) {
+	if s.rev == nil {
+		return nil, 0, review.ErrNoRun
+	}
+	return s.rev.Events(prID, runID)
+}
+
+// SubscribeRunEvents streams every run's output events until cancel. Subscribe
+// before reading RunEvents' backlog, and skip live events with Line below it.
+func (s *Service) SubscribeRunEvents() (<-chan review.RunEvent, func()) {
+	if s.rev == nil {
+		ch := make(chan review.RunEvent)
+		return ch, func() {}
+	}
+	return s.rev.SubscribeEvents()
+}
+
 // RunDir returns the directory holding one review run's run.json, log and out/.
 func (s *Service) RunDir(prID, runID string) (string, bool) {
 	if s.rev == nil {

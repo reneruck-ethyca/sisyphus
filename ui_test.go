@@ -49,13 +49,14 @@ func TestTrayStatus(t *testing.T) {
 	}
 }
 
-func TestUIRunLog(t *testing.T) {
+func TestUIRunEvents(t *testing.T) {
 	_, svc, run := newReviewServer(t)
 	ui := &UI{svc}
-	if got, err := ui.RunLog(testkit.RefA.Key(), run.ID); err != nil || got != "review <log>\n" {
-		t.Fatalf("RunLog = %q, %v", got, err)
+	out, err := ui.RunEvents(testkit.RefA.Key(), run.ID)
+	if err != nil || len(out.Events) != 3 || out.Events[1].Text != "Found <b>one</b> bug." || out.Next != 3 {
+		t.Fatalf("RunEvents = %+v, %v", out, err)
 	}
-	if _, err := ui.RunLog(testkit.RefA.Key(), "nope"); err == nil {
+	if _, err := ui.RunEvents(testkit.RefA.Key(), "nope"); err == nil {
 		t.Fatal("unknown run should fail")
 	}
 }

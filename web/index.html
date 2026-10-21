@@ -1,4 +1,4 @@
-{{if .PR}}{{template "head" .PR.ID}}{{else}}{{template "head" "Status"}}{{end}}
+{{template "head" .Title}}
 <header>
   <h1>waterboy</h1>
   <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
@@ -37,6 +37,7 @@
   <dt>Conflict head</dt><dd><code>{{or .ConflictHeadSHA "—"}}</code></dd>
   <dt>Last error</dt><dd class="err">{{or .LastError "—"}}</dd>
 </dl>
+{{if $.Run}}{{template "run" $}}{{else}}
 <h3>Reviews {{with .Review.State}}<span class="health {{.}}">{{.}}</span>{{end}}</h3>
 <table>
   <thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th>Finished</th><th>Error</th></tr></thead>
@@ -44,7 +45,7 @@
   {{$pr := .}}
   {{range .Review.Runs}}
     <tr>
-      <td class="nowrap"><code>{{.ID}}</code><br><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}/log">log</a> · <a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}/out/">out/</a></td>
+      <td class="nowrap"><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}"><code>{{.ID}}</code></a>{{if .Overdue}} <span class="overdue" title="running longer than review.timeout">⚠</span>{{end}}{{with .Claude}}<br><span class="muted">{{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}</span>{{end}}</td>
       <td>{{.Job.Reason}}</td>
       <td class="nowrap"><code>{{printf "%.12s" .Job.PR.HeadSHA}}</code></td>
       <td><span class="health {{.Status}}">{{.Status}}</span></td>
@@ -58,12 +59,51 @@
   {{end}}
   </tbody>
 </table>
+{{end}}
 {{else}}
 <p class="muted">{{if .PRs}}Select a PR on the left.{{end}}</p>
 {{end}}
 </main>
 </div>
+{{define "run"}}{{$pr := .PR}}{{with .Run}}{{$base := printf "/prs/%s/%d/runs/%s" $pr.Repo $pr.Number .ID}}
+<div class="runhead">
+  <h3><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}">Reviews</a> › <code>{{.ID}}</code></h3>
+  <span class="health {{.Status}}">{{.Status}}</span>
+  {{if .Overdue}}<span class="overdue">⚠ running longer than review.timeout</span>{{end}}
+</div>
+<div class="muted">{{.Job.Reason}} · head <code>{{printf "%.12s" .Job.PR.HeadSHA}}</code> · started {{when .Started}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}
+  · <a href="{{$base}}/log">raw log</a> · <a href="{{$base}}/prompt.md">prompt</a> · <a href="{{$base}}/out/">out/</a></div>
+{{with .Error}}<p class="err">{{.}}</p>{{end}}
+<div id="events" data-src="/api{{$base}}/events?from={{$.Next}}" data-live="{{eq .Status "running"}}">
+{{range $.Events}}{{template "event" .}}{{end}}
+</div>
+{{end}}{{end}}
+
+{{define "event"}}<div class="ev {{.Kind}}{{if .IsError}} bad{{end}}">{{if eq .Kind "tool"}}<b>{{.Tool}}</b><code>{{.Text}}</code>{{else if eq .Kind "tool_result"}}<details><summary>{{if .IsError}}error{{else}}result{{end}}</summary><pre>{{.Text}}</pre></details>{{else}}{{.Text}}{{end}}</div>{{end}}
+
 <script>
+  // Run view: follow the run live, rendering events the way the template does.
+  const events = document.getElementById("events");
+  if (events && events.dataset.live === "true") {
+    const el = (tag, cls, text) => Object.assign(document.createElement(tag), {className: cls ?? "", textContent: text ?? ""});
+    const render = (e) => {
+      const div = el("div", "ev " + e.kind + (e.is_error ? " bad" : ""));
+      if (e.kind === "tool") div.append(el("b", "", e.tool), el("code", "", e.text));
+      else if (e.kind === "tool_result") {
+        const d = el("details"); d.append(el("summary", "", e.is_error ? "error" : "result"), el("pre", "", e.text)); div.append(d);
+      } else div.textContent = e.text;
+      return div;
+    };
+    const src = new EventSource(events.dataset.src);
+    src.onmessage = (m) => {
+      const follow = innerHeight + scrollY >= document.body.scrollHeight - 40;
+      events.append(render(JSON.parse(m.data)));
+      if (follow) scrollTo(0, document.body.scrollHeight);
+    };
+    src.addEventListener("done", () => { src.close(); location.reload(); });
+  }
+  if (events) scrollTo(0, document.body.scrollHeight);
+
   document.getElementById("run").onclick = async (e) => {
     e.target.disabled = true;
     await fetch("/api/run", {method: "POST"});

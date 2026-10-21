@@ -4,10 +4,12 @@
 package review
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,25 +35,35 @@ type Job struct {
 const (
 	Running   = "running"
 	Succeeded = "succeeded"
-	Failed    = "failed"    // container exited non-zero
+	Failed    = "failed"    // setup or Claude failed (non-zero exit, or Claude reported an error)
 	Cancelled = "cancelled" // superseded, worktree reclaimed, or PR dropped
-	TimedOut  = "timeout"
-	Errored   = "error" // couldn't start, or the worktree wasn't at the announced head
-	Lost      = "lost"  // its container was gone after a restart; requeued
+	Errored   = "error"     // couldn't start, or the worktree wasn't at the announced head
+	Lost      = "lost"      // its container was gone after a restart; requeued
 )
 
-// Run is the record of one review run. Its directory holds run.json, log and out/.
+// Run is the record of one review run. Its directory holds run.json, prompt.md,
+// log (raw container output: setup, then Claude's stream-json), claude/ (Claude's
+// config dir, with the session transcript) and out/.
 type Run struct {
-	ID        string    `json:"id"`
-	Job       Job       `json:"job"`
-	Image     string    `json:"image"`
-	Container string    `json:"container,omitempty"`
-	Started   time.Time `json:"started"`
-	Finished  time.Time `json:"finished"`
-	Status    string    `json:"status"`
-	ExitCode  int       `json:"exit_code"`
-	Error     string    `json:"error,omitempty"`
-	Dir       string    `json:"dir"`
+	ID        string        `json:"id"`
+	Job       Job           `json:"job"`
+	Image     string        `json:"image"`
+	Container string        `json:"container,omitempty"`
+	Started   time.Time     `json:"started"`
+	Finished  time.Time     `json:"finished"`
+	Status    string        `json:"status"`
+	ExitCode  int           `json:"exit_code"`
+	Error     string        `json:"error,omitempty"`
+	Dir       string        `json:"dir"`
+	Claude    *ClaudeResult `json:"claude,omitempty"`  // Claude's final result line, once it has one
+	Overdue   bool          `json:"overdue,omitempty"` // still running past review.timeout (set by Status)
+}
+
+// RunEvent is an Event of one run, as streamed to subscribers.
+type RunEvent struct {
+	PR  string `json:"pr"`
+	Run string `json:"run"`
+	Event
 }
 
 // PRStatus is what UIs show for one PR.
@@ -80,7 +92,6 @@ var (
 	errSuperseded = errors.New("superseded by new commits")
 	errReclaimed  = errors.New("worktree reclaimed by the tracker")
 	errDropped    = errors.New("PR dropped")
-	errTimeout    = errors.New("timed out")
 )
 
 type store struct {
@@ -103,11 +114,14 @@ type Reviewer struct {
 	wake        chan struct{}
 	unavailable string // why the runtime can't start containers right now
 	retrying    bool   // a runtime re-check is scheduled
+	subs        map[chan RunEvent]struct{}
+	skipped     map[string]bool // repos without review config, logged once
 }
 
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
 	r := &Reviewer{cfg: cfg, rt: rt, locks: locks, dir: dir, st: store{Runs: map[string][]Run{}},
-		active: map[string]context.CancelCauseFunc{}, wake: make(chan struct{}, 1)}
+		active: map[string]context.CancelCauseFunc{}, wake: make(chan struct{}, 1),
+		subs: map[chan RunEvent]struct{}{}, skipped: map[string]bool{}}
 	if err := jsonfile.Load(r.storePath(), &r.st); err != nil {
 		return nil, err
 	}
@@ -121,9 +135,16 @@ func (r *Reviewer) storePath() string { return filepath.Join(r.dir, "reviews.jso
 
 // --- tracker.Events (called on the ticking goroutine; never block) ---
 
-func (r *Reviewer) Tracked(tr tracker.Tracked) { r.enqueue(Job{PR: tr, Reason: "new"}) }
+func (r *Reviewer) Tracked(tr tracker.Tracked) {
+	if r.reviewable(tr) {
+		r.enqueue(Job{PR: tr, Reason: "new"})
+	}
+}
 
 func (r *Reviewer) Updated(tr tracker.Tracked, newCommits bool, _ int) {
+	if !r.reviewable(tr) {
+		return
+	}
 	reason := "replies" // replies don't interrupt a running review; they queue behind it
 	if newCommits {
 		reason = "commits"
@@ -142,6 +163,22 @@ func (r *Reviewer) Dropped(tr tracker.Tracked, _ string) {
 	r.mu.Unlock()
 	r.cancel(id, errDropped)
 	r.changed()
+}
+
+// reviewable: only repos with a review.repos entry are reviewed. (Fork PRs never
+// get here: the tracker doesn't track them.)
+func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
+	if _, ok := r.cfg.Repos[tr.Repo]; ok {
+		return true
+	}
+	r.mu.Lock()
+	first := !r.skipped[tr.Repo]
+	r.skipped[tr.Repo] = true
+	r.mu.Unlock()
+	if first {
+		slog.Info("not reviewing: no review.repos entry", "repo", tr.Repo)
+	}
+	return false
 }
 
 var rank = map[string]int{"replies": 1, "commits": 2, "new": 3}
@@ -237,7 +274,7 @@ func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func
 	}
 	run.Container = infos[0].ID
 	slog.Info("re-attached review", "pr", id, "run", run.ID, "container", run.Container, "running", infos[0].Running)
-	r.follow(appCtx, runCtx, run, unlock, true, !infos[0].Running)
+	r.follow(appCtx, runCtx, run, unlock, true)
 }
 
 // sweepOrphans removes review containers with no running record (we died
@@ -359,7 +396,7 @@ func (r *Reviewer) dispatch(ctx context.Context) {
 		r.st.Queue = slices.Delete(r.st.Queue, i, i+1)
 		now := time.Now()
 		runID := now.UTC().Format("20060102-150405.000")
-		run := Run{ID: runID, Job: j, Image: r.cfg.Image, Started: now, Status: Running,
+		run := Run{ID: runID, Job: j, Image: r.cfg.Repos[j.PR.Repo].Image, Started: now, Status: Running,
 			Dir: filepath.Join(r.dir, "runs", prPath(id), runID)}
 		r.appendRunLocked(run) // saved with the dequeue, so a crash here is seen as "lost"
 		runCtx, cancel := context.WithCancelCause(ctx)
@@ -409,7 +446,7 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 	run.Container = cid
 	r.record(id, run.ID, func(x *Run) { x.Container = cid })
 	slog.Info("review started", "pr", id, "run", run.ID, "reason", run.Job.Reason, "container", cid)
-	r.follow(appCtx, runCtx, run, unlock, false, false)
+	r.follow(appCtx, runCtx, run, unlock, false)
 }
 
 // endEarly settles a run that ended before its container was up.
@@ -438,17 +475,44 @@ func (r *Reviewer) removeRun(ctx context.Context, runID string) {
 
 func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	tr := run.Job.PR
-	out := filepath.Join(run.Dir, "out")
-	if err := os.MkdirAll(out, 0o755); err != nil {
+	repo, ok := r.cfg.Repos[tr.Repo]
+	if !ok {
+		return container.Spec{}, fmt.Errorf("no review.repos entry for %s", tr.Repo)
+	}
+	workdir := cmp.Or(repo.Workdir, tr.Worktree)
+	for _, d := range []string{"out", "claude"} {
+		if err := os.MkdirAll(filepath.Join(run.Dir, d), 0o755); err != nil {
+			return container.Spec{}, err
+		}
+	}
+	prompt, err := renderPrompt(cmp.Or(repo.PromptFile, r.cfg.PromptFile),
+		PromptData{PR: tr, Reason: run.Job.Reason, PreviousHead: r.previousHead(tr.Key()), Workdir: workdir})
+	if err != nil {
+		return container.Spec{}, fmt.Errorf("prompt: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(run.Dir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return container.Spec{}, err
 	}
+	if r.cfg.ClaudeSettings != "" {
+		b, err := os.ReadFile(r.cfg.ClaudeSettings)
+		if err != nil {
+			return container.Spec{}, fmt.Errorf("claude_settings: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(run.Dir, "claude", "settings.json"), b, 0o644); err != nil {
+			return container.Spec{}, err
+		}
+	}
+
 	// Sources are read/write; git metadata is read-only. Host-side git (sync,
 	// cleanup) runs in this worktree, so a container that could write hooks or
 	// config (core.fsmonitor, …), or re-point the worktree's .git file, could run
-	// commands on the host. The worktree's .git points into the clone's .git;
-	// both are mounted at their own paths so the pointer resolves.
+	// commands on the host. The worktree's .git points into the clone's .git,
+	// which is mounted at its own host path so the pointer resolves.
 	dotGit := filepath.Join(tr.Worktree, ".git")
-	mounts := []container.Mount{{Source: tr.Worktree, Target: tr.Worktree}, {Source: dotGit, Target: dotGit, ReadOnly: true}}
+	mounts := []container.Mount{
+		{Source: tr.Worktree, Target: workdir},
+		{Source: dotGit, Target: filepath.Join(workdir, ".git"), ReadOnly: true},
+	}
 	gitDir, err := worktree.CommonDir(ctx, tr.Worktree)
 	if err != nil {
 		return container.Spec{}, err
@@ -456,40 +520,120 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	if real, _ := filepath.EvalSymlinks(dotGit); gitDir != real {
 		mounts = append(mounts, container.Mount{Source: gitDir, Target: gitDir, ReadOnly: true})
 	}
-	mounts = append(mounts, container.Mount{Source: out, Target: "/out"})
+	// Dependency caches: per-repo volumes over the worktree, so the host's macOS
+	// builds stay out and installs survive between runs. Volumes start root-owned.
+	var owned []string
+	for _, c := range repo.Cache {
+		target := filepath.Join(workdir, c)
+		mounts = append(mounts, container.Mount{Source: volumeName(tr.Repo, c), Target: target})
+		owned = append(owned, target)
+	}
+	mounts = append(mounts,
+		container.Mount{Source: filepath.Join(run.Dir, "out"), Target: "/out"},
+		container.Mount{Source: filepath.Join(run.Dir, "prompt.md"), Target: "/waterboy/prompt.md", ReadOnly: true},
+		container.Mount{Source: filepath.Join(run.Dir, "claude"), Target: claudeDir}, // fresh per run
+	)
+	if r.cfg.PluginsVolume != "" {
+		mounts = append(mounts, container.Mount{Source: r.cfg.PluginsVolume, Target: claudeDir + "/plugins"})
+		owned = append(owned, claudeDir+"/plugins")
+	}
+
 	env := map[string]string{
 		"WATERBOY_RUN_ID": run.ID, "WATERBOY_REASON": run.Job.Reason,
 		"WATERBOY_PR_URL": tr.URL, "WATERBOY_REPO": tr.Repo, "WATERBOY_PR_NUMBER": strconv.Itoa(tr.Number),
-		"WATERBOY_BRANCH": tr.HeadRef, "WATERBOY_HEAD_SHA": tr.HeadSHA, "WATERBOY_WORKTREE": tr.Worktree,
-		"WATERBOY_OUT": "/out",
+		"WATERBOY_BRANCH": tr.HeadRef, "WATERBOY_HEAD_SHA": tr.HeadSHA, "WATERBOY_WORKTREE": workdir,
+		"WATERBOY_OUT":      "/out",
+		"CLAUDE_CONFIG_DIR": claudeDir,
 		// The container's user doesn't own the mounted files; let git work anyway.
 		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": "*",
 	}
+	maps.Copy(env, repo.Env)
 	for _, k := range r.cfg.Env {
 		if v, ok := os.LookupEnv(k); ok {
 			env[k] = v
 		}
 	}
+	var envFiles []string
+	for _, f := range []string{repo.EnvFile, r.cfg.EnvFile} { // later files win: secrets last
+		if f != "" {
+			envFiles = append(envFiles, f)
+		}
+	}
 	return container.Spec{
 		Name:  "waterboy-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
-		Image: r.cfg.Image, Command: r.cfg.Command, Env: env, EnvFile: r.cfg.EnvFile,
-		Mounts: mounts, Workdir: tr.Worktree,
+		Image: repo.Image, Command: []string{"bash", "-c", r.script(repo, owned)}, Env: env, EnvFiles: envFiles,
+		Mounts: mounts, Workdir: workdir,
 		Labels: map[string]string{"waterboy": "1", "waterboy.run": run.ID, "waterboy.pr": tr.Key()},
 	}, nil
 }
 
-// follow streams the container's log into the run dir, waits for it to exit
-// (stopping it on cancel or timeout), then records the result. On shutdown it
-// returns without touching the container, which a restart re-attaches to.
-// exited: a re-attached container had already finished, so its timeout doesn't apply.
-func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func(), reattached, exited bool) {
-	id := run.Job.PR.Key()
-	deadline := run.Started.Add(r.cfg.Timeout.Duration)
-	if exited {
-		deadline = time.Now().Add(time.Minute)
+// claudeDir is Claude Code's config dir inside review containers.
+const claudeDir = "/waterboy/claude"
+
+// script is the container's command: own the volumes, run the repo's setup,
+// then Claude headless on the rendered prompt.
+func (r *Reviewer) script(repo config.RepoReview, owned []string) string {
+	var sb strings.Builder
+	sb.WriteString("set -eo pipefail\n")
+	for _, d := range owned {
+		fmt.Fprintf(&sb, "sudo -n chown \"$(id -u):$(id -g)\" %s 2>/dev/null || true\n", shellQuote(d))
 	}
-	runCtx, cancelTimeout := context.WithDeadlineCause(runCtx, deadline, errTimeout)
-	defer cancelTimeout()
+	if repo.Setup != "" {
+		sb.WriteString("echo '── waterboy: setup ──'\n" + repo.Setup + "\n")
+	}
+	sb.WriteString("echo '── waterboy: claude ──'\n")
+	args := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
+		"--model", r.cfg.Model, "--max-turns", strconv.Itoa(r.cfg.MaxTurns)}
+	if r.cfg.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(r.cfg.MaxBudgetUSD, 'f', -1, 64))
+	}
+	for i, a := range args {
+		args[i] = shellQuote(a)
+	}
+	sb.WriteString("exec " + strings.Join(args, " ") + " < /waterboy/prompt.md\n")
+	return sb.String()
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// volumeName is the per-repo cache volume for a workdir-relative path.
+func volumeName(repo, path string) string {
+	clean := func(s string) string {
+		return strings.Map(func(c rune) rune {
+			if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' {
+				return c
+			}
+			return '-'
+		}, s)
+	}
+	return "waterboy-" + clean(repo) + "-" + clean(path)
+}
+
+// previousHead is the head of the PR's last successful review.
+func (r *Reviewer) previousHead(prID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	runs := r.st.Runs[prID]
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Status == Succeeded {
+			return runs[i].Job.PR.HeadSHA
+		}
+	}
+	return ""
+}
+
+// follow streams the container's output into the run log and to subscribers,
+// waits for it to exit (stopping it on cancel), then records the result. On
+// shutdown it returns without touching the container, which a restart
+// re-attaches to. There's no hard timeout: past review.timeout a run is only
+// flagged overdue.
+func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func(), reattached bool) {
+	id := run.Job.PR.Key()
+	overdue := time.AfterFunc(time.Until(run.Started.Add(r.cfg.Timeout.Duration)), func() {
+		slog.Warn("review running longer than review.timeout", "pr", id, "run", run.ID, "timeout", r.cfg.Timeout.Duration)
+		r.changed()
+	})
+	defer overdue.Stop()
 
 	// Logs follows until the container exits; it gets its own context so a
 	// container we failed to wait for or stop can't hold this run forever.
@@ -504,36 +648,43 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 			<-logsDone
 		}
 	}
+	var result *ClaudeResult
+	os.MkdirAll(run.Dir, 0o755)
 	logf, err := os.Create(filepath.Join(run.Dir, "log")) // docker replays from the start, so truncate
 	if err != nil {
 		slog.Warn("creating run log", "run", run.ID, "err", err)
 		close(logsDone)
 	} else {
+		lw := &lineWriter{file: logf, onLine: func(n int, line string) {
+			evs, res := parseLine(n, line)
+			if res != nil {
+				result = res
+				r.record(id, run.ID, func(x *Run) { x.Claude = res })
+			}
+			r.publish(id, run.ID, evs)
+		}}
 		go func() {
 			defer close(logsDone)
 			defer logf.Close()
-			r.rt.Logs(logsCtx, run.Container, logf)
+			r.rt.Logs(logsCtx, run.Container, lw)
+			lw.Flush()
 		}()
 	}
 
 	code, err := r.rt.Wait(runCtx, run.Container)
 	status, why := Succeeded, error(nil)
 	switch {
-	case err == nil && code != 0:
-		status = Failed
-	case err != nil && appCtx.Err() != nil:
+	case err == nil:
+	case appCtx.Err() != nil:
 		return // shutting down: leave the container running and the record "running"
-	case err != nil && runCtx.Err() != nil: // cancelled or timed out
+	case runCtx.Err() != nil: // superseded, reclaimed or dropped
 		why = context.Cause(runCtx)
 		status = Cancelled
-		if errors.Is(why, errTimeout) {
-			status = TimedOut
-		}
 		bg, cancel := context.WithTimeout(context.WithoutCancel(appCtx), time.Minute)
 		r.rt.Stop(bg, run.Container)
 		code, _ = r.rt.Wait(bg, run.Container)
 		cancel()
-	case err != nil: // couldn't wait for it: don't trust it to ever exit
+	default: // couldn't wait for it: don't trust it to ever exit
 		r.rt.Remove(context.WithoutCancel(appCtx), run.Container)
 		drainLogs()
 		if reattached {
@@ -548,7 +699,17 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.finish(run, Errored, 0, err, unlock)
 		return
 	}
-	drainLogs()
+	drainLogs() // the result line is in by now
+	if status == Succeeded {
+		switch {
+		case result != nil && result.IsError:
+			status, why = Failed, fmt.Errorf("claude: %s", cmp.Or(result.Error, result.Subtype))
+		case code != 0:
+			status, why = Failed, fmt.Errorf("exited %d before Claude finished (setup failed?)", code)
+		case result == nil:
+			status, why = Failed, errors.New("Claude produced no result")
+		}
+	}
 	bg := context.WithoutCancel(appCtx)
 	if err := r.rt.Remove(bg, run.Container); err != nil {
 		slog.Warn("removing review container", "run", run.ID, "err", err)
@@ -561,6 +722,66 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	if errors.Is(why, errReclaimed) && r.Kick != nil {
 		r.Kick() // the tracker is waiting for this worktree
 	}
+}
+
+// --- live output ---
+
+// SubscribeEvents streams every run's events as they're produced, until cancel.
+// A subscriber more than 1024 events behind misses events rather than stalling runs.
+func (r *Reviewer) SubscribeEvents() (<-chan RunEvent, func()) {
+	ch := make(chan RunEvent, 1024)
+	r.mu.Lock()
+	r.subs[ch] = struct{}{}
+	r.mu.Unlock()
+	return ch, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if _, ok := r.subs[ch]; ok {
+			delete(r.subs, ch)
+			close(ch)
+		}
+	}
+}
+
+func (r *Reviewer) publish(prID, runID string, evs []Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range evs {
+		for ch := range r.subs {
+			select {
+			case ch <- RunEvent{PR: prID, Run: runID, Event: e}:
+			default:
+			}
+		}
+	}
+}
+
+// ErrNoRun means there's no such run for the PR.
+var ErrNoRun = errors.New("no such run")
+
+// Events parses a run's log so far and returns the number of the next line to
+// come. With SubscribeEvents: subscribe first, read this backlog, then skip live
+// events with Line < next.
+func (r *Reviewer) Events(prID, runID string) (evs []Event, next int, err error) {
+	dir, ok := r.RunDir(prID, runID)
+	if !ok {
+		return nil, 0, ErrNoRun
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "log"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	for n, line := range strings.SplitAfter(string(b), "\n") {
+		if !strings.HasSuffix(line, "\n") {
+			break // a partial last line arrives live once complete
+		}
+		e, _ := parseLine(n, strings.TrimRight(line, "\r\n"))
+		evs, next = append(evs, e...), n+1
+	}
+	return evs, next, nil
 }
 
 // finish records the outcome, releases the worktree and the run slot.
@@ -653,6 +874,11 @@ func (r *Reviewer) Status() map[string]PRStatus {
 	}
 	for id := range r.active {
 		set(id, "running")
+	}
+	for _, s := range out {
+		for i := range s.Runs {
+			s.Runs[i].Overdue = s.Runs[i].Status == Running && time.Since(s.Runs[i].Started) > r.cfg.Timeout.Duration
+		}
 	}
 	return out
 }

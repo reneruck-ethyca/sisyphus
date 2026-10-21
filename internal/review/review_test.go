@@ -42,8 +42,9 @@ func newFixture(t *testing.T, mutate ...func(*config.Review)) *fixture {
 	f := &fixture{rt: &container.Fake{}, locks: &tracker.Locks{}, dir: t.TempDir()}
 	f.tr = tracker.Tracked{PRRef: refA, URL: "https://github.com/ethyca/a/pull/1", HeadRef: "feature/x",
 		HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), Worktree: clone, CreatedWorktree: true}
-	cfg := config.Review{Image: "img:1", Command: []string{"sh", "-c", "review"}, Timeout: config.Duration{Duration: time.Minute},
-		MaxConcurrent: 1, Cleanup: true}
+	cfg := config.Review{Model: "opus", MaxTurns: 10, Timeout: config.Duration{Duration: time.Minute},
+		MaxConcurrent: 1, Cleanup: true,
+		Repos: map[string]config.RepoReview{"ethyca/a": {Image: "img:1"}, "ethyca/b": {Image: "img:1"}}}
 	for _, m := range mutate {
 		m(&cfg)
 	}
@@ -66,6 +67,11 @@ func (f *fixture) start(t *testing.T) {
 	t.Cleanup(cancel)
 	go f.r.Run(ctx)
 }
+
+const okResult = `{"type":"result","subtype":"success","is_error":false,"num_turns":2,"duration_ms":1000,"total_cost_usd":0.25,"session_id":"s1"}` + "\n"
+
+// succeed ends a container the way a successful Claude run does: output, then a success result line.
+func (f *fixture) succeed(id, out string) { f.rt.Finish(id, 0, out+okResult) }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -114,7 +120,7 @@ func TestTrackedRunsReview(t *testing.T) {
 	// A clone's .git lives inside the (read/write) worktree; it's overlaid read-only
 	// so the container can't plant hooks or config that host-side git would run.
 	dotGit := filepath.Join(f.tr.Worktree, ".git")
-	if len(s.Mounts) != 3 || s.Mounts[0] != (container.Mount{Source: f.tr.Worktree, Target: f.tr.Worktree}) ||
+	if len(s.Mounts) != 5 || s.Mounts[0] != (container.Mount{Source: f.tr.Worktree, Target: f.tr.Worktree}) ||
 		s.Mounts[1] != (container.Mount{Source: dotGit, Target: dotGit, ReadOnly: true}) || s.Mounts[2].Target != "/out" {
 		t.Fatalf("mounts = %+v (git dir %s)", s.Mounts, gitDir)
 	}
@@ -122,10 +128,10 @@ func TestTrackedRunsReview(t *testing.T) {
 		t.Fatalf("state = %q", st.State)
 	}
 
-	f.rt.Finish(f.containers()[0].ID, 0, "looks good\n")
+	f.succeed(f.containers()[0].ID, "looks good\n")
 	waitFor(t, "run to finish", f.lastStatus(Succeeded))
 	run := f.runs()[0]
-	if b, _ := os.ReadFile(filepath.Join(run.Dir, "log")); string(b) != "looks good\n" {
+	if b, _ := os.ReadFile(filepath.Join(run.Dir, "log")); string(b) != "looks good\n"+okResult {
 		t.Fatalf("log = %q", b)
 	}
 	if _, err := os.Stat(filepath.Join(run.Dir, "run.json")); err != nil {
@@ -155,7 +161,8 @@ func TestMountsCloneGitDirForLinkedWorktree(t *testing.T) {
 	for _, m := range f.rt.Started()[0].Mounts {
 		got = append(got, fmt.Sprintf("%s ro=%v", m.Target, m.ReadOnly))
 	}
-	want := []string{wt + " ro=false", wt + "/.git ro=true", common + " ro=true", "/out ro=false"}
+	want := []string{wt + " ro=false", wt + "/.git ro=true", common + " ro=true", "/out ro=false",
+		"/waterboy/prompt.md ro=true", "/waterboy/claude ro=false"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("mounts\n got %q\nwant %q", got, want)
 	}
@@ -170,7 +177,7 @@ func TestCleanupResetsOnlyCreatedWorktrees(t *testing.T) {
 		waitFor(t, "container start", f.started(1))
 		os.WriteFile(filepath.Join(f.tr.Worktree, "a.txt"), []byte("reviewer edit"), 0o644)
 		os.WriteFile(filepath.Join(f.tr.Worktree, "scratch.txt"), []byte("x"), 0o644)
-		f.rt.Finish(f.containers()[0].ID, 0, "")
+		f.succeed(f.containers()[0].ID, "")
 		waitFor(t, "run to finish", f.lastStatus(Succeeded))
 		dirty := gittest.Git(t, f.tr.Worktree, "status", "--porcelain") != ""
 		if dirty == created {
@@ -212,7 +219,7 @@ func TestRepliesQueueBehindRunningReview(t *testing.T) {
 	if st := f.r.Status()[refA.Key()]; st.State != "running" || len(f.rt.Started()) != 1 {
 		t.Fatalf("replies interrupted the run: %+v", st)
 	}
-	f.rt.Finish(f.containers()[0].ID, 0, "")
+	f.succeed(f.containers()[0].ID, "")
 	waitFor(t, "follow-up run", func() bool { return len(f.rt.Started()) == 2 })
 	if f.rt.Started()[1].Env["WATERBOY_REASON"] != "replies" || f.runs()[1].Status != Succeeded {
 		t.Fatalf("follow-up = %v, first = %+v", f.rt.Started()[1].Env, f.runs()[1])
@@ -244,7 +251,7 @@ func TestMaxConcurrent(t *testing.T) {
 	if n := len(f.rt.Started()); n != 1 {
 		t.Fatalf("%d containers running, max is 1", n)
 	}
-	f.rt.Finish(f.containers()[0].ID, 0, "")
+	f.succeed(f.containers()[0].ID, "")
 	waitFor(t, "second container", func() bool { return len(f.rt.Started()) == 2 })
 }
 
@@ -260,13 +267,20 @@ func TestHeadMismatchIsAnError(t *testing.T) {
 	}
 }
 
-func TestTimeoutStopsContainer(t *testing.T) {
-	f := newFixture(t, func(c *config.Review) { c.Timeout = config.Duration{Duration: 50 * time.Millisecond} })
+// Past review.timeout a run is only flagged, never stopped.
+func TestOverdueIsOnlyFlagged(t *testing.T) {
+	f := newFixture(t, func(c *config.Review) { c.Timeout = config.Duration{Duration: 30 * time.Millisecond} })
 	f.start(t)
 	f.r.Tracked(f.tr)
-	waitFor(t, "timeout", f.lastStatus(TimedOut))
-	if f.runs()[0].ExitCode != 137 || len(f.containers()) != 0 {
-		t.Fatalf("run = %+v, containers %d", f.runs()[0], len(f.containers()))
+	waitFor(t, "container start", f.started(1))
+	waitFor(t, "overdue flag", func() bool { rs := f.runs(); return len(rs) == 1 && rs[0].Overdue })
+	if c := f.containers(); len(c) != 1 || !c[0].Running || f.runs()[0].Status != Running {
+		t.Fatalf("overdue run was stopped: %+v %+v", c, f.runs()[0])
+	}
+	f.succeed(f.containers()[0].ID, "")
+	waitFor(t, "finish", f.lastStatus(Succeeded))
+	if f.runs()[0].Overdue {
+		t.Fatal("finished run still flagged overdue")
 	}
 }
 
@@ -275,10 +289,10 @@ func TestFailedExitCode(t *testing.T) {
 	f.start(t)
 	f.r.Tracked(f.tr)
 	waitFor(t, "container start", f.started(1))
-	f.rt.Finish(f.containers()[0].ID, 2, "boom")
+	f.rt.Finish(f.containers()[0].ID, 2, "uv sync: boom\n") // setup failed: Claude never ran
 	waitFor(t, "failure", f.lastStatus(Failed))
-	if f.runs()[0].ExitCode != 2 {
-		t.Fatalf("run = %+v", f.runs()[0])
+	if r := f.runs()[0]; r.ExitCode != 2 || !strings.Contains(r.Error, "before Claude finished") {
+		t.Fatalf("run = %+v", r)
 	}
 }
 
@@ -304,9 +318,9 @@ func TestShutdownThenReattach(t *testing.T) {
 		t.Fatal("re-attached run must hold the worktree lock")
 	}
 	f.start(t)
-	f.rt.Finish(f.containers()[0].ID, 0, "replayed\n")
+	f.succeed(f.containers()[0].ID, "replayed\n")
 	waitFor(t, "re-attached run to finish", f.lastStatus(Succeeded))
-	if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "log")); string(b) != "replayed\n" {
+	if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "log")); string(b) != "replayed\n"+okResult {
 		t.Fatalf("log = %q", b)
 	}
 }
@@ -418,7 +432,7 @@ func TestShutdownDuringStartReattaches(t *testing.T) {
 	f.r = f.newReviewer(t, f.r.cfg)
 	f.r.Reattach(context.Background())
 	waitFor(t, "re-attached", func() bool { return f.r.Status()[refA.Key()].State == "running" })
-	f.rt.Finish(f.containers()[0].ID, 0, "")
+	f.succeed(f.containers()[0].ID, "")
 	waitFor(t, "finished", f.lastStatus(Succeeded))
 }
 
@@ -466,7 +480,7 @@ func TestReattachWaitsForRuntime(t *testing.T) {
 	f.rt.SetUnavailable(nil)
 	f.start(t)
 	time.Sleep(60 * time.Millisecond)
-	f.rt.Finish(id, 0, "ok\n")
+	f.succeed(id, "ok\n")
 	waitFor(t, "re-attached run to finish", f.lastStatus(Succeeded))
 }
 
@@ -474,7 +488,7 @@ func TestReattachWaitsForRuntime(t *testing.T) {
 // run's timeout has passed by the time we look.
 func TestReattachExitedPastDeadline(t *testing.T) {
 	f := newFixture(t)
-	id := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "r1"}, false, 0, "done\n")
+	id := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "r1"}, false, 0, "done\n"+okResult)
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
 		Started: time.Now().Add(-2 * time.Hour), Dir: filepath.Join(f.dir, "runs", "r1")}}
 	os.MkdirAll(filepath.Join(f.dir, "runs", "r1"), 0o755)
@@ -482,5 +496,134 @@ func TestReattachExitedPastDeadline(t *testing.T) {
 	waitFor(t, "run to finish", func() bool { rs := f.runs(); return rs[0].Status != Running })
 	if rs := f.runs(); rs[0].Status != Succeeded {
 		t.Fatalf("run = %+v", rs[0])
+	}
+}
+
+func TestClaudeOutputStreamsAndIsRecorded(t *testing.T) {
+	f := newFixture(t)
+	live, cancel := f.r.SubscribeEvents()
+	defer cancel()
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	id := f.containers()[0].ID
+	f.rt.Print(id, "── waterboy: claude ──\n")
+	f.rt.Print(id, `{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the diff."},{"type":"tool_use","name":"Bash","input":{"command":"gh pr diff 1"}}]}}`+"\n")
+
+	var got []string
+	for len(got) < 3 {
+		select {
+		case e := <-live:
+			if e.PR != refA.Key() || e.Run != f.runs()[0].ID {
+				t.Fatalf("event for the wrong run: %+v", e)
+			}
+			got = append(got, e.Kind+":"+e.Text)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("live events so far: %q", got)
+		}
+	}
+	want := []string{"output:── waterboy: claude ──", "text:Reading the diff.", "tool:gh pr diff 1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("live = %q, want %q", got, want)
+	}
+
+	f.succeed(id, "")
+	waitFor(t, "finish", f.lastStatus(Succeeded))
+	run := f.runs()[0]
+	if run.Claude == nil || run.Claude.SessionID != "s1" || run.Claude.NumTurns != 2 || run.Claude.CostUSD != 0.25 {
+		t.Fatalf("claude result = %+v", run.Claude)
+	}
+	evs, next, err := f.r.Events(refA.Key(), run.ID)
+	if err != nil || len(evs) != 4 || evs[3].Kind != "result" || evs[1].Line != 1 || next != 3 {
+		t.Fatalf("Events = %+v, next %d, %v", evs, next, err)
+	}
+}
+
+func TestClaudeErrorResultFails(t *testing.T) {
+	f := newFixture(t)
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	f.rt.Finish(f.containers()[0].ID, 1, `{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":10,"session_id":"s","errors":["Reached max turns (10)"]}`+"\n")
+	waitFor(t, "failure", f.lastStatus(Failed))
+	if r := f.runs()[0]; !strings.Contains(r.Error, "Reached max turns") || r.Claude == nil || r.Claude.Subtype != "error_max_turns" {
+		t.Fatalf("run = %+v", r)
+	}
+}
+
+func TestUnconfiguredRepoIsNotReviewed(t *testing.T) {
+	f := newFixture(t)
+	other := f.tr
+	other.PRRef = github.PRRef{Repo: "ethyca/fides", Number: 9}
+	f.r.Tracked(other)
+	f.r.Updated(other, true, 0)
+	if len(f.r.st.Queue) != 0 {
+		t.Fatalf("queued a repo without review config: %+v", f.r.st.Queue)
+	}
+}
+
+func TestSpecForConfiguredRepo(t *testing.T) {
+	settings := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(settings, []byte(`{"enabledPlugins":{}}`), 0o644)
+	prompt := filepath.Join(t.TempDir(), "p.md")
+	os.WriteFile(prompt, []byte("Review {{.PR.URL}} in {{.Workdir}} ({{.Reason}})"), 0o644)
+	f := newFixture(t, func(c *config.Review) {
+		c.EnvFile, c.ClaudeSettings, c.PluginsVolume, c.MaxBudgetUSD = "/secrets.env", settings, "wb-plugins", 2.5
+		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", EnvFile: "/a.env", PromptFile: prompt,
+			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules"}}
+	})
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	s := f.rt.Started()[0]
+	run := f.runs()[0]
+
+	if s.Image != "reviewer:a" || s.Workdir != "/a" || s.Env["PYTHONPATH"] != "/a/src" || s.Env["CLAUDE_CONFIG_DIR"] != "/waterboy/claude" ||
+		s.Env["WATERBOY_WORKTREE"] != "/a" || !slices.Equal(s.EnvFiles, []string{"/a.env", "/secrets.env"}) {
+		t.Fatalf("spec = %+v", s)
+	}
+	mounts := map[string]container.Mount{}
+	for _, m := range s.Mounts {
+		mounts[m.Target] = m
+	}
+	for target, want := range map[string]container.Mount{
+		"/a":                       {Source: f.tr.Worktree, Target: "/a"},
+		"/a/.git":                  {Source: filepath.Join(f.tr.Worktree, ".git"), Target: "/a/.git", ReadOnly: true},
+		"/a/.venv":                 {Source: "waterboy-ethyca-a-.venv", Target: "/a/.venv"},
+		"/a/clients/node_modules":  {Source: "waterboy-ethyca-a-clients-node_modules", Target: "/a/clients/node_modules"},
+		"/waterboy/claude/plugins": {Source: "wb-plugins", Target: "/waterboy/claude/plugins"},
+		"/waterboy/prompt.md":      {Source: filepath.Join(run.Dir, "prompt.md"), Target: "/waterboy/prompt.md", ReadOnly: true},
+		"/waterboy/claude":         {Source: filepath.Join(run.Dir, "claude"), Target: "/waterboy/claude"},
+	} {
+		if mounts[target] != want {
+			t.Errorf("mount %s = %+v, want %+v", target, mounts[target], want)
+		}
+	}
+	script := s.Command[2]
+	for _, want := range []string{"sudo -n chown", "'/a/.venv'", "'/waterboy/claude/plugins'", "uv sync",
+		"exec 'claude' '-p' '--output-format' 'stream-json' '--verbose' '--dangerously-skip-permissions' '--model' 'opus' '--max-turns' '10' '--max-budget-usd' '2.5' < /waterboy/prompt.md"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q:\n%s", want, script)
+		}
+	}
+	if s.Command[0] != "bash" || strings.Index(script, "uv sync") > strings.Index(script, "exec 'claude'") {
+		t.Errorf("setup must run before claude: %q", s.Command)
+	}
+	if b, _ := os.ReadFile(filepath.Join(run.Dir, "prompt.md")); string(b) != "Review https://github.com/ethyca/a/pull/1 in /a (new)" {
+		t.Errorf("prompt.md = %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(run.Dir, "claude", "settings.json")); string(b) != `{"enabledPlugins":{}}` {
+		t.Errorf("settings.json = %q", b)
+	}
+}
+
+func TestPreviousHeadIsLastSuccessfulReview(t *testing.T) {
+	f := newFixture(t)
+	f.r.st.Runs[refA.Key()] = []Run{
+		{ID: "1", Status: Succeeded, Job: Job{PR: tracker.Tracked{HeadSHA: "aaa"}}},
+		{ID: "2", Status: Failed, Job: Job{PR: tracker.Tracked{HeadSHA: "bbb"}}},
+	}
+	if got := f.r.previousHead(refA.Key()); got != "aaa" {
+		t.Fatalf("previousHead = %q", got)
 	}
 }

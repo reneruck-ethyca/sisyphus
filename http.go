@@ -10,9 +10,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/review"
 )
 
 //go:embed web/*.html
@@ -25,6 +28,8 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 		return t.Local().Format("2006-01-02 15:04:05")
 	},
+	// live pages update themselves; the rest refresh every 15s.
+	"live": func(title string) bool { return title == "Logs" || strings.HasPrefix(title, "Run ") },
 }).ParseFS(webFS, "web/*.html"))
 
 // startHTTP serves the dashboard and JSON API on addr. Only app.Service is used, so
@@ -59,6 +64,23 @@ func newHandler(svc *app.Service) http.Handler {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
 	})
+	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}", func(w http.ResponseWriter, r *http.Request) {
+		pr, ok := svc.PR(prID(r))
+		run := findRun(pr, r.PathValue("run"))
+		if !ok || run == nil {
+			http.NotFound(w, r)
+			return
+		}
+		evs, next, err := svc.RunEvents(pr.ID, run.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		render(w, "index.html", dashboard{Status: svc.Status(), PR: &pr, Run: run, Events: evs, Next: next})
+	})
+	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events", func(w http.ResponseWriter, r *http.Request) {
+		streamRun(w, r, svc)
+	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		serveRunFile(w, r, svc)
 	})
@@ -85,10 +107,99 @@ func newHandler(svc *app.Service) http.Handler {
 	return localOnly(http.NewCrossOriginProtection().Handler(mux))
 }
 
-// dashboard is the two-column page: every PR on the left, PR (if any) on the right.
+// dashboard is the two-column page: every PR on the left, PR (if any) on the
+// right, and one of its review runs (if any) streaming below.
 type dashboard struct {
 	app.Status
-	PR *app.PRView
+	PR     *app.PRView
+	Run    *review.Run
+	Events []review.Event
+	Next   int // first log line the live stream should send
+}
+
+func (d dashboard) Title() string {
+	switch {
+	case d.Run != nil:
+		return "Run " + d.Run.ID
+	case d.PR != nil:
+		return d.PR.ID
+	}
+	return "Status"
+}
+
+func findRun(pr app.PRView, id string) *review.Run {
+	for i := range pr.Review.Runs {
+		if pr.Review.Runs[i].ID == id {
+			return &pr.Review.Runs[i]
+		}
+	}
+	return nil
+}
+
+// streamRun sends a run's events from line ?from= on as server-sent events: the
+// backlog, then live ones. Once the run is over it sends a "done" event and ends.
+func streamRun(w http.ResponseWriter, r *http.Request, svc *app.Service) {
+	id, runID := prID(r), r.PathValue("run")
+	live, cancel := svc.SubscribeRunEvents() // before the backlog, so nothing falls in between
+	defer cancel()
+	backlog, next, err := svc.RunEvents(id, runID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	rc := http.NewResponseController(w)
+	send := func(event string, v any) bool {
+		b, _ := json.Marshal(v)
+		if event != "" {
+			fmt.Fprintf(w, "event: %s\n", event)
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
+	for _, e := range backlog {
+		if e.Line >= from && !send("", e) {
+			return
+		}
+	}
+	rc.Flush()
+	running := func() bool {
+		pr, _ := svc.PR(id)
+		run := findRun(pr, runID)
+		return run != nil && run.Status == review.Running
+	}
+	check := time.NewTicker(time.Second)
+	defer check.Stop()
+	for {
+		select {
+		case e := <-live:
+			if e.PR == id && e.Run == runID && e.Line >= max(next, from) && !send("", e.Event) {
+				return
+			}
+		case <-check.C:
+			if !running() {
+				// Drain what the run printed last, then tell the page to settle.
+				for drained := false; !drained; {
+					select {
+					case e := <-live:
+						if e.PR == id && e.Run == runID && e.Line >= max(next, from) {
+							send("", e.Event)
+						}
+					default:
+						drained = true
+					}
+				}
+				send("done", struct{}{})
+				return
+			}
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // streamLogs sends the backlog, then every new entry, as server-sent events

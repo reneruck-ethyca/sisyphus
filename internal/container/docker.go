@@ -66,8 +66,8 @@ func runArgs(s Spec) (args, env []string, err error) {
 		args = append(args, "--env", k)
 		env = append(env, k+"="+s.Env[k])
 	}
-	if s.EnvFile != "" {
-		args = append(args, "--env-file", s.EnvFile)
+	for _, f := range s.EnvFiles {
+		args = append(args, "--env-file", f)
 	}
 	for _, m := range s.Mounts {
 		if strings.ContainsAny(m.Source+m.Target, ":,") {

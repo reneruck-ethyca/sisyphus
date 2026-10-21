@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -181,7 +182,8 @@ func newReviewServer(t *testing.T) (*httptest.Server, *app.Service, review.Run) 
 		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: head, RequestedReviewers: []string{"me"}}}}
 	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: head, SyncedSHA: head, Worktree: clone})
 	rt := &container.Fake{}
-	rev, err := review.New(config.Review{Image: "img", Command: []string{"sh"}, Timeout: config.Duration{Duration: time.Minute}, MaxConcurrent: 1},
+	rev, err := review.New(config.Review{Model: "opus", MaxTurns: 5, Timeout: config.Duration{Duration: time.Minute}, MaxConcurrent: 1,
+		Repos: map[string]config.RepoReview{testkit.RefA.Repo: {Image: "img"}}},
 		rt, tr.Locks, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +199,8 @@ func newReviewServer(t *testing.T) (*httptest.Server, *app.Service, review.Run) 
 			t.Fatal("review never finished")
 		}
 		if cs, _ := rt.List(ctx, nil); len(cs) == 1 && cs[0].Running {
-			rt.Finish(cs[0].ID, 0, "review <log>\n")
+			rt.Finish(cs[0].ID, 0, "review <log>\n"+`{"type":"assistant","message":{"content":[{"type":"text","text":"Found <b>one</b> bug."}]}}`+"\n"+
+				`{"type":"result","subtype":"success","is_error":false,"num_turns":3,"duration_ms":61000,"total_cost_usd":0.5,"session_id":"s1"}`+"\n")
 		}
 		if pr, _ := svc.PR(testkit.RefA.Key()); pr.Review.State == "" && pr.Review.Latest() != nil {
 			run = *pr.Review.Latest()
@@ -215,8 +218,9 @@ func TestHTTPReviewRuns(t *testing.T) {
 	srv, _, run := newReviewServer(t)
 	base := srv.URL + "/prs/ethyca/a/1/runs/" + run.ID
 	for path, want := range map[string]string{
-		"/prs/ethyca/a/1": `href="/prs/ethyca/a/1/runs/` + run.ID + `/log"`,
-		"/":               `class="health succeeded"`,
+		"/prs/ethyca/a/1":                `href="/prs/ethyca/a/1/runs/` + run.ID + `"`,
+		"/prs/ethyca/a/1/runs/" + run.ID: `Found &lt;b&gt;one&lt;/b&gt; bug.`,
+		"/":                              `class="health succeeded"`,
 		"/prs/ethyca/a/1/runs/" + run.ID + "/log":           "review <log>\n",
 		"/prs/ethyca/a/1/runs/" + run.ID + "/out/review.md": "# hi",
 	} {
@@ -237,5 +241,47 @@ func TestHTTPReviewRuns(t *testing.T) {
 		if code, body := get(t, base+path); code == 200 {
 			t.Errorf("%s served: %.80s", path, body)
 		}
+	}
+}
+
+func TestHTTPRunPageRendersEvents(t *testing.T) {
+	srv, _, run := newReviewServer(t)
+	_, body := get(t, srv.URL+"/prs/ethyca/a/1/runs/"+run.ID)
+	for _, want := range []string{`<div class="ev output">review &lt;log&gt;</div>`, `class="ev text"`, `class="ev result"`,
+		"success · 3 turns · 1m1s · $0.50", `data-live="false"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run page missing %q", want)
+		}
+	}
+	if strings.Contains(body, `http-equiv="refresh"`) {
+		t.Error("run page must not auto-reload")
+	}
+	if code, _ := get(t, srv.URL+"/prs/ethyca/a/1/runs/nope"); code != 404 {
+		t.Errorf("unknown run = %d", code)
+	}
+}
+
+// A finished run's stream replays from ?from= and then says it's done.
+func TestHTTPRunEventStream(t *testing.T) {
+	srv, _, run := newReviewServer(t)
+	resp, err := http.Get(srv.URL + "/api/prs/ethyca/a/1/runs/" + run.ID + "/events?from=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var kinds []string
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		if sc.Text() == "event: done" {
+			break
+		}
+		if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+			var e review.Event
+			json.Unmarshal([]byte(data), &e)
+			kinds = append(kinds, e.Kind)
+		}
+	}
+	if !slices.Equal(kinds, []string{"text", "result"}) {
+		t.Fatalf("streamed %q (line 0 should be skipped by from=1)", kinds)
 	}
 }

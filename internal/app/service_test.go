@@ -103,7 +103,7 @@ func TestServiceShowsReviewState(t *testing.T) {
 	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA}, PRs: map[string]github.PR{
 		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}}}}
 	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"})
-	rev, err := review.New(config.Review{MaxConcurrent: 1}, &container.Fake{}, tr.Locks, t.TempDir())
+	rev, err := review.New(config.Review{MaxConcurrent: 1, Repos: map[string]config.RepoReview{testkit.RefA.Repo: {Image: "i"}}}, &container.Fake{}, tr.Locks, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -58,7 +58,8 @@ type fakeContainer struct {
 	done     chan struct{}
 	waitFail chan struct{}
 	code     int
-	out      string
+	log      []byte        // everything printed so far; Logs replays it, like docker
+	grew     chan struct{} // closed (and replaced) whenever log grows
 }
 
 func (f *Fake) Available(context.Context) error {
@@ -92,7 +93,7 @@ func (f *Fake) add(labels map[string]string) string {
 	}
 	f.next++
 	id := fmt.Sprintf("c%d", f.next)
-	f.cs[id] = &fakeContainer{labels: labels, done: make(chan struct{}), waitFail: make(chan struct{})}
+	f.cs[id] = &fakeContainer{labels: labels, done: make(chan struct{}), waitFail: make(chan struct{}), grew: make(chan struct{})}
 	return id
 }
 
@@ -118,9 +119,28 @@ func (f *Fake) Finish(id string, code int, out string) {
 	select {
 	case <-c.done:
 	default:
-		c.code, c.out = code, out
+		c.print(out)
+		c.code = code
 		close(c.done)
 	}
+}
+
+// Print makes a running container write s to its output.
+func (f *Fake) Print(id, s string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c := f.cs[id]; c != nil {
+		c.print(s)
+	}
+}
+
+func (c *fakeContainer) print(s string) {
+	if s == "" {
+		return
+	}
+	c.log = append(c.log, s...)
+	close(c.grew)
+	c.grew = make(chan struct{})
 }
 
 func (f *Fake) get(id string) (*fakeContainer, error) {
@@ -137,12 +157,28 @@ func (f *Fake) Logs(ctx context.Context, id string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	select {
-	case <-c.done:
-		_, err := io.WriteString(w, c.out)
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	for pos := 0; ; {
+		f.mu.Lock()
+		chunk, grew := c.log[pos:], c.grew
+		f.mu.Unlock()
+		if len(chunk) > 0 {
+			if _, err := w.Write(chunk); err != nil {
+				return err
+			}
+			pos += len(chunk)
+			continue
+		}
+		select {
+		case <-grew:
+		case <-c.done:
+			f.mu.Lock()
+			rest := c.log[pos:]
+			f.mu.Unlock()
+			_, err := w.Write(rest)
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
