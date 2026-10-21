@@ -627,3 +627,28 @@ func TestPreviousHeadIsLastSuccessfulReview(t *testing.T) {
 		t.Fatalf("previousHead = %q", got)
 	}
 }
+
+func TestForget(t *testing.T) {
+	f := newFixture(t)
+	other := f.tr
+	other.PRRef = github.PRRef{Repo: "ethyca/b", Number: 2}
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	f.r.Tracked(other) // queued behind it (max_concurrent 1)
+
+	f.r.Forget(refA.Key())
+	waitFor(t, "a's run stopped and forgotten", func() bool { return len(f.runs()) == 0 && f.r.Status()[refA.Key()].State == "" })
+	if u, ok := f.locks.TryLock(refA.Key()); !ok {
+		t.Fatal("a's worktree still locked")
+	} else {
+		u()
+	}
+	waitFor(t, "b starts", func() bool { return f.r.Status()[other.Key()].State == "running" })
+
+	f.r.Forget("") // everything
+	waitFor(t, "all forgotten", func() bool { return len(f.r.Status()) == 0 })
+	if len(f.r.st.Queue) != 0 {
+		t.Fatalf("queue = %+v", f.r.st.Queue)
+	}
+}

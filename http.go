@@ -64,6 +64,18 @@ func newHandler(svc *app.Service) http.Handler {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
 	})
+	mux.HandleFunc("POST /api/reset", func(w http.ResponseWriter, r *http.Request) {
+		svc.Reset("")
+		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/reset", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := svc.PR(prID(r)); !ok {
+			http.NotFound(w, r)
+			return
+		}
+		svc.Reset(prID(r))
+		w.WriteHeader(http.StatusAccepted)
+	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}", func(w http.ResponseWriter, r *http.Request) {
 		pr, ok := svc.PR(prID(r))
 		run := findRun(pr, r.PathValue("run"))

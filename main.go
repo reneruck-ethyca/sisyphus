@@ -71,7 +71,6 @@ func main() {
 		if st := svc.Status(); st.LastError != "" {
 			fatal(fmt.Errorf("%s", st.LastError))
 		}
-		slog.Info("tick done", "summary", svc.Status().Summary())
 		return
 	}
 

@@ -4,7 +4,8 @@
   <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
   <span>{{if .Running}}Running…{{else}}Last run {{when .LastRun}}{{end}} · {{.Summary}}</span>
   <button id="run" {{if .Running}}disabled{{end}}>Run now</button>
-  <nav><a href="/logs">Logs</a></nav>
+  <nav><a href="/logs">Logs</a><button class="quiet" data-reset="/api/reset"
+    data-confirm="Reset everything? Stops all reviews, forgets their history, removes the worktrees waterboy created, and starts over.">Reset all</button></nav>
 </header>
 <div class="cols">
 <aside>
@@ -24,7 +25,9 @@
 {{with .RuntimeError}}<p class="err notice">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
 {{with .PR}}
 <h2>{{.Title}}</h2>
-<div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span></div>
+<div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span>
+  <button class="quiet" data-reset="/api/prs/{{.Repo}}/{{.Number}}/reset" data-to="/"
+    data-confirm="Reset {{.ID}}? Stops its review, forgets its review history, removes its worktree if waterboy created it, and rediscovers it from scratch.">Reset PR</button></div>
 <dl>
   <dt>Branch</dt><dd><code>{{.HeadRef}}</code></dd>
   <dt>Head SHA</dt><dd><code>{{.HeadSHA}}</code></dd>
@@ -104,6 +107,12 @@
   }
   if (events) scrollTo(0, document.body.scrollHeight);
 
+  document.querySelectorAll("[data-reset]").forEach(b => b.onclick = async () => {
+    if (!confirm(b.dataset.confirm)) return;
+    b.disabled = true;
+    await fetch(b.dataset.reset, {method: "POST"});
+    setTimeout(() => location.href = b.dataset.to ?? location.href, 1000);
+  });
   document.getElementById("run").onclick = async (e) => {
     e.target.disabled = true;
     await fetch("/api/run", {method: "POST"});

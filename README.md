@@ -130,6 +130,11 @@ waterboy quits and are re-attached on start; a run whose container is gone is ma
 
 The agent may approve. An approval posted as you makes the tracker drop the PR on its next tick.
 
+**Reset** (dashboard and window: "Reset PR" on a PR, "Reset all" in the header; API: `POST
+/api/prs/{owner}/{repo}/{number}/reset`, `POST /api/reset`) stops the PR's review, forgets its review
+history (run directories stay on disk), removes the worktree if waterboy created it, and stops tracking
+it. A run follows right away and rediscovers whatever still awaits your review, as new.
+
 ## `on_conflict` hook
 
 Runs via `sh -c` with the worktree as cwd, at most 3 times per PR head (sync is retried after

@@ -286,3 +286,28 @@ func TestLocks(t *testing.T) {
 	}
 	u()
 }
+
+func TestForget(t *testing.T) {
+	tr := newTestTracker(t, &github.Fake{}, &Tracked{PRRef: refA}, &Tracked{PRRef: github.PRRef{Repo: "ethyca/b", Number: 2}})
+	ctx := context.Background()
+	if err := tr.Forget(ctx, refA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _ := LoadState(tr.cfg.StateFile)
+	if tr.state.PRs[refA.Key()] != nil || len(tr.state.PRs) != 1 || len(reloaded.PRs) != 1 {
+		t.Fatalf("not forgotten: %+v", tr.state.PRs)
+	}
+	if err := tr.Forget(ctx, "ethyca/nope#9"); err != nil {
+		t.Fatalf("unknown PR: %v", err)
+	}
+
+	// A worktree still in use is waited for, not removed from under it.
+	b := github.PRRef{Repo: "ethyca/b", Number: 2}.Key()
+	unlock, _ := tr.Locks.TryLock(b)
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if err := tr.Forget(short, b); err == nil || tr.state.PRs[b] == nil {
+		t.Fatalf("forgot a locked PR: %v", err)
+	}
+	unlock()
+}

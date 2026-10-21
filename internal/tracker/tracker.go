@@ -221,6 +221,30 @@ func (t *Tracker) announce(tr *Tracked) {
 	tr.AnnouncedSHA, tr.UnannouncedReplies = tr.HeadSHA, 0
 }
 
+// Forget stops tracking id, removing its worktree if waterboy created it, so the
+// next tick discovers it from scratch. It waits (until ctx ends) for whatever
+// holds the worktree. Call it on the ticking goroutine.
+func (t *Tracker) Forget(ctx context.Context, id string) error {
+	tr := t.state.PRs[id]
+	if tr == nil {
+		return nil
+	}
+	unlock, err := t.Locks.Lock(ctx, id)
+	if err != nil {
+		return fmt.Errorf("waiting for %s's worktree: %w", id, err)
+	}
+	defer unlock()
+	if tr.CreatedWorktree {
+		if err := worktree.Remove(ctx, t.repoDir(tr.Repo), tr.HeadRef, tr.CreatedBranch); err != nil {
+			return err
+		}
+	}
+	delete(t.state.PRs, id)
+	t.save()
+	slog.Info("forgot PR", "pr", id, "removed_worktree", tr.CreatedWorktree)
+	return nil
+}
+
 // forgetMissing handles a worktree deleted outside waterboy: drop the entry (the
 // next tick re-tracks the PR if it's still eligible) and delete our branch, but
 // only if it holds nothing unpushed (`git branch -d` refuses otherwise).

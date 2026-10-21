@@ -21,8 +21,11 @@ var frontend embed.FS
 // app.Service, so Run/OnChange stay out of the frontend's reach.
 type UI struct{ svc *app.Service }
 
-func (u *UI) Status() app.Status   { return u.svc.Status() }
-func (u *UI) RunNow()              { u.svc.RunNow() }
+func (u *UI) Status() app.Status { return u.svc.Status() }
+func (u *UI) RunNow()            { u.svc.RunNow() }
+
+// Reset forgets a PR ("" = all) and rediscovers it from scratch; see app.Service.Reset.
+func (u *UI) Reset(prID string)    { u.svc.Reset(prID) }
 func (u *UI) Logs() []app.LogEntry { return u.svc.Logs() }
 
 // RunOutput is a run's readable output so far; live "run-event" events with

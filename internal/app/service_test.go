@@ -114,3 +114,48 @@ func TestServiceShowsReviewState(t *testing.T) {
 		t.Fatalf("status = %+v, summary %q", st, st.Summary())
 	}
 }
+
+func TestServiceReset(t *testing.T) {
+	b := github.PRRef{Repo: "ethyca/b", Number: 2}
+	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA}, &tracker.Tracked{PRRef: b})
+	s := NewService(cfg, tr, nil, NewLogBuffer(10))
+	ctx := context.Background()
+
+	s.reset(ctx, testkit.RefA.Key())
+	if st := s.Status(); len(st.PRs) != 1 || st.PRs[0].ID != b.Key() {
+		t.Fatalf("after resetting a: %+v", st.PRs)
+	}
+	s.reset(ctx, "")
+	if st := s.Status(); len(st.PRs) != 0 {
+		t.Fatalf("after reset all: %+v", st.PRs)
+	}
+}
+
+// Reset requests are served by the loop, followed by a tick that rediscovers.
+func TestServiceResetRunsThroughLoop(t *testing.T) {
+	gh := &github.Fake{PRs: map[string]github.PR{testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", RequestedReviewers: []string{"me"}}}}
+	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA})
+	s := NewService(cfg, tr, nil, NewLogBuffer(10))
+	ticks := make(chan struct{}, 10)
+	s.OnChange(func(st Status) {
+		if !st.Running && !st.LastRun.IsZero() {
+			ticks <- struct{}{}
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	<-ticks
+	if len(s.Status().PRs) != 1 {
+		t.Fatal("PR should still be tracked after a normal tick")
+	}
+	s.Reset(testkit.RefA.Key())
+	select {
+	case <-ticks:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no tick after reset")
+	}
+	if len(s.Status().PRs) != 0 {
+		t.Fatal("reset not applied")
+	}
+}

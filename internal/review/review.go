@@ -92,6 +92,7 @@ var (
 	errSuperseded = errors.New("superseded by new commits")
 	errReclaimed  = errors.New("worktree reclaimed by the tracker")
 	errDropped    = errors.New("PR dropped")
+	errReset      = errors.New("reset")
 )
 
 type store struct {
@@ -179,6 +180,32 @@ func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
 		slog.Info("not reviewing: no review.repos entry", "repo", tr.Repo)
 	}
 	return false
+}
+
+// Forget drops a PR's queued job and run records ("" = every PR's) and stops its
+// running review. Run directories stay on disk.
+func (r *Reviewer) Forget(prID string) {
+	match := func(id string) bool { return prID == "" || id == prID }
+	r.mu.Lock()
+	r.st.Queue = slices.DeleteFunc(r.st.Queue, func(j Job) bool { return match(j.PR.Key()) })
+	for id := range r.st.Runs {
+		if match(id) {
+			delete(r.st.Runs, id)
+		}
+	}
+	var cancels []context.CancelCauseFunc
+	for id, c := range r.active {
+		if match(id) {
+			cancels = append(cancels, c)
+		}
+	}
+	r.saveLocked()
+	r.mu.Unlock()
+	for _, c := range cancels {
+		c(errReset)
+	}
+	slog.Info("forgot reviews", "pr", cmp.Or(prID, "all"))
+	r.changed()
 }
 
 var rank = map[string]int{"replies": 1, "commits": 2, "new": 3}

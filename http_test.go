@@ -285,3 +285,16 @@ func TestHTTPRunEventStream(t *testing.T) {
 		t.Fatalf("streamed %q (line 0 should be skipped by from=1)", kinds)
 	}
 }
+
+func TestHTTPReset(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	for path, want := range map[string]int{"/api/reset": 202, "/api/prs/ethyca/a/1/reset": 202, "/api/prs/ethyca/nope/9/reset": 404} {
+		resp, err := http.Post(srv.URL+path, "", nil)
+		if err != nil || resp.StatusCode != want {
+			t.Errorf("POST %s = %v %v, want %d", path, resp.StatusCode, err, want)
+		}
+	}
+	if _, body := get(t, srv.URL+"/prs/ethyca/a/1"); !strings.Contains(body, `data-reset="/api/prs/ethyca/a/1/reset"`) {
+		t.Error("PR page has no reset button")
+	}
+}
