@@ -26,6 +26,11 @@
   .error    { background: light-dark(#fef7e0, #3d3214); color: light-dark(#a05a00, #fdd663); }
   .conflict { background: light-dark(#fce8e6, #3f1f1d); color: light-dark(#c5221f, #f28b82); }
   .err { color: light-dark(#c5221f, #f28b82); }
+  h2 { font-size: 1.05rem; margin-top: 2rem; }
+  .running, .queued, .succeeded { background: light-dark(#e8f0fe, #1c2b45); color: light-dark(#1a56c4, #8ab4f8); }
+  .succeeded { background: light-dark(#e6f4ea, #1e3a29); color: light-dark(#137333, #81c995); }
+  .failed, .timeout, .lost { background: light-dark(#fce8e6, #3f1f1d); color: light-dark(#c5221f, #f28b82); }
+  .cancelled { background: light-dark(#f1f3f4, #2d2e30); color: var(--muted); }
   nav { margin-left: auto; display: flex; gap: 1rem; }
   #log { font: 12px/1.6 ui-monospace, monospace; margin-top: 1rem; }
   #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
@@ -35,6 +40,8 @@
 </head>
 <body>
 {{end}}
+
+{{define "review"}}{{if .State}}<span class="health {{.State}}">{{.State}}</span>{{else}}{{with .Latest}}<span class="health {{.Status}}">{{.Status}}</span>{{else}}<span class="muted">—</span>{{end}}{{end}}{{end}}
 
 {{define "foot"}}</body>
 </html>

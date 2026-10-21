@@ -1,17 +1,31 @@
 # waterboy
 
-macOS menu-bar service that keeps a worktree for every PR waiting on your review.
-On each tick it:
+macOS menu-bar service that keeps a worktree for every PR waiting on your review and runs a
+review container in it. On each tick it:
 
 1. **discovers** open PRs in `org` where review is requested from `user` or `user` has reviewed,
    and checks each out into a worktree (reusing an existing worktree on that branch, else `wtp add`),
-2. **updates** tracked PRs: logs new commits / new replies, sets `pending_updates`, syncs the worktree,
+2. **updates** tracked PRs: notices new commits / new replies, syncs the worktree,
 3. **cleans up** PRs that are done: removes worktrees it created, forgets reused ones.
 
-It does not run reviews yet. `onTracked` / `onUpdated` in `internal/tracker` are the hooks for that.
+Scheduling and reviewing meet in `tracker.Events`: the tracker announces a PR (`Tracked`, `Updated`)
+only once its worktree is synced to the head it announces, asks for a worktree back (`Reclaim`) when
+it needs to sync or remove one a review is using, and reports `Dropped`. `review.Reviewer` implements
+it: a queue, review containers, and run records. The default container is a placeholder that proves
+the plumbing; the real reviewer image is the next step.
 
-UIs talk to `app.Service` (`internal/app`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`, `Logs()`, `SubscribeLogs()`. It owns
-the run loop and hands out copies of state, so a UI or API never races a running tick.
+| Package | |
+|---|---|
+| `internal/tracker` | discover / update / drop, state file, drop rules, `on_conflict`, events, per-PR worktree locks |
+| `internal/review` | job queue (one per PR), container runs, run records, re-attach after restart |
+| `internal/container` | `Runtime` interface; `Docker` (docker CLI) and `Fake` |
+| `internal/worktree` | git/wtp operations |
+| `internal/github` | `Client` interface; `CLI` (gh) and `Fake` |
+| `internal/app` | `Service`: the boundary UIs talk to (status snapshots, run now, run dirs, logs) |
+| `main` | wiring, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`, `frontend/`) |
+
+UIs talk to `app.Service`: `Status()`, `PR(id)`, `RunNow()`, `RunDir(pr, run)`, `OnChange(fn)`,
+`Logs()`, `SubscribeLogs()`. It hands out copies of state, so a UI or API never races a tick or a run.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process.
 The window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI`
@@ -32,9 +46,11 @@ The menu-bar app also serves a dashboard (overview + per-PR details, auto-refres
 API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `POST /api/run`,
 `GET /api/logs` (last 1000 ops log lines) and `GET /api/logs/stream` (server-sent events: backlog,
 then live). If the port is taken it logs and runs without it. Both the dashboard (`/logs`) and the
-window ("Logs") have a live log viewer.
+window ("Logs") have a live log viewer. PR pages list review runs; a run's files are served at
+`/prs/{owner}/{repo}/{number}/runs/{run}/` (`log`, `run.json`, `out/`).
 
-Requires `gh` (authenticated), `git`, and `wtp` on PATH. `install-agent` bakes your current
+Requires `gh` (authenticated), `git`, and `wtp` on PATH, and Docker for reviews (if it's down,
+reviews wait in the queue and are retried every minute). `install-agent` bakes your current
 shell's PATH into the LaunchAgent.
 
 ## Config
@@ -52,6 +68,14 @@ Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
 | `hooks` | `{}` | `{"on_conflict": "<shell command>"}` |
 | `hook_timeout` | `30m` | per hook run |
 | `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; only loopback `Host`s and same-origin POSTs are accepted |
+| `review.disabled` | `false` | don't run reviews |
+| `review.image` | `alpine/git:v2.49.1` | review container image |
+| `review.command` | placeholder script | full argv, replaces the image's entrypoint |
+| `review.env` | `[]` | names of variables copied from waterboy's environment |
+| `review.env_file` | — | `KEY=value` file for secrets (launchd gives waterboy a bare environment) |
+| `review.timeout` | `30m` | per run; the container is stopped after it |
+| `review.max_concurrent` | `1` | review containers at a time |
+| `review.cleanup` | `true` | after each run, reset worktrees waterboy created to the reviewed head |
 
 ## Rules
 
@@ -67,6 +91,26 @@ history, or an incoming file colliding with an untracked one are a conflict.
 
 A PR missing from search results is only dropped if its own payload agrees (you're not a
 requested reviewer and haven't reviewed), so search lag can't delete worktrees.
+
+## Reviews
+
+A run is started when a PR is first tracked (`new`), after new commits (`commits`, which also stops a
+run still going on the old head) and after new replies (`replies`, queued behind a running one). Each
+PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and one running container,
+which holds the PR's worktree lock: the tracker doesn't sync or remove that worktree meanwhile, asks
+for it back instead, and catches up on the next tick.
+
+The container gets the worktree and the clone's `.git` mounted read/write at their own paths (a
+worktree's `.git` points into the clone), `/out` for results, the worktree as cwd, and
+`WATERBOY_RUN_ID`, `WATERBOY_REASON`, `WATERBOY_PR_URL`, `WATERBOY_REPO`, `WATERBOY_PR_NUMBER`,
+`WATERBOY_BRANCH`, `WATERBOY_HEAD_SHA`, `WATERBOY_WORKTREE`, `WATERBOY_OUT`. With `review.cleanup`,
+worktrees waterboy created are reset to the reviewed head afterwards (tracked changes, commits on top
+and untracked files go; ignored files stay). Reused worktrees are never reset: they may hold your work.
+
+Runs live in `<state dir>/runs/<owner>/<repo>/<n>/<run>/` (`run.json`, `log`, `out/`); the queue and
+the last 10 runs per PR are in `<state dir>/reviews.json`. Containers keep running when waterboy
+quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
+Nothing is posted to GitHub yet.
 
 ## `on_conflict` hook
 

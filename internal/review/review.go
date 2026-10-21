@@ -60,6 +60,14 @@ type PRStatus struct {
 	Runs  []Run  `json:"runs"`  // newest first
 }
 
+// Latest is the most recent run, if any.
+func (p PRStatus) Latest() *Run {
+	if len(p.Runs) == 0 {
+		return nil
+	}
+	return &p.Runs[0]
+}
+
 const keepRuns = 10 // records per PR in reviews.json; run dirs stay on disk
 
 var (
@@ -83,10 +91,11 @@ type Reviewer struct {
 	Kick     func() // asks for a tick soon; called once a reclaimed worktree is free
 	OnChange func() // called after every change, on any goroutine
 
-	mu     sync.Mutex
-	st     store
-	active map[string]context.CancelCauseFunc // running, by PR ID
-	wake   chan struct{}
+	mu          sync.Mutex
+	st          store
+	active      map[string]context.CancelCauseFunc // running, by PR ID
+	wake        chan struct{}
+	unavailable string // why the runtime can't start containers right now
 }
 
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
@@ -228,7 +237,43 @@ func (r *Reviewer) Run(ctx context.Context) {
 	}
 }
 
+// RuntimeError says why reviews are waiting on the container runtime ("" = they aren't).
+func (r *Reviewer) RuntimeError() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.unavailable
+}
+
+// checkRuntime keeps jobs queued while the runtime is down and retries in a minute.
+func (r *Reviewer) checkRuntime(ctx context.Context) bool {
+	err := r.rt.Available(ctx)
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+		time.AfterFunc(time.Minute, r.poke)
+	}
+	r.mu.Lock()
+	was := r.unavailable
+	r.unavailable = msg
+	r.mu.Unlock()
+	if was != msg {
+		if err != nil {
+			slog.Error("container runtime unavailable, reviews wait", "err", err)
+		} else {
+			slog.Info("container runtime available")
+		}
+		r.changed()
+	}
+	return err == nil
+}
+
 func (r *Reviewer) dispatch(ctx context.Context) {
+	r.mu.Lock()
+	pending := len(r.st.Queue) > 0 && len(r.active) < r.cfg.MaxConcurrent
+	r.mu.Unlock()
+	if !pending || !r.checkRuntime(ctx) {
+		return
+	}
 	r.mu.Lock()
 	type start struct {
 		run    Run

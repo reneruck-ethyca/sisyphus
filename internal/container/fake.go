@@ -14,8 +14,15 @@ type Fake struct {
 	mu          sync.Mutex
 	next        int
 	cs          map[string]*fakeContainer
-	Unavailable error // returned by Available when set
+	unavailable error
 	started     []Spec
+}
+
+// SetUnavailable makes Available fail with err (nil = available again).
+func (f *Fake) SetUnavailable(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unavailable = err
 }
 
 // Started returns every Spec passed to Start, in order.
@@ -32,7 +39,11 @@ type fakeContainer struct {
 	out    string
 }
 
-func (f *Fake) Available(context.Context) error { return f.Unavailable }
+func (f *Fake) Available(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.unavailable
+}
 
 func (f *Fake) Start(_ context.Context, s Spec) (string, error) {
 	f.mu.Lock()

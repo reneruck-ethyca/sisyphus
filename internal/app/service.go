@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/review"
 	"github.com/reneruck/waterboy/internal/tracker"
 )
 
@@ -22,17 +23,33 @@ type Status struct {
 	LastRun   time.Time `json:"last_run"`
 	LastError string    `json:"last_error,omitempty"` // of the last tick as a whole
 	PRs       []PRView  `json:"prs"`                  // sorted by ID
+	Reviews   bool      `json:"reviews"`              // false when review.disabled
+	// Why reviews are waiting on the container runtime ("" = they aren't).
+	RuntimeError string `json:"runtime_error,omitempty"`
 }
 
 func (s Status) Summary() string {
-	return fmt.Sprintf("%d tracked", len(s.PRs))
+	out := fmt.Sprintf("%d tracked", len(s.PRs))
+	for _, state := range []string{"running", "queued"} {
+		n := 0
+		for _, pr := range s.PRs {
+			if pr.Review.State == state {
+				n++
+			}
+		}
+		if n > 0 {
+			out += fmt.Sprintf(" · %d review %s", n, state)
+		}
+	}
+	return out
 }
 
 // PRView is a tracked PR as UIs see it: a copy of its state plus derived fields.
 type PRView struct {
 	tracker.Tracked
-	ID     string `json:"id"`     // "owner/repo#n"
-	Health string `json:"health"` // "conflict" | "error" | "ok"
+	ID     string          `json:"id"`     // "owner/repo#n"
+	Health string          `json:"health"` // "conflict" | "error" | "ok" (tracking, not review)
+	Review review.PRStatus `json:"review"`
 }
 
 func health(tr tracker.Tracked) string {
@@ -50,20 +67,36 @@ func health(tr tracker.Tracked) string {
 type Service struct {
 	cfg     config.Config
 	tracker *tracker.Tracker
+	rev     *review.Reviewer // nil when reviews are disabled
 	logs    *LogBuffer
 	runNow  chan struct{}
 
-	mu     sync.Mutex
-	status Status
-	subs   []func(Status)
+	mu      sync.Mutex
+	tracked []tracker.Tracked // last tracker snapshot
+	status  Status
+	subs    []func(Status)
 }
 
-func NewService(cfg config.Config, tr *tracker.Tracker, logs *LogBuffer) *Service {
-	s := &Service{cfg: cfg, tracker: tr, logs: logs, runNow: make(chan struct{}, 1)}
-	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String()}
+// NewService wires the tracker, the reviewer (nil = reviews disabled) and the log buffer.
+func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *LogBuffer) *Service {
+	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1)}
+	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String(), Reviews: rev != nil}
 	tr.OnSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
+	if rev != nil {
+		tr.Events = rev
+		rev.Kick = s.RunNow
+		rev.OnChange = s.publish
+	}
 	s.refreshPRs()
 	return s
+}
+
+// RunDir returns the directory holding one review run's run.json, log and out/.
+func (s *Service) RunDir(prID, runID string) (string, bool) {
+	if s.rev == nil {
+		return "", false
+	}
+	return s.rev.RunDir(prID, runID)
 }
 
 // Status returns the latest snapshot. Its PRs slice is shared; don't mutate it.
@@ -108,8 +141,13 @@ func (s *Service) RunNow() {
 func (s *Service) RunQueued() bool { return len(s.runNow) > 0 }
 
 // Run ticks immediately, then every interval or on RunNow, until ctx is done.
-// Ticks never overlap.
+// Ticks never overlap. Reviews run alongside; leftover review containers are
+// re-attached before the first tick so it won't sync a worktree still in use.
 func (s *Service) Run(ctx context.Context) {
+	if s.rev != nil {
+		s.rev.Reattach(ctx)
+		go s.rev.Run(ctx)
+	}
 	ticker := time.NewTicker(s.cfg.Interval.Duration)
 	defer ticker.Stop()
 	for {
@@ -140,11 +178,28 @@ func (s *Service) RunOnce(ctx context.Context) {
 
 // refreshPRs copies tracker state. It must run on the goroutine that ticks.
 func (s *Service) refreshPRs() {
-	var prs []PRView
-	for _, tr := range s.tracker.Snapshot() {
-		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr)})
+	snap := s.tracker.Snapshot()
+	s.mu.Lock()
+	s.tracked = snap
+	s.mu.Unlock()
+	s.publish()
+}
+
+// publish merges the last tracker snapshot with live review state. Safe from any goroutine.
+func (s *Service) publish() {
+	var reviews map[string]review.PRStatus
+	runtimeErr := ""
+	if s.rev != nil {
+		reviews, runtimeErr = s.rev.Status(), s.rev.RuntimeError()
 	}
-	s.update(func(st *Status) { st.PRs = prs })
+	s.mu.Lock()
+	tracked := s.tracked
+	s.mu.Unlock()
+	prs := make([]PRView, 0, len(tracked))
+	for _, tr := range tracked {
+		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: reviews[tr.Key()]})
+	}
+	s.update(func(st *Status) { st.PRs, st.RuntimeError = prs, runtimeErr })
 }
 
 func (s *Service) update(fn func(*Status)) {

@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -323,5 +324,22 @@ func TestQueuePersists(t *testing.T) {
 	r2 := f.newReviewer(t, f.r.cfg)
 	if q := r2.st.Queue; len(q) != 1 || q[0].PR.Key() != refA.Key() {
 		t.Fatalf("queue after reload = %+v", q)
+	}
+}
+
+func TestJobsWaitForRuntime(t *testing.T) {
+	f := newFixture(t)
+	f.rt.SetUnavailable(errors.New("docker daemon not running"))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "runtime error", func() bool { return f.r.RuntimeError() != "" })
+	if st := f.r.Status()[refA.Key()]; st.State != "queued" || len(f.rt.Started()) != 0 {
+		t.Fatalf("status = %+v", st)
+	}
+	f.rt.SetUnavailable(nil)
+	f.r.poke() // stands in for the one-minute retry
+	waitFor(t, "container start", f.started(1))
+	if f.r.RuntimeError() != "" {
+		t.Fatal("runtime error not cleared")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"os"
 	"os/exec"
 
 	"github.com/reneruck/waterboy/internal/app"
@@ -23,6 +24,30 @@ type UI struct{ svc *app.Service }
 func (u *UI) Status() app.Status   { return u.svc.Status() }
 func (u *UI) RunNow()              { u.svc.RunNow() }
 func (u *UI) Logs() []app.LogEntry { return u.svc.Logs() }
+
+// RunLog returns a review run's container log.
+func (u *UI) RunLog(prID, runID string) (string, error) {
+	dir, ok := u.svc.RunDir(prID, runID)
+	if !ok {
+		return "", fmt.Errorf("no run %s for %s", runID, prID)
+	}
+	root, err := os.OpenRoot(dir) // a reviewer can't point us outside its run dir
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	b, err := root.ReadFile("log")
+	return string(b), err
+}
+
+// OpenRun opens a review run's directory (log, run.json, out/) in Finder.
+func (u *UI) OpenRun(prID, runID string) error {
+	dir, ok := u.svc.RunDir(prID, runID)
+	if !ok {
+		return fmt.Errorf("no run %s for %s", runID, prID)
+	}
+	return exec.Command("open", dir).Run()
+}
 
 func (u *UI) PR(id string) (app.PRView, error) {
 	pr, ok := u.svc.PR(id)

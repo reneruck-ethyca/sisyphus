@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/container"
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/review"
 	"github.com/reneruck/waterboy/internal/testkit"
 	"github.com/reneruck/waterboy/internal/tracker"
 )
@@ -34,7 +37,7 @@ func TestServiceSnapshot(t *testing.T) {
 		&tracker.Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y"},
 		a,
 	)
-	s := NewService(cfg, tr, NewLogBuffer(10))
+	s := NewService(cfg, tr, nil, NewLogBuffer(10))
 	var changes int
 	s.OnChange(func(Status) { changes++ })
 
@@ -66,7 +69,7 @@ func TestServiceSnapshot(t *testing.T) {
 
 func TestServiceTickError(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{CandErr: errors.New("offline")})
-	s := NewService(cfg, tr, NewLogBuffer(10))
+	s := NewService(cfg, tr, nil, NewLogBuffer(10))
 	s.RunOnce(context.Background())
 	if st := s.Status(); st.LastError == "" || st.LastRun.IsZero() {
 		t.Fatalf("status = %+v", st)
@@ -75,7 +78,7 @@ func TestServiceTickError(t *testing.T) {
 
 func TestServiceRunNow(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
-	s := NewService(cfg, tr, NewLogBuffer(10))
+	s := NewService(cfg, tr, nil, NewLogBuffer(10))
 	ticks := make(chan struct{}, 10)
 	s.OnChange(func(st Status) {
 		if !st.Running && !st.LastRun.IsZero() {
@@ -93,5 +96,21 @@ func TestServiceRunNow(t *testing.T) {
 			t.Fatalf("tick %d never happened", i+1)
 		}
 		s.RunNow()
+	}
+}
+
+func TestServiceShowsReviewState(t *testing.T) {
+	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA}, PRs: map[string]github.PR{
+		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}}}}
+	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"})
+	rev, err := review.New(config.Review{MaxConcurrent: 1}, &container.Fake{}, tr.Locks, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(cfg, tr, rev, NewLogBuffer(10))
+	s.RunOnce(context.Background()) // announces the PR; the reviewer isn't running, so it stays queued
+	st := s.Status()
+	if !st.Reviews || st.PRs[0].Review.State != "queued" || st.Summary() != "1 tracked · 1 review queued" {
+		t.Fatalf("status = %+v, summary %q", st, st.Summary())
 	}
 }

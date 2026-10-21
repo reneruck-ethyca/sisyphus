@@ -9,10 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/reneruck/waterboy/internal/app"
 	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/container"
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/review"
 	"github.com/reneruck/waterboy/internal/tracker"
 )
 
@@ -53,7 +56,14 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	svc := app.NewService(cfg, tracker.New(cfg, gh, st), logs)
+	tr := tracker.New(cfg, gh, st)
+	var rev *review.Reviewer // reviews state lives next to the tracker's
+	if !cfg.Review.Disabled {
+		if rev, err = review.New(cfg.Review, container.Docker{}, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
+			fatal(err)
+		}
+	}
+	svc := app.NewService(cfg, tr, rev, logs)
 	slog.Info("waterboy starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
 
 	if *once {

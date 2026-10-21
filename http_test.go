@@ -8,11 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/container"
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/gittest"
+	"github.com/reneruck/waterboy/internal/review"
 	"github.com/reneruck/waterboy/internal/testkit"
 	"github.com/reneruck/waterboy/internal/tracker"
 )
@@ -22,7 +29,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer
 	cfg, tr := testkit.Tracker(t, &github.Fake{},
 		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x"})
 	logs := app.NewLogBuffer(10)
-	svc := app.NewService(cfg, tr, logs)
+	svc := app.NewService(cfg, tr, nil, logs)
 	srv := httptest.NewServer(newHandler(svc))
 	t.Cleanup(srv.Close)
 	return srv, svc, logs
@@ -161,5 +168,69 @@ func TestHTTPLogStream(t *testing.T) {
 	log.Info("live")
 	if e := next(); e.Msg != "live" || e.Seq != 2 {
 		t.Fatalf("second event %+v", e)
+	}
+}
+
+// newReviewServer runs one placeholder review to completion against a real git
+// worktree and a fake container runtime, then serves the dashboard.
+func newReviewServer(t *testing.T) (*httptest.Server, *app.Service, review.Run) {
+	t.Helper()
+	_, clone := gittest.Setup(t)
+	head := gittest.Git(t, clone, "rev-parse", "HEAD")
+	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA}, PRs: map[string]github.PR{
+		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: head, RequestedReviewers: []string{"me"}}}}
+	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: head, SyncedSHA: head, Worktree: clone})
+	rt := &container.Fake{}
+	rev, err := review.New(config.Review{Image: "img", Command: []string{"sh"}, Timeout: config.Duration{Duration: time.Minute}, MaxConcurrent: 1},
+		rt, tr.Locks, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := app.NewService(cfg, tr, rev, app.NewLogBuffer(10))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go rev.Run(ctx)
+	svc.RunOnce(ctx)
+	var run review.Run
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("review never finished")
+		}
+		if cs, _ := rt.List(ctx, nil); len(cs) == 1 && cs[0].Running {
+			rt.Finish(cs[0].ID, 0, "review <log>\n")
+		}
+		if pr, _ := svc.PR(testkit.RefA.Key()); pr.Review.State == "" && pr.Review.Latest() != nil {
+			run = *pr.Review.Latest()
+			break
+		}
+	}
+	os.WriteFile(filepath.Join(run.Dir, "out", "review.md"), []byte("# hi"), 0o644)
+	os.Symlink("/etc/hosts", filepath.Join(run.Dir, "out", "escape"))
+	srv := httptest.NewServer(newHandler(svc))
+	t.Cleanup(srv.Close)
+	return srv, svc, run
+}
+
+func TestHTTPReviewRuns(t *testing.T) {
+	srv, _, run := newReviewServer(t)
+	base := srv.URL + "/prs/ethyca/a/1/runs/" + run.ID
+	for path, want := range map[string]string{
+		"/prs/ethyca/a/1": `href="/prs/ethyca/a/1/runs/` + run.ID + `/log"`,
+		"/":               `class="health succeeded"`,
+		"/prs/ethyca/a/1/runs/" + run.ID + "/log":           "review <log>\n",
+		"/prs/ethyca/a/1/runs/" + run.ID + "/out/review.md": "# hi",
+	} {
+		code, body := get(t, srv.URL+path)
+		if code != 200 || !strings.Contains(body, want) {
+			t.Errorf("%s = %d, want %q in:\n%s", path, code, want, body)
+		}
+	}
+	if resp, _ := http.Get(base + "/log"); resp.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Errorf("log content type %q", resp.Header.Get("Content-Type"))
+	}
+	for _, path := range []string{"/out/escape", "/../../../../../../etc/hosts", "-nope/log"} {
+		if code, body := get(t, base+path); code == 200 {
+			t.Errorf("%s served: %.80s", path, body)
+		}
 	}
 }

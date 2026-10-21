@@ -30,6 +30,11 @@
   #log { font: 12px/1.6 ui-monospace, monospace; }
   #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
   .WARN { color: var(--pending); } .ERROR { color: var(--error); }
+  h2 { font-size: 14px; margin: 24px 0 8px; }
+  .running, .queued { color: var(--pending); } .succeeded { color: var(--ok); }
+  .failed, .timeout, .lost { color: var(--error); } .cancelled { color: var(--muted); }
+  pre { font: 12px/1.5 ui-monospace, monospace; background: var(--hover); padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  button.link { margin: 0; padding: 0; border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; }
 </style>
 <script type="module">
   import { Call, Events, Browser } from "/wails/runtime.js";
@@ -53,16 +58,21 @@
   function overview() {
     const s = status;
     const rows = s.prs.map(p => `<tr data-id="${esc(p.id)}">
-        <td class="health ${p.health}">${p.health}</td><td>${esc(p.id)}</td><td>${esc(p.title)}</td>
+        <td class="health ${p.health}">${p.health}</td><td>${reviewCell(p.review)}</td><td>${esc(p.id)}</td><td>${esc(p.title)}</td>
         <td class="muted">${esc(p.head_ref)}</td><td class="muted">${time(p.last_seen_at)}</td></tr>`).join("");
     return `<header><h1>waterboy</h1>
         <span class="muted">${esc(s.user)} · ${esc(s.org)} · every ${esc(s.interval)} ·
         ${s.running ? "running…" : "last run " + time(s.last_run)}</span>
         <button id="run" ${s.running ? "disabled" : ""}>Run now</button><nav><a href="#logs">Logs</a></nav></header>
       ${s.last_error ? `<p class="err">${esc(s.last_error)}</p>` : ""}
-      ${s.prs.length ? `<table><thead><tr><th>Health</th><th>PR</th><th>Title</th><th>Branch</th><th>Last seen</th></tr></thead>
+      ${s.reviews ? "" : `<p class="muted">Reviews are disabled (review.disabled).</p>`}
+      ${s.runtime_error ? `<p class="err">Reviews are waiting for the container runtime: ${esc(s.runtime_error)}</p>` : ""}
+      ${s.prs.length ? `<table><thead><tr><th>Health</th><th>Review</th><th>PR</th><th>Title</th><th>Branch</th><th>Last seen</th></tr></thead>
         <tbody>${rows}</tbody></table>` : `<p class="muted">No PRs tracked.</p>`}`;
   }
+
+  const reviewCell = r => r.state ? `<span class="${esc(r.state)}">${esc(r.state)}</span>`
+    : r.runs?.length ? `<span class="${esc(r.runs[0].status)}">${esc(r.runs[0].status)}</span>` : `<span class="muted">—</span>`;
 
   const logRow = e => `<div class="${esc(e.level)}"><span class="muted">${new Date(e.time).toLocaleTimeString([], {hour12: false})}</span>
       ${esc(e.level)} ${esc(e.msg)} <span class="muted">${esc(e.attrs)}</span></div>`;
@@ -98,11 +108,27 @@
         field("Worktree", esc(p.worktree) + (p.created_worktree ? "" : " <span class=muted>(reused)</span>")),
         field("Tracked since", time(p.tracked_at)),
         field("Last seen", time(p.last_seen_at)),
-      ].join("")}</dl>`;
+      ].join("")}</dl>
+      <h2>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}</h2>
+      ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th></th></tr></thead><tbody>
+        ${p.review.runs.map(r => `<tr>
+          <td>${esc(r.id)}</td><td>${esc(r.job.reason)}</td><td class="muted">${esc(r.job.pr.head_sha.slice(0, 12))}</td>
+          <td class="${esc(r.status)}">${esc(r.status)}${r.error ? `<div class="err">${esc(r.error)}</div>` : ""}</td>
+          <td>${r.status === "running" ? "" : r.exit_code}</td><td class="muted">${time(r.started)}</td>
+          <td><button class="link" data-log="${esc(r.id)}">log</button> · <button class="link" data-open="${esc(r.id)}">folder</button></td></tr>`).join("")}
+        </tbody></table><pre id="runlog" hidden></pre>` : `<p class="muted">No reviews yet.</p>`}`;
   }
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
+    const prID = decodeURIComponent(location.hash.slice(1));
+    if (e.target.dataset.open) return call("OpenRun", prID, e.target.dataset.open);
+    if (e.target.dataset.log) {
+      const pre = document.getElementById("runlog");
+      return call("RunLog", prID, e.target.dataset.log)
+        .then(t => { pre.textContent = t || "(empty)"; pre.hidden = false; })
+        .catch(err => { pre.textContent = String(err.message ?? err); pre.hidden = false; });
+    }
     const a = e.target.closest("a[data-external]");
     if (a) { e.preventDefault(); return Browser.OpenURL(a.href); }
     const row = e.target.closest("tr[data-id]");

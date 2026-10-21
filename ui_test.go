@@ -15,7 +15,7 @@ import (
 func TestUI(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x"})
 	logs := app.NewLogBuffer(10)
-	ui := &UI{app.NewService(cfg, tr, logs)}
+	ui := &UI{app.NewService(cfg, tr, nil, logs)}
 
 	if st := ui.Status(); len(st.PRs) != 1 || st.PRs[0].ID != testkit.RefA.Key() {
 		t.Fatalf("Status() = %+v", st)
@@ -46,5 +46,16 @@ func TestTrayStatus(t *testing.T) {
 		if got := trayStatus(st); got != want {
 			t.Errorf("trayStatus = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestUIRunLog(t *testing.T) {
+	_, svc, run := newReviewServer(t)
+	ui := &UI{svc}
+	if got, err := ui.RunLog(testkit.RefA.Key(), run.ID); err != nil || got != "review <log>\n" {
+		t.Fatalf("RunLog = %q, %v", got, err)
+	}
+	if _, err := ui.RunLog(testkit.RefA.Key(), "nope"); err == nil {
+		t.Fatal("unknown run should fail")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/app"
@@ -57,6 +58,9 @@ func newHandler(svc *app.Service) http.Handler {
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		serveRunFile(w, r, svc)
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, svc.Logs())
@@ -117,6 +121,30 @@ func streamLogs(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 			return
 		}
 	}
+}
+
+// serveRunFile serves a review run's files (log, run.json, out/…). os.Root keeps
+// paths and symlinks a reviewer left in out/ from escaping the run directory.
+func serveRunFile(w http.ResponseWriter, r *http.Request, svc *app.Service) {
+	dir, ok := svc.RunDir(prID(r), r.PathValue("run"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer root.Close()
+	name := r.PathValue("path")
+	if name == "" {
+		name = "."
+	}
+	if name == "log" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
+	http.ServeFileFS(w, r, root.FS(), name)
 }
 
 // prID rebuilds the app.Service ID ("owner/repo#n") from the path.
