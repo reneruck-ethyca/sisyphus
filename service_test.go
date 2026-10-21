@@ -30,7 +30,7 @@ func TestServiceSnapshot(t *testing.T) {
 		&Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y", PendingUpdates: true},
 		&Tracked{PRRef: refA, HeadSHA: "x", SyncedSHA: "x"},
 	)
-	s := NewService(tr.cfg, tr)
+	s := NewService(tr.cfg, tr, NewLogBuffer(10))
 	var changes int
 	s.OnChange(func(Status) { changes++ })
 
@@ -62,7 +62,7 @@ func TestServiceSnapshot(t *testing.T) {
 
 func TestServiceTickError(t *testing.T) {
 	tr := newTestTracker(t, &fakeGitHub{candErr: errors.New("offline")})
-	s := NewService(tr.cfg, tr)
+	s := NewService(tr.cfg, tr, NewLogBuffer(10))
 	s.tick(context.Background())
 	if st := s.Status(); st.LastError == "" || st.LastRun.IsZero() {
 		t.Fatalf("status = %+v", st)
@@ -72,7 +72,7 @@ func TestServiceTickError(t *testing.T) {
 func TestServiceRunNow(t *testing.T) {
 	tr := newTestTracker(t, &fakeGitHub{})
 	tr.cfg.Interval = Duration{time.Hour}
-	s := NewService(tr.cfg, tr)
+	s := NewService(tr.cfg, tr, NewLogBuffer(10))
 	ticks := make(chan struct{}, 10)
 	s.OnChange(func(st Status) {
 		if !st.Running && !st.LastRun.IsZero() {

@@ -4,6 +4,7 @@
   <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
   <span>{{if .Running}}Running…{{else}}Last run {{when .LastRun}}{{end}} · {{.Summary}}</span>
   <button id="run" {{if .Running}}disabled{{end}}>Run now</button>
+  <nav><a href="/logs">Logs</a></nav>
 </header>
 {{with .LastError}}<p class="err">Last run failed: {{.}}</p>{{end}}
 <table>

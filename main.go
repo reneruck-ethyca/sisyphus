@@ -25,6 +25,10 @@ func main() {
 	once := flag.Bool("once", false, "run a single tick and exit (no tray)")
 	flag.Parse()
 
+	// ponytail: 1000 lines covers several ticks; older lines are in the log file.
+	logs := NewLogBuffer(1000)
+	slog.SetDefault(slog.New(logs.Handler(slog.NewTextHandler(os.Stderr, nil))))
+
 	if err := checkTools("gh", "git", "wtp"); err != nil {
 		fatal(err)
 	}
@@ -44,7 +48,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	svc := NewService(cfg, NewTracker(cfg, gh, st))
+	svc := NewService(cfg, NewTracker(cfg, gh, st), logs)
 	slog.Info("waterboy starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
 
 	if *once {

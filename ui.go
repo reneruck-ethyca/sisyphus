@@ -18,8 +18,9 @@ var frontend embed.FS
 // Service, so Run/OnChange stay out of the frontend's reach.
 type UI struct{ svc *Service }
 
-func (u *UI) Status() Status { return u.svc.Status() }
-func (u *UI) RunNow()        { u.svc.RunNow() }
+func (u *UI) Status() Status   { return u.svc.Status() }
+func (u *UI) RunNow()          { u.svc.RunNow() }
+func (u *UI) Logs() []LogEntry { return u.svc.Logs() }
 
 func (u *UI) PR(id string) (PRView, error) {
 	pr, ok := u.svc.PR(id)
@@ -82,6 +83,18 @@ func runApp(cfg Config, svc *Service) error {
 		app.Event.Emit("status", st)
 	})
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		logs, cancel := svc.SubscribeLogs()
+		go func() {
+			defer cancel()
+			for {
+				select {
+				case e := <-logs:
+					app.Event.Emit("log", e)
+				case <-app.Context().Done():
+					return
+				}
+			}
+		}()
 		go svc.Run(app.Context())
 	})
 	return app.Run()

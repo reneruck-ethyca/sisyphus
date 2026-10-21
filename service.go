@@ -56,6 +56,7 @@ func health(tr Tracked) string {
 type Service struct {
 	cfg     Config
 	tracker *Tracker
+	logs    *LogBuffer
 	runNow  chan struct{}
 
 	mu     sync.Mutex
@@ -63,8 +64,8 @@ type Service struct {
 	subs   []func(Status)
 }
 
-func NewService(cfg Config, tracker *Tracker) *Service {
-	s := &Service{cfg: cfg, tracker: tracker, runNow: make(chan struct{}, 1)}
+func NewService(cfg Config, tracker *Tracker, logs *LogBuffer) *Service {
+	s := &Service{cfg: cfg, tracker: tracker, logs: logs, runNow: make(chan struct{}, 1)}
 	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String()}
 	tracker.onSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
 	s.refreshPRs()
@@ -87,6 +88,12 @@ func (s *Service) PR(id string) (PRView, bool) {
 	}
 	return st.PRs[i], true
 }
+
+// Logs returns the most recent ops log entries, oldest first.
+func (s *Service) Logs() []LogEntry { return s.logs.Recent() }
+
+// SubscribeLogs streams new log entries until cancel is called.
+func (s *Service) SubscribeLogs() (<-chan LogEntry, func()) { return s.logs.Subscribe() }
 
 // OnChange registers fn to run (on the tick goroutine) after every snapshot change.
 func (s *Service) OnChange(fn func(Status)) {

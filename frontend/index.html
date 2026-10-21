@@ -26,6 +26,10 @@
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
   dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
   a { color: inherit; }
+  nav { margin-left: 12px; }
+  #log { font: 12px/1.6 ui-monospace, monospace; }
+  #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
+  .WARN { color: var(--pending); } .ERROR { color: var(--error); }
 </style>
 <script type="module">
   import { Call, Events, Browser } from "/wails/runtime.js";
@@ -34,9 +38,14 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
   const time = t => !t || t.startsWith("0001") ? "never" : new Date(t).toLocaleString();
   const app = document.getElementById("app");
-  let status;
+  let status, logs = [];
+  const LOG_MAX = 1000;
 
   async function render() {
+    if (location.hash === "#logs") {
+      app.innerHTML = logsView();
+      return scrollTo(0, document.body.scrollHeight);
+    }
     const id = decodeURIComponent(location.hash.slice(1));
     app.innerHTML = id ? await detail(id) : overview();
   }
@@ -49,10 +58,29 @@
     return `<header><h1>waterboy</h1>
         <span class="muted">${esc(s.user)} · ${esc(s.org)} · every ${esc(s.interval)} ·
         ${s.running ? "running…" : "last run " + time(s.last_run)}</span>
-        <button id="run" ${s.running ? "disabled" : ""}>Run now</button></header>
+        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><nav><a href="#logs">Logs</a></nav></header>
       ${s.last_error ? `<p class="err">${esc(s.last_error)}</p>` : ""}
       ${s.prs.length ? `<table><thead><tr><th>Health</th><th>PR</th><th>Title</th><th>Branch</th><th>Last seen</th></tr></thead>
         <tbody>${rows}</tbody></table>` : `<p class="muted">No PRs tracked.</p>`}`;
+  }
+
+  const logRow = e => `<div class="${esc(e.level)}"><span class="muted">${new Date(e.time).toLocaleTimeString([], {hour12: false})}</span>
+      ${esc(e.level)} ${esc(e.msg)} <span class="muted">${esc(e.attrs)}</span></div>`;
+
+  function logsView() {
+    return `<p><a href="#">← All PRs</a></p><header><h1>Logs</h1></header><div id="log">${logs.map(logRow).join("")}</div>`;
+  }
+
+  function addLog(e) {
+    if (logs.length && e.seq <= logs.at(-1).seq) return;
+    logs.push(e);
+    if (logs.length > LOG_MAX) logs.shift();
+    const box = document.getElementById("log");
+    if (!box) return;
+    const follow = innerHeight + scrollY >= document.body.scrollHeight - 20;
+    box.insertAdjacentHTML("beforeend", logRow(e));
+    if (box.childElementCount > LOG_MAX) box.firstElementChild.remove();
+    if (follow) scrollTo(0, document.body.scrollHeight);
   }
 
   async function detail(id) {
@@ -82,7 +110,12 @@
     if (row) location.hash = encodeURIComponent(row.dataset.id);
   });
   addEventListener("hashchange", render);
-  Events.On("status", e => { status = e.data; render(); });
+  Events.On("status", e => { status = e.data; if (location.hash !== "#logs") render(); });
+  Events.On("log", e => addLog(e.data));
+  const backlog = await call("Logs"); // merge: events may have arrived while this was in flight
+  const live = logs;
+  logs = backlog;
+  live.forEach(addLog);
   status = await call("Status");
   render();
 </script>

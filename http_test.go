@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +16,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *Service) {
 	t.Helper()
 	tr := newTestTracker(t, &fakeGitHub{},
 		&Tracked{PRRef: refA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x", PendingUpdates: true})
-	svc := NewService(tr.cfg, tr)
+	svc := NewService(tr.cfg, tr, NewLogBuffer(10))
 	srv := httptest.NewServer(newHandler(svc))
 	t.Cleanup(srv.Close)
 	return srv, svc
@@ -97,5 +100,60 @@ func TestHTTPRejectsForeignHostAndOrigin(t *testing.T) {
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
 	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden || len(svc.runNow) != 0 {
 		t.Fatalf("cross-origin run: %v %v", resp, err)
+	}
+}
+
+func TestHTTPLogs(t *testing.T) {
+	srv, svc := newTestServer(t)
+	log := slog.New(svc.logs.Handler(slog.NewTextHandler(io.Discard, nil)))
+	log.Warn("fetching <PR>", "pr", refA.Key())
+
+	code, body := get(t, srv.URL+"/api/logs")
+	var entries []LogEntry
+	if err := json.Unmarshal([]byte(body), &entries); code != 200 || err != nil || len(entries) != 1 || entries[0].Msg != "fetching <PR>" {
+		t.Fatalf("%d %v %s", code, err, body)
+	}
+	code, body = get(t, srv.URL+"/logs")
+	if code != 200 || !strings.Contains(body, "fetching &lt;PR&gt;") || strings.Contains(body, `http-equiv="refresh"`) {
+		t.Fatalf("logs page %d: %s", code, body)
+	}
+}
+
+func TestHTTPLogStream(t *testing.T) {
+	srv, svc := newTestServer(t)
+	log := slog.New(svc.logs.Handler(slog.NewTextHandler(io.Discard, nil)))
+	log.Info("backlog")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/logs/stream", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("content type %q", ct)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	next := func() LogEntry {
+		for sc.Scan() {
+			if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+				var e LogEntry
+				if err := json.Unmarshal([]byte(data), &e); err != nil {
+					t.Fatal(err)
+				}
+				return e
+			}
+		}
+		t.Fatalf("stream ended: %v", sc.Err())
+		return LogEntry{}
+	}
+	if e := next(); e.Msg != "backlog" {
+		t.Fatalf("first event %+v", e)
+	}
+	log.Info("live")
+	if e := next(); e.Msg != "live" || e.Seq != 2 {
+		t.Fatalf("second event %+v", e)
 	}
 }

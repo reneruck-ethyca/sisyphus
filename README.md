@@ -10,7 +10,7 @@ On each tick it:
 
 It does not run reviews yet. `onTracked` / `onUpdated` in `tracker.go` are the hooks for that.
 
-UIs talk to `Service` (`service.go`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`. It owns
+UIs talk to `Service` (`service.go`): `Status()`, `PR(id)`, `RunNow()`, `OnChange(fn)`, `Logs()`, `SubscribeLogs()`. It owns
 the run loop and hands out copies of state, so a UI or API never races a running tick.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process.
@@ -29,8 +29,10 @@ make uninstall-agent
 ```
 
 The menu-bar app also serves a dashboard (overview + per-PR details, auto-refreshing) and a JSON
-API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `POST /api/run`.
-If the port is taken it logs and runs without it.
+API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `POST /api/run`,
+`GET /api/logs` (last 1000 ops log lines) and `GET /api/logs/stream` (server-sent events: backlog,
+then live). If the port is taken it logs and runs without it. Both the dashboard (`/logs`) and the
+window ("Logs") have a live log viewer.
 
 Requires `gh` (authenticated), `git`, and `wtp` on PATH. `install-agent` bakes your current
 shell's PATH into the LaunchAgent.

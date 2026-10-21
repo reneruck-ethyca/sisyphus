@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="15">
+{{if ne . "Logs"}}<meta http-equiv="refresh" content="15">{{end}}
 <title>{{.}} · waterboy</title>
 <style>
   :root { color-scheme: light dark; --muted: light-dark(#666, #999); --line: light-dark(#ddd, #333); }
@@ -26,6 +26,11 @@
   .error    { background: light-dark(#fef7e0, #3d3214); color: light-dark(#a05a00, #fdd663); }
   .conflict { background: light-dark(#fce8e6, #3f1f1d); color: light-dark(#c5221f, #f28b82); }
   .err { color: light-dark(#c5221f, #f28b82); }
+  nav { margin-left: auto; display: flex; gap: 1rem; }
+  #log { font: 12px/1.6 ui-monospace, monospace; margin-top: 1rem; }
+  #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
+  .WARN { color: light-dark(#a05a00, #fdd663); }
+  .ERROR { color: light-dark(#c5221f, #f28b82); }
 </style>
 </head>
 <body>

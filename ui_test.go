@@ -1,13 +1,15 @@
 package main
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 )
 
 func TestUI(t *testing.T) {
 	tr := newTestTracker(t, &fakeGitHub{}, &Tracked{PRRef: refA, HeadSHA: "x", PendingUpdates: true})
-	ui := &UI{NewService(tr.cfg, tr)}
+	ui := &UI{NewService(tr.cfg, tr, NewLogBuffer(10))}
 
 	if st := ui.Status(); len(st.PRs) != 1 || st.PRs[0].ID != refA.Key() {
 		t.Fatalf("Status() = %+v", st)
@@ -17,6 +19,10 @@ func TestUI(t *testing.T) {
 	}
 	if _, err := ui.PR("ethyca/nope#1"); err == nil {
 		t.Fatal("PR(unknown) should fail")
+	}
+	slog.New(ui.svc.logs.Handler(slog.NewTextHandler(io.Discard, nil))).Info("hello")
+	if logs := ui.Logs(); len(logs) != 1 || logs[0].Msg != "hello" {
+		t.Fatalf("Logs() = %+v", logs)
 	}
 	ui.RunNow()
 	select {

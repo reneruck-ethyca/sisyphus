@@ -1,0 +1,35 @@
+{{template "head" "Logs"}}
+<header>
+  <h1>waterboy logs</h1>
+  <span class="muted" id="state">connecting…</span>
+  <nav><a href="/">Status</a></nav>
+</header>
+<div id="log">
+{{range .}}<div class="{{.Level}}" data-seq="{{.Seq}}"><span class="muted">{{.Time.Local.Format "15:04:05"}}</span> {{.Level}} {{.Msg}} <span class="muted">{{.Attrs}}</span></div>
+{{end}}</div>
+<script>
+  const log = document.getElementById("log"), state = document.getElementById("state");
+  const el = (tag, cls, text) => Object.assign(document.createElement(tag), {className: cls, textContent: text});
+  const lastSeq = () => +(log.lastElementChild?.dataset.seq ?? 0);
+  const atBottom = () => innerHeight + scrollY >= document.body.scrollHeight - 20;
+  const src = new EventSource("/api/logs/stream");
+  let dropped = false;
+  src.onopen = () => {
+    if (dropped) log.replaceChildren(); // waterboy may have restarted: seqs start over, the backlog is resent
+    state.textContent = "live";
+  };
+  src.onerror = () => { dropped = true; state.textContent = "disconnected, retrying…"; };
+  src.onmessage = (m) => {
+    const e = JSON.parse(m.data);
+    if (e.seq <= lastSeq()) return; // already rendered server-side
+    const follow = atBottom();
+    const row = el("div", e.level, "");
+    row.dataset.seq = e.seq;
+    row.append(el("span", "muted", new Date(e.time).toLocaleTimeString([], {hour12: false})), ` ${e.level} ${e.msg} `, el("span", "muted", e.attrs ?? ""));
+    log.append(row);
+    while (log.childElementCount > 1000) log.firstElementChild.remove();
+    if (follow) scrollTo(0, document.body.scrollHeight);
+  };
+  scrollTo(0, document.body.scrollHeight);
+</script>
+{{template "foot"}}

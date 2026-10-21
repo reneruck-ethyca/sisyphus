@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net"
@@ -55,6 +56,15 @@ func newHandler(svc *Service) http.Handler {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
 	})
+	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, svc.Logs())
+	})
+	mux.HandleFunc("GET /api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
+		streamLogs(w, r, svc)
+	})
+	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
+		render(w, "logs.html", svc.Logs())
+	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "index.html", svc.Status())
 	})
@@ -67,6 +77,44 @@ func newHandler(svc *Service) http.Handler {
 		render(w, "pr.html", pr)
 	})
 	return localOnly(http.NewCrossOriginProtection().Handler(mux))
+}
+
+// streamLogs sends the backlog, then every new entry, as server-sent events
+// until the client goes away.
+func streamLogs(w http.ResponseWriter, r *http.Request, svc *Service) {
+	live, cancel := svc.SubscribeLogs() // before the backlog, so nothing falls in between
+	defer cancel()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	rc := http.NewResponseController(w)
+	var last uint64
+	send := func(e LogEntry) bool {
+		if e.Seq <= last {
+			return true // already sent with the backlog
+		}
+		last = e.Seq
+		b, _ := json.Marshal(e)
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
+	for _, e := range svc.Logs() {
+		if !send(e) {
+			return
+		}
+	}
+	rc.Flush() // send headers even with an empty backlog
+	for {
+		select {
+		case e := <-live:
+			if !send(e) {
+				return
+			}
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // prID rebuilds the Service ID ("owner/repo#n") from the path.
