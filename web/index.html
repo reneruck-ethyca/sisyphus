@@ -1,4 +1,4 @@
-{{template "head" "Status"}}
+{{if .PR}}{{template "head" .PR.ID}}{{else}}{{template "head" "Status"}}{{end}}
 <header>
   <h1>waterboy</h1>
   <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
@@ -6,26 +6,63 @@
   <button id="run" {{if .Running}}disabled{{end}}>Run now</button>
   <nav><a href="/logs">Logs</a></nav>
 </header>
-{{with .LastError}}<p class="err">Last run failed: {{.}}</p>{{end}}
-{{if not .Reviews}}<p class="muted">Reviews are disabled (review.disabled).</p>{{end}}
-{{with .RuntimeError}}<p class="err">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
-<table>
-  <thead><tr><th>PR</th><th>Title</th><th>Health</th><th>Review</th><th>Last error</th><th>Worktree</th></tr></thead>
-  <tbody>
+<div class="cols">
+<aside>
+  {{$sel := ""}}{{with .PR}}{{$sel = .ID}}{{end}}
   {{range .PRs}}
+    <a href="/prs/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} class="sel"{{end}}>
+      <div class="row"><span class="dot {{.Health}}" title="{{.Health}}"></span><strong>{{.ID}}</strong><span class="review">{{template "review" .Review}}</span></div>
+      <div class="title">{{.Title}}</div>
+    </a>
+  {{else}}
+    <p class="muted" style="padding: 0 1rem">No PRs tracked.</p>
+  {{end}}
+</aside>
+<main>
+{{with .LastError}}<p class="err notice">Last run failed: {{.}}</p>{{end}}
+{{if not .Reviews}}<p class="muted notice">Reviews are disabled (review.disabled).</p>{{end}}
+{{with .RuntimeError}}<p class="err notice">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
+{{with .PR}}
+<h2>{{.Title}}</h2>
+<div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span></div>
+<dl>
+  <dt>Branch</dt><dd><code>{{.HeadRef}}</code></dd>
+  <dt>Head SHA</dt><dd><code>{{.HeadSHA}}</code></dd>
+  <dt>Synced SHA</dt><dd><code>{{or .SyncedSHA "—"}}</code></dd>
+  <dt>Worktree</dt><dd><code>{{.Worktree}}</code></dd>
+  <dt>Created worktree</dt><dd>{{.CreatedWorktree}}</dd>
+  <dt>Created branch</dt><dd>{{.CreatedBranch}}</dd>
+  <dt>Tracked since</dt><dd>{{when .TrackedAt}}</dd>
+  <dt>Last seen activity</dt><dd>{{when .LastSeenAt}}</dd>
+  <dt>Conflict head</dt><dd><code>{{or .ConflictHeadSHA "—"}}</code></dd>
+  <dt>Last error</dt><dd class="err">{{or .LastError "—"}}</dd>
+</dl>
+<h3>Reviews {{with .Review.State}}<span class="health {{.}}">{{.}}</span>{{end}}</h3>
+<table>
+  <thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th>Finished</th><th>Error</th></tr></thead>
+  <tbody>
+  {{$pr := .}}
+  {{range .Review.Runs}}
     <tr>
-      <td class="nowrap"><a href="/prs/{{.Repo}}/{{.Number}}">{{.ID}}</a> <a href="{{.URL}}" title="Open on GitHub">↗</a></td>
-      <td>{{.Title}}</td>
-      <td><span class="health {{.Health}}">{{.Health}}</span></td>
-      <td>{{template "review" .Review}}</td>
-      <td class="err">{{.LastError}}</td>
-      <td><code>{{.Worktree}}</code></td>
+      <td class="nowrap"><code>{{.ID}}</code><br><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}/log">log</a> · <a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}/out/">out/</a></td>
+      <td>{{.Job.Reason}}</td>
+      <td class="nowrap"><code>{{printf "%.12s" .Job.PR.HeadSHA}}</code></td>
+      <td><span class="health {{.Status}}">{{.Status}}</span></td>
+      <td>{{if ne .Status "running"}}{{.ExitCode}}{{end}}</td>
+      <td class="nowrap">{{when .Started}}</td>
+      <td class="nowrap">{{when .Finished}}</td>
+      <td class="err">{{.Error}}</td>
     </tr>
   {{else}}
-    <tr><td colspan="6" class="muted">No PRs tracked.</td></tr>
+    <tr><td colspan="8" class="muted">No reviews yet.</td></tr>
   {{end}}
   </tbody>
 </table>
+{{else}}
+<p class="muted">{{if .PRs}}Select a PR on the left.{{end}}</p>
+{{end}}
+</main>
+</div>
 <script>
   document.getElementById("run").onclick = async (e) => {
     e.target.disabled = true;

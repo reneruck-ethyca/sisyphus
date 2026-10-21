@@ -6,36 +6,53 @@
 {{if ne . "Logs"}}<meta http-equiv="refresh" content="15">{{end}}
 <title>{{.}} · waterboy</title>
 <style>
-  :root { color-scheme: light dark; --muted: light-dark(#666, #999); --line: light-dark(#ddd, #333); }
-  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
-  a { color: light-dark(#0b57d0, #8ab4f8); }
-  header { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; }
-  h1 { font-size: 1.3rem; margin: 0; }
+  :root { color-scheme: light dark;
+    --bg: light-dark(#faf9f5, #262624); --side: light-dark(#f0eee6, #1f1e1d); --fg: light-dark(#3d3929, #f0eee6);
+    --muted: light-dark(#83827d, #a6a39a); --line: light-dark(#e3dfd2, #3e3d39); --hover: light-dark(#e8e5da, #30302e);
+    --accent: light-dark(#c15f3c, #d97757); --code: light-dark(#f0eee6, #30302e);
+    --ok: light-dark(#4f7a3a, #8fb573); --info: light-dark(#5b6f8a, #9db3cf); --warn: light-dark(#a8661a, #e0a458); --bad: light-dark(#b3403a, #e5847b); }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  a { color: var(--accent); }
   .muted { color: var(--muted); }
   .nowrap { white-space: nowrap; }
-  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  .err { color: var(--bad); }
+  body > header { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; padding: .75rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--side); }
+  h1 { font-size: 1.1rem; margin: 0; color: var(--accent); }
+  h2 { font-size: 1.15rem; margin: 0 0 .25rem; }
+  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
+  nav { margin-left: auto; display: flex; gap: 1rem; }
+  button { font: inherit; padding: .2rem .8rem; border-radius: 6px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .cols { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; min-height: calc(100vh - 3.2rem); }
+  aside { background: var(--side); border-right: 1px solid var(--line); overflow-y: auto; }
+  aside a { display: block; padding: .6rem 1rem; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; border-left: 3px solid transparent; }
+  aside a:hover { background: var(--hover); }
+  aside a.sel { background: var(--hover); border-left-color: var(--accent); }
+  aside .row { display: flex; gap: .5rem; align-items: center; }
+  aside .title { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  aside .review { margin-left: auto; }
+  main { padding: 1.25rem 1.5rem; min-width: 0; overflow-x: auto; }
+  .notice { margin: 0 0 .5rem; }
+  .dot { width: .55rem; height: .55rem; border-radius: 50%; flex: none; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.error { background: var(--warn); } .dot.conflict { background: var(--bad); }
+  table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-weight: 600; color: var(--muted); }
-  code { font: 12px ui-monospace, monospace; word-break: break-all; }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.5rem; margin-top: 1rem; }
+  th { font-weight: 600; color: var(--muted); font-size: 13px; }
+  code { font: 12px ui-monospace, monospace; word-break: break-all; background: var(--code); padding: 0 .25rem; border-radius: 4px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.5rem; margin: 1rem 0 0; }
   dt { color: var(--muted); }
   dd { margin: 0; }
-  .health { display: inline-block; padding: 0 .5rem; border-radius: 1rem; font-size: 12px; font-weight: 600; }
-  .ok       { background: light-dark(#e6f4ea, #1e3a29); color: light-dark(#137333, #81c995); }
-  .pending  { background: light-dark(#e8f0fe, #1c2b45); color: light-dark(#1a56c4, #8ab4f8); }
-  .error    { background: light-dark(#fef7e0, #3d3214); color: light-dark(#a05a00, #fdd663); }
-  .conflict { background: light-dark(#fce8e6, #3f1f1d); color: light-dark(#c5221f, #f28b82); }
-  .err { color: light-dark(#c5221f, #f28b82); }
-  h2 { font-size: 1.05rem; margin-top: 2rem; }
-  .running, .queued, .succeeded { background: light-dark(#e8f0fe, #1c2b45); color: light-dark(#1a56c4, #8ab4f8); }
-  .succeeded { background: light-dark(#e6f4ea, #1e3a29); color: light-dark(#137333, #81c995); }
-  .failed, .timeout, .lost { background: light-dark(#fce8e6, #3f1f1d); color: light-dark(#c5221f, #f28b82); }
-  .cancelled { background: light-dark(#f1f3f4, #2d2e30); color: var(--muted); }
-  nav { margin-left: auto; display: flex; gap: 1rem; }
-  #log { font: 12px/1.6 ui-monospace, monospace; margin-top: 1rem; }
+  .health { display: inline-block; padding: 0 .5rem; border-radius: 1rem; font-size: 12px; font-weight: 600; background: var(--code); color: var(--muted); }
+  .ok, .succeeded { color: var(--ok); }
+  .pending, .running, .queued { color: var(--info); }
+  .error { color: var(--warn); }
+  .conflict, .failed, .timeout, .lost { color: var(--bad); }
+  #log { font: 12px/1.6 ui-monospace, monospace; padding: 1rem 1.25rem; }
   #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
-  .WARN { color: light-dark(#a05a00, #fdd663); }
-  .ERROR { color: light-dark(#c5221f, #f28b82); }
+  .WARN { color: var(--warn); }
+  .ERROR { color: var(--bad); }
+  @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; } }
 </style>
 </head>
 <body>

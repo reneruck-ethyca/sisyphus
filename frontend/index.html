@@ -4,37 +4,49 @@
 <meta charset="utf-8">
 <title>waterboy</title>
 <style>
-  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #fff; --line: #e5e5ea; --hover: #f5f5f7;
-          --ok: #248a3d; --pending: #b25000; --error: #d70015; --conflict: #8944ab; }
+  :root { color-scheme: light dark; --bg: #faf9f5; --side: #f0eee6; --fg: #3d3929; --muted: #83827d; --line: #e3dfd2; --hover: #e8e5da;
+          --accent: #c15f3c; --ok: #4f7a3a; --pending: #5b6f8a; --error: #a8661a; --conflict: #b3403a; }
   @media (prefers-color-scheme: dark) {
-    :root { --fg: #f5f5f7; --muted: #98989d; --bg: #1c1c1e; --line: #38383a; --hover: #2c2c2e;
-            --ok: #30d158; --pending: #ff9f0a; --error: #ff453a; --conflict: #bf5af2; }
+    :root { --bg: #262624; --side: #1f1e1d; --fg: #f0eee6; --muted: #a6a39a; --line: #3e3d39; --hover: #30302e;
+            --accent: #d97757; --ok: #8fb573; --pending: #9db3cf; --error: #e0a458; --conflict: #e5847b; }
   }
-  body { margin: 0; padding: 20px 24px; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
-  h1 { font-size: 17px; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  #app { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(220px, 300px) 1fr; height: 100vh; }
+  #app > header { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; padding: 10px 16px; background: var(--side); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0; color: var(--accent); }
+  h2 { font-size: 16px; margin: 0 0 6px; }
+  h3 { font-size: 14px; margin: 24px 0 8px; }
+  aside { background: var(--side); border-right: 1px solid var(--line); overflow-y: auto; }
+  aside .pr { padding: 8px 12px; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; cursor: pointer; }
+  aside .pr:hover { background: var(--hover); }
+  aside .pr.sel { background: var(--hover); border-left-color: var(--accent); }
+  aside .row { display: flex; gap: 6px; align-items: center; }
+  aside .row :last-child { margin-left: auto; }
+  aside .title { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.error { background: var(--error); } .dot.conflict { background: var(--conflict); }
+  #main { padding: 16px 20px; overflow-y: auto; min-width: 0; }
   .muted { color: var(--muted); }
-  .err { color: var(--error); margin: 0 0 12px; }
-  button { margin-left: auto; font: inherit; padding: 4px 12px; }
+  .err { color: var(--conflict); margin: 0 0 12px; }
+  button { font: inherit; padding: 3px 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #run { margin-left: auto; }
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; font-weight: 500; color: var(--muted); }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
-  tbody tr { cursor: pointer; }
-  tbody tr:hover { background: var(--hover); }
   .health { font-weight: 600; }
   .ok { color: var(--ok); } .pending { color: var(--pending); } .error { color: var(--error); } .conflict { color: var(--conflict); }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
   dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
-  a { color: inherit; }
-  nav { margin-left: 12px; }
+  a { color: var(--accent); }
   #log { font: 12px/1.6 ui-monospace, monospace; }
   #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
-  .WARN { color: var(--pending); } .ERROR { color: var(--error); }
-  h2 { font-size: 14px; margin: 24px 0 8px; }
+  .WARN { color: var(--error); } .ERROR { color: var(--conflict); }
   .running, .queued { color: var(--pending); } .succeeded { color: var(--ok); }
-  .failed, .timeout, .lost { color: var(--error); } .cancelled { color: var(--muted); }
-  pre { font: 12px/1.5 ui-monospace, monospace; background: var(--hover); padding: 8px; white-space: pre-wrap; word-break: break-all; }
-  button.link { margin: 0; padding: 0; border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; }
+  .failed, .timeout, .lost { color: var(--conflict); } .cancelled { color: var(--muted); }
+  pre { font: 12px/1.5 ui-monospace, monospace; background: var(--side); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
+  button.link { margin: 0; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
 </style>
 <script type="module">
   import { Call, Events, Browser } from "/wails/runtime.js";
@@ -47,38 +59,43 @@
   const LOG_MAX = 1000;
 
   async function render() {
-    if (location.hash === "#logs") {
-      app.innerHTML = logsView();
-      return scrollTo(0, document.body.scrollHeight);
-    }
-    const id = decodeURIComponent(location.hash.slice(1));
-    app.innerHTML = id ? await detail(id) : overview();
+    const id = location.hash === "#logs" ? "" : decodeURIComponent(location.hash.slice(1));
+    const main = location.hash === "#logs" ? logsView() : id ? await detail(id) : placeholder();
+    app.innerHTML = header() + sidebar(id) + `<section id="main">${notices()}${main}</section>`;
+    if (location.hash === "#logs") scrollMain();
   }
 
-  function overview() {
+  const scrollMain = () => { const m = document.getElementById("main"); m.scrollTop = m.scrollHeight; };
+
+  function header() {
     const s = status;
-    const rows = s.prs.map(p => `<tr data-id="${esc(p.id)}">
-        <td class="health ${p.health}">${p.health}</td><td>${reviewCell(p.review)}</td><td>${esc(p.id)}</td><td>${esc(p.title)}</td>
-        <td class="muted">${esc(p.head_ref)}</td><td class="muted">${time(p.last_seen_at)}</td></tr>`).join("");
     return `<header><h1>waterboy</h1>
         <span class="muted">${esc(s.user)} · ${esc(s.org)} · every ${esc(s.interval)} ·
         ${s.running ? "running…" : "last run " + time(s.last_run)}</span>
-        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><nav><a href="#logs">Logs</a></nav></header>
-      ${s.last_error ? `<p class="err">${esc(s.last_error)}</p>` : ""}
-      ${s.reviews ? "" : `<p class="muted">Reviews are disabled (review.disabled).</p>`}
-      ${s.runtime_error ? `<p class="err">Reviews are waiting for the container runtime: ${esc(s.runtime_error)}</p>` : ""}
-      ${s.prs.length ? `<table><thead><tr><th>Health</th><th>Review</th><th>PR</th><th>Title</th><th>Branch</th><th>Last seen</th></tr></thead>
-        <tbody>${rows}</tbody></table>` : `<p class="muted">No PRs tracked.</p>`}`;
+        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><a href="#logs">Logs</a></header>`;
   }
+
+  const sidebar = sel => `<aside>${status.prs.map(p => `<div class="pr${p.id === sel ? " sel" : ""}" data-id="${esc(p.id)}">
+      <div class="row"><span class="dot ${esc(p.health)}" title="${esc(p.health)}"></span><strong>${esc(p.id)}</strong>${reviewCell(p.review)}</div>
+      <div class="title" title="${esc(p.title)}">${esc(p.title)}</div></div>`).join("")
+    || `<p class="muted" style="padding: 0 12px">No PRs tracked.</p>`}</aside>`;
+
+  const notices = () => {
+    const s = status;
+    return (s.last_error ? `<p class="err">${esc(s.last_error)}</p>` : "")
+      + (s.reviews ? "" : `<p class="muted">Reviews are disabled (review.disabled).</p>`)
+      + (s.runtime_error ? `<p class="err">Reviews are waiting for the container runtime: ${esc(s.runtime_error)}</p>` : "");
+  };
+
+  const placeholder = () => status.prs.length ? `<p class="muted">Select a PR on the left.</p>` : "";
 
   const reviewCell = r => r.state ? `<span class="${esc(r.state)}">${esc(r.state)}</span>`
     : r.runs?.length ? `<span class="${esc(r.runs[0].status)}">${esc(r.runs[0].status)}</span>` : `<span class="muted">—</span>`;
 
-  const logRow = e => `<div class="${esc(e.level)}"><span class="muted">${new Date(e.time).toLocaleTimeString([], {hour12: false})}</span>
-      ${esc(e.level)} ${esc(e.msg)} <span class="muted">${esc(e.attrs)}</span></div>`;
+  const logRow = e => `<div class="${esc(e.level)}"><span class="muted">${new Date(e.time).toLocaleTimeString([], {hour12: false})}</span> ${esc(e.level)} ${esc(e.msg)} <span class="muted">${esc(e.attrs)}</span></div>`;
 
   function logsView() {
-    return `<p><a href="#">← All PRs</a></p><header><h1>Logs</h1></header><div id="log">${logs.map(logRow).join("")}</div>`;
+    return `<h2>Logs</h2><div id="log">${logs.map(logRow).join("")}</div>`;
   }
 
   function addLog(e) {
@@ -87,18 +104,17 @@
     if (logs.length > LOG_MAX) logs.shift();
     const box = document.getElementById("log");
     if (!box) return;
-    const follow = innerHeight + scrollY >= document.body.scrollHeight - 20;
+    const m = document.getElementById("main"), follow = m.scrollTop + m.clientHeight >= m.scrollHeight - 20;
     box.insertAdjacentHTML("beforeend", logRow(e));
     if (box.childElementCount > LOG_MAX) box.firstElementChild.remove();
-    if (follow) scrollTo(0, document.body.scrollHeight);
+    if (follow) scrollMain();
   }
 
   async function detail(id) {
     let p;
-    try { p = await call("PR", id); } catch (e) { return `<p><a href="#">← All PRs</a></p><p class="err">${esc(e.message ?? e)}</p>`; }
+    try { p = await call("PR", id); } catch (e) { return `<p class="err">${esc(e.message ?? e)}</p>`; }
     const field = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
-    return `<p><a href="#">← All PRs</a></p>
-      <header><h1>${esc(p.title)}</h1><span class="health ${p.health}">${p.health}</span></header>
+    return `<h2>${esc(p.title)} <span class="health ${p.health}">${p.health}</span></h2>
       ${p.last_error ? `<p class="err">${esc(p.last_error)}</p>` : ""}
       <dl>${[
         field("PR", `<a href="${esc(p.url)}" data-external>${esc(p.id)}</a>`),
@@ -109,7 +125,7 @@
         field("Tracked since", time(p.tracked_at)),
         field("Last seen", time(p.last_seen_at)),
       ].join("")}</dl>
-      <h2>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}</h2>
+      <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}</h3>
       ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th></th></tr></thead><tbody>
         ${p.review.runs.map(r => `<tr>
           <td>${esc(r.id)}</td><td>${esc(r.job.reason)}</td><td class="muted">${esc(r.job.pr.head_sha.slice(0, 12))}</td>
@@ -131,7 +147,7 @@
     }
     const a = e.target.closest("a[data-external]");
     if (a) { e.preventDefault(); return Browser.OpenURL(a.href); }
-    const row = e.target.closest("tr[data-id]");
+    const row = e.target.closest("[data-id]");
     if (row) location.hash = encodeURIComponent(row.dataset.id);
   });
   addEventListener("hashchange", render);
@@ -145,5 +161,5 @@
   render();
 </script>
 </head>
-<body><main id="app"></main></body>
+<body><div id="app"></div></body>
 </html>

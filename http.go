@@ -72,7 +72,7 @@ func newHandler(svc *app.Service) http.Handler {
 		render(w, "logs.html", svc.Logs())
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "index.html", svc.Status())
+		render(w, "index.html", dashboard{Status: svc.Status()})
 	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}", func(w http.ResponseWriter, r *http.Request) {
 		pr, ok := svc.PR(prID(r))
@@ -80,9 +80,15 @@ func newHandler(svc *app.Service) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		render(w, "pr.html", pr)
+		render(w, "index.html", dashboard{Status: svc.Status(), PR: &pr})
 	})
 	return localOnly(http.NewCrossOriginProtection().Handler(mux))
+}
+
+// dashboard is the two-column page: every PR on the left, PR (if any) on the right.
+type dashboard struct {
+	app.Status
+	PR *app.PRView
 }
 
 // streamLogs sends the backlog, then every new entry, as server-sent events
