@@ -14,8 +14,15 @@ type Fake struct {
 	mu          sync.Mutex
 	next        int
 	cs          map[string]*fakeContainer
-	Unavailable error  // returned by Available when set
-	Started     []Spec // every Spec passed to Start
+	Unavailable error // returned by Available when set
+	started     []Spec
+}
+
+// Started returns every Spec passed to Start, in order.
+func (f *Fake) Started() []Spec {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Spec(nil), f.started...)
 }
 
 type fakeContainer struct {
@@ -30,7 +37,7 @@ func (f *Fake) Available(context.Context) error { return f.Unavailable }
 func (f *Fake) Start(_ context.Context, s Spec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Started = append(f.Started, s)
+	f.started = append(f.started, s)
 	return f.add(s.Labels), nil
 }
 

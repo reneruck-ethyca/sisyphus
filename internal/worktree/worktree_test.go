@@ -137,3 +137,28 @@ func TestRunTimeout(t *testing.T) {
 		t.Fatalf("err=%v after %v", err, time.Since(start))
 	}
 }
+
+func TestResetAndCommonDir(t *testing.T) {
+	ctx := context.Background()
+	_, clone := gittest.Setup(t)
+	head := gittest.Commit(t, clone, ".gitignore", "deps/")
+	gittest.Commit(t, clone, "b.txt", "reviewer commit")
+	os.WriteFile(filepath.Join(clone, "a.txt"), []byte("edited"), 0o644)
+	os.WriteFile(filepath.Join(clone, "scratch.txt"), []byte("x"), 0o644)
+	os.Mkdir(filepath.Join(clone, "deps"), 0o755)
+	os.WriteFile(filepath.Join(clone, "deps", "lib"), []byte("x"), 0o644)
+
+	if err := Reset(ctx, clone, head); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := HeadSHA(ctx, clone); got != head {
+		t.Fatalf("HEAD %s, want %s", got, head)
+	}
+	if st := gittest.Git(t, clone, "status", "--porcelain", "--ignored"); st != "!! deps/" {
+		t.Fatalf("status after reset: %q", st)
+	}
+	dir, err := CommonDir(ctx, clone)
+	if want, _ := filepath.EvalSymlinks(filepath.Join(clone, ".git")); err != nil || dir != want {
+		t.Fatalf("CommonDir = %q, %v; want %q", dir, err, want)
+	}
+}

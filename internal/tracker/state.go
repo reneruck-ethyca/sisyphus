@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/jsonfile"
 )
 
 type Tracked struct {
@@ -54,26 +54,5 @@ func LoadState(path string) (*State, error) {
 	return s, nil
 }
 
-// Save writes atomically (temp file + rename) so a crash never leaves half a file.
-func (s *State) Save(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
-}
+// Save writes atomically so a crash never leaves half a file.
+func (s *State) Save(path string) error { return jsonfile.Save(path, s) }

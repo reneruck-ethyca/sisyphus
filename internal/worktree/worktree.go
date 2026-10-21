@@ -139,3 +139,19 @@ func Sync(ctx context.Context, dir, branch, syncedSHA string) (string, error) {
 		return "", &ConflictError{Reason: "diverged"}
 	}
 }
+
+// CommonDir returns the absolute path of the clone's shared .git directory,
+// which a worktree's .git file points into.
+func CommonDir(ctx context.Context, dir string) (string, error) {
+	return proc.Run(ctx, dir, "git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+}
+
+// Reset puts dir back at sha: drops tracked changes and commits made on top,
+// and deletes untracked files. Ignored files (installed deps, copied config) stay.
+func Reset(ctx context.Context, dir, sha string) error {
+	if _, err := proc.Run(ctx, dir, "git", "reset", "--hard", "--quiet", sha); err != nil {
+		return err
+	}
+	_, err := proc.Run(ctx, dir, "git", "clean", "-fd", "--quiet")
+	return err
+}
