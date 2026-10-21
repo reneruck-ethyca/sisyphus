@@ -1,9 +1,10 @@
 package tracker
 
 import (
-	"github.com/reneruck/waterboy/internal/github"
 	"testing"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/github"
 )
 
 func at(m int) time.Time { return time.Date(2026, 10, 20, 12, m, 0, 0, time.UTC) }
@@ -62,7 +63,7 @@ func TestNewReplies(t *testing.T) {
 	check(time.Time{}, 3, at(8))
 }
 
-// github.Review #3: search lag must not drop a github.PR the payload still shows as ours.
+// Review #3: search lag must not drop a PR the payload still shows as ours.
 func TestStillMine(t *testing.T) {
 	if !stillMine(github.PR{RequestedReviewers: []string{"me"}}, "me") {
 		t.Error("requested reviewer")

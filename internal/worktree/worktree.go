@@ -3,8 +3,9 @@ package worktree
 import (
 	"context"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/proc"
 	"strings"
+
+	"github.com/reneruck/waterboy/internal/proc"
 )
 
 // ConflictError means a worktree can't be synced without a human (or hook).

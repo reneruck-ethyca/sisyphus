@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/worktree"
 	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/worktree"
 )
 
 const maxHookRuns = 3
@@ -36,7 +37,7 @@ func runHook(ctx context.Context, command string, timeout time.Duration, dir str
 	return nil
 }
 
-// syncWithRetry runs sync; on a worktree.ConflictError it runs onConflict (if any) and
+// syncWithRetry runs sync; on a ConflictError it runs onConflict (if any) and
 // retries, running the hook at most maxRuns times. Other errors return at once.
 func syncWithRetry(sync func() error, onConflict func(reason string) error, maxRuns int) error {
 	for runs := 0; ; runs++ {

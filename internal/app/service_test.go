@@ -3,11 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/reneruck/waterboy/internal/github"
 	"github.com/reneruck/waterboy/internal/testkit"
 	"github.com/reneruck/waterboy/internal/tracker"
-	"testing"
-	"time"
 )
 
 func TestHealth(t *testing.T) {
@@ -51,10 +52,10 @@ func TestServiceSnapshot(t *testing.T) {
 		t.Fatalf("summary = %q", st.Summary())
 	}
 	if pr, ok := s.PR(refB.Key()); !ok || pr.Health != "pending" {
-		t.Fatalf("github.PR(b) = %+v, %v", pr, ok)
+		t.Fatalf("PR(b) = %+v, %v", pr, ok)
 	}
 	if _, ok := s.PR("ethyca/nope#9"); ok {
-		t.Fatal("unknown github.PR found")
+		t.Fatal("unknown PR found")
 	}
 
 	// Snapshots are copies: mutating tracker state doesn't leak into them.

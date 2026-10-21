@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/proc"
-	"github.com/reneruck/waterboy/internal/worktree"
 	"log/slog"
 	"maps"
 	"os"
@@ -16,6 +12,11 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/proc"
+	"github.com/reneruck/waterboy/internal/worktree"
 )
 
 type Tracker struct {
@@ -32,12 +33,12 @@ func New(cfg config.Config, gh github.Client, st *State) *Tracker {
 
 // onTracked is where the next iteration launches a review. Logging only for now.
 func onTracked(tr *Tracked) {
-	slog.Info("tracking github.PR", "pr", tr.Key(), "title", tr.Title, "worktree", tr.Worktree, "created", tr.CreatedWorktree)
+	slog.Info("tracking PR", "pr", tr.Key(), "title", tr.Title, "worktree", tr.Worktree, "created", tr.CreatedWorktree)
 }
 
 // onUpdated is where the next iteration re-triggers a review. Logging only for now.
 func onUpdated(tr *Tracked, newCommits bool, replies int) {
-	slog.Info("github.PR updated", "pr", tr.Key(), "new_commits", newCommits, "new_replies", replies)
+	slog.Info("PR updated", "pr", tr.Key(), "new_commits", newCommits, "new_replies", replies)
 }
 
 // Snapshot copies the tracked PRs, sorted by ID. Call it on the ticking goroutine
@@ -64,7 +65,7 @@ func (t *Tracker) repoDir(repo string) string { return filepath.Join(t.cfg.Repos
 func (t *Tracker) skipOnce(key, why string) {
 	if !t.skipped[key+why] {
 		t.skipped[key+why] = true
-		slog.Info("skipping github.PR", "pr", key, "reason", why)
+		slog.Info("skipping PR", "pr", key, "reason", why)
 	}
 }
 
@@ -95,7 +96,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 	key := ref.Key()
 	pr, err := t.gh.PR(ctx, ref)
 	if err != nil {
-		slog.Warn("fetching github.PR", "pr", key, "err", err)
+		slog.Warn("fetching PR", "pr", key, "err", err)
 		return false
 	}
 	if dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "" {
@@ -158,7 +159,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 	pr, err := t.gh.PR(ctx, tr.PRRef)
 	if err != nil {
 		tr.LastError = err.Error() // never drop on a fetch error
-		slog.Warn("fetching github.PR", "pr", key, "err", err)
+		slog.Warn("fetching PR", "pr", key, "err", err)
 		return
 	}
 	isCandidate = isCandidate || stillMine(pr, t.cfg.User)
@@ -171,7 +172,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 			}
 		}
 		delete(t.state.PRs, key)
-		slog.Info("dropped github.PR", "pr", key, "reason", reason, "removed_worktree", tr.CreatedWorktree)
+		slog.Info("dropped PR", "pr", key, "reason", reason, "removed_worktree", tr.CreatedWorktree)
 		return
 	}
 	tr.LastError = ""
@@ -187,7 +188,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 }
 
 // forgetMissing handles a worktree deleted outside waterboy: drop the entry (the
-// next tick re-tracks the github.PR if it's still eligible) and delete our branch, but
+// next tick re-tracks the PR if it's still eligible) and delete our branch, but
 // only if it holds nothing unpushed (`git branch -d` refuses otherwise).
 func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 	repoDir := t.repoDir(tr.Repo)
@@ -200,12 +201,12 @@ func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 		}
 	}
 	delete(t.state.PRs, tr.Key())
-	slog.Info("worktree deleted outside waterboy, forgot github.PR", "pr", tr.Key(), "worktree", tr.Worktree)
+	slog.Info("worktree deleted outside waterboy, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
 }
 
 func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
 	var onConflict func(string) error
-	// Hooks proc.Run at most maxHookRuns times per github.PR head; a persistent conflict
+	// Hooks run at most maxHookRuns times per PR head; a persistent conflict
 	// waits for a new push instead of re-running the hook every tick.
 	if hook := t.cfg.Hooks["on_conflict"]; hook != "" && tr.ConflictHeadSHA != tr.HeadSHA {
 		onConflict = func(reason string) error {

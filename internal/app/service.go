@@ -4,12 +4,13 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/tracker"
 	"log/slog"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/tracker"
 )
 
 // Status is a point-in-time snapshot of waterboy for UIs and APIs.

@@ -6,13 +6,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+
 	"github.com/reneruck/waterboy/internal/app"
 	"github.com/reneruck/waterboy/internal/config"
 	"github.com/reneruck/waterboy/internal/github"
 	"github.com/reneruck/waterboy/internal/tracker"
-	"log/slog"
-	"os"
-	"os/exec"
 )
 
 func checkTools(names ...string) error {

@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/proc"
 	"sort"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/proc"
 )
 
 // PRRef identifies a PR. Repo is "owner/name".

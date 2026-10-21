@@ -3,15 +3,16 @@ package tracker
 import (
 	"context"
 	"errors"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/gittest"
-	"github.com/reneruck/waterboy/internal/worktree"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/gittest"
+	"github.com/reneruck/waterboy/internal/worktree"
 )
 
 func newTestTracker(t *testing.T, gh github.Client, tracked ...*Tracked) *Tracker {
@@ -105,7 +106,7 @@ func TestTickKeepsRequestedPRMissingFromSearch(t *testing.T) {
 	}
 }
 
-// github.Review #4: a persistent conflict runs the hook once per github.PR head, not every tick.
+// Review #4: a persistent conflict runs the hook once per PR head, not every tick.
 func TestSyncHookOncePerHead(t *testing.T) {
 	_, clone := gittest.Setup(t)
 	os.WriteFile(filepath.Join(clone, "a.txt"), []byte("dirty"), 0o644)
@@ -128,7 +129,7 @@ func TestSyncHookOncePerHead(t *testing.T) {
 }
 
 // A worktree the user deleted by hand is forgotten (and our branch removed if it
-// holds nothing unpushed) instead of leaving the github.PR stuck; discover re-tracks it.
+// holds nothing unpushed) instead of leaving the PR stuck; discover re-tracks it.
 func TestTickForgetsManuallyDeletedWorktree(t *testing.T) {
 	_, clone := gittest.Setup(t)
 	gh := &github.Fake{}

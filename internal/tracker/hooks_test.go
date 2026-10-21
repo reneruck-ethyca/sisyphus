@@ -3,11 +3,12 @@ package tracker
 import (
 	"context"
 	"errors"
-	"github.com/reneruck/waterboy/internal/worktree"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/worktree"
 )
 
 func TestSyncWithRetry(t *testing.T) {

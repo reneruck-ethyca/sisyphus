@@ -1,13 +1,14 @@
 package tracker
 
 import (
-	"github.com/reneruck/waterboy/internal/github"
 	"sort"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/github"
 )
 
 // latestStates returns each human reviewer's effective review state, the way
-// github.Client computes it: COMMENTED and PENDING never override an earlier verdict.
+// GitHub computes it: COMMENTED and PENDING never override an earlier verdict.
 func latestStates(reviews []github.Review) map[string]string {
 	rs := append([]github.Review(nil), reviews...)
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].SubmittedAt.Before(rs[j].SubmittedAt) })
@@ -21,7 +22,7 @@ func latestStates(reviews []github.Review) map[string]string {
 	return states
 }
 
-// dropReason says why a github.PR should not be (or no longer be) tracked; "" = keep.
+// dropReason says why a PR should not be (or no longer be) tracked; "" = keep.
 func dropReason(pr github.PR, me string, isCandidate, includeDrafts bool) string {
 	if pr.Merged {
 		return "merged"
@@ -54,7 +55,7 @@ func dropReason(pr github.PR, me string, isCandidate, includeDrafts bool) string
 	return ""
 }
 
-// stillMine reports whether the github.PR payload itself says it awaits me: I'm a
+// stillMine reports whether the PR payload itself says it awaits me: I'm a
 // requested reviewer or have reviewed. Guards against search lag/incomplete results.
 func stillMine(pr github.PR, me string) bool {
 	for _, u := range pr.RequestedReviewers {
@@ -71,7 +72,7 @@ func stillMine(pr github.PR, me string) bool {
 }
 
 // newReplies counts human comments and review bodies not by me that are newer
-// than since. latest is the newest timestamp seen on the github.PR (or since), used to
+// than since. latest is the newest timestamp seen on the PR (or since), used to
 // advance the cursor.
 func newReplies(pr github.PR, me string, since time.Time) (count int, latest time.Time) {
 	latest = since

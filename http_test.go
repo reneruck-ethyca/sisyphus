@@ -1,19 +1,20 @@
 package main
 
 import (
-	"github.com/reneruck/waterboy/internal/github"
 	"bufio"
 	"context"
 	"encoding/json"
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/testkit"
-	"github.com/reneruck/waterboy/internal/tracker"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/testkit"
+	"github.com/reneruck/waterboy/internal/tracker"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer) {

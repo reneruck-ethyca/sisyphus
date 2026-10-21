@@ -1,11 +1,12 @@
 package tracker
 
 import (
-	"github.com/reneruck/waterboy/internal/github"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/reneruck/waterboy/internal/github"
 )
 
 func TestStateRoundTrip(t *testing.T) {

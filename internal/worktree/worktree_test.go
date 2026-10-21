@@ -3,12 +3,13 @@ package worktree
 import (
 	"context"
 	"errors"
-	"github.com/reneruck/waterboy/internal/gittest"
-	"github.com/reneruck/waterboy/internal/proc"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/gittest"
+	"github.com/reneruck/waterboy/internal/proc"
 )
 
 func wantConflict(t *testing.T, err error, reason string) {

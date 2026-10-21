@@ -1,14 +1,15 @@
 package main
 
 import (
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/testkit"
-	"github.com/reneruck/waterboy/internal/tracker"
 	"io"
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/testkit"
+	"github.com/reneruck/waterboy/internal/tracker"
 )
 
 func TestUI(t *testing.T) {
@@ -17,7 +18,7 @@ func TestUI(t *testing.T) {
 	ui := &UI{app.NewService(cfg, tr, logs)}
 
 	if st := ui.Status(); len(st.PRs) != 1 || st.PRs[0].ID != testkit.RefA.Key() {
-		t.Fatalf("app.Status() = %+v", st)
+		t.Fatalf("Status() = %+v", st)
 	}
 	if pr, err := ui.PR(testkit.RefA.Key()); err != nil || pr.Health != "pending" {
 		t.Fatalf("PR(a) = %+v, %v", pr, err)

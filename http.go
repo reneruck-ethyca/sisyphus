@@ -5,12 +5,13 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/app"
 	"html/template"
 	"log/slog"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/reneruck/waterboy/internal/app"
 )
 
 //go:embed web/*.html

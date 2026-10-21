@@ -3,12 +3,12 @@ package main
 import (
 	"embed"
 	"fmt"
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/config"
 	"io/fs"
 	"log/slog"
 	"os/exec"
 
+	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/config"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
