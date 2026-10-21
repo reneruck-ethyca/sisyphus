@@ -20,7 +20,7 @@ import (
 func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer) {
 	t.Helper()
 	cfg, tr := testkit.Tracker(t, &github.Fake{},
-		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x", PendingUpdates: true})
+		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x"})
 	logs := app.NewLogBuffer(10)
 	svc := app.NewService(cfg, tr, logs)
 	srv := httptest.NewServer(newHandler(svc))
@@ -46,7 +46,7 @@ func TestHTTPStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &st); code != 200 || err != nil {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
-	if st.User != "me" || len(st.PRs) != 1 || st.PRs[0].ID != testkit.RefA.Key() || st.PRs[0].Health != "pending" {
+	if st.User != "me" || len(st.PRs) != 1 || st.PRs[0].ID != testkit.RefA.Key() || st.PRs[0].Health != "ok" {
 		t.Fatalf("status = %+v", st)
 	}
 }
@@ -79,8 +79,8 @@ func TestHTTPRun(t *testing.T) {
 func TestHTTPPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{
-		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "1 tracked · 1 pending", "Last run never"},
-		"/prs/ethyca/a/1": {"ethyca/a#1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `class="health pending"`},
+		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "1 tracked", "Last run never"},
+		"/prs/ethyca/a/1": {"ethyca/a#1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `class="health ok"`},
 	} {
 		code, body := get(t, srv.URL+path)
 		if code != 200 {

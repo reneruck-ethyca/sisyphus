@@ -24,8 +24,10 @@ type Tracked struct {
 	TrackedAt       time.Time `json:"tracked_at"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	ConflictHeadSHA string    `json:"conflict_head_sha,omitempty"` // on_conflict already exhausted for this head
-	PendingUpdates  bool      `json:"pending_updates"`             // consumed by the (future) review launcher
-	LastError       string    `json:"last_error,omitempty"`
+	// What Events has been told: the head last announced, and replies seen since.
+	AnnouncedSHA       string `json:"announced_sha,omitempty"`
+	UnannouncedReplies int    `json:"unannounced_replies,omitempty"`
+	LastError          string `json:"last_error,omitempty"`
 }
 
 type State struct {

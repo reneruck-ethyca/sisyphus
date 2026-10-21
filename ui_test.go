@@ -13,14 +13,14 @@ import (
 )
 
 func TestUI(t *testing.T) {
-	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", PendingUpdates: true})
+	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x"})
 	logs := app.NewLogBuffer(10)
 	ui := &UI{app.NewService(cfg, tr, logs)}
 
 	if st := ui.Status(); len(st.PRs) != 1 || st.PRs[0].ID != testkit.RefA.Key() {
 		t.Fatalf("Status() = %+v", st)
 	}
-	if pr, err := ui.PR(testkit.RefA.Key()); err != nil || pr.Health != "pending" {
+	if pr, err := ui.PR(testkit.RefA.Key()); err != nil || pr.Health != "ok" {
 		t.Fatalf("PR(a) = %+v, %v", pr, err)
 	}
 	if _, err := ui.PR("ethyca/nope#1"); err == nil {
@@ -39,9 +39,9 @@ func TestUI(t *testing.T) {
 func TestTrayStatus(t *testing.T) {
 	at := time.Date(2026, 1, 1, 9, 5, 0, 0, time.Local)
 	for want, st := range map[string]app.Status{
-		"Running… · 0 tracked · 0 pending":       {Running: true},
-		"Last run 09:05 failed: boom":            {LastRun: at, LastError: "boom"},
-		"Last run 09:05 · 0 tracked · 0 pending": {LastRun: at},
+		"Running… · 0 tracked":        {Running: true},
+		"Last run 09:05 failed: boom": {LastRun: at, LastError: "boom"},
+		"Last run 09:05 · 0 tracked":  {LastRun: at},
 	} {
 		if got := trayStatus(st); got != want {
 			t.Errorf("trayStatus = %q, want %q", got, want)

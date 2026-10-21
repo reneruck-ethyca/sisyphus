@@ -25,20 +25,12 @@ type Tracker struct {
 	state   *State
 	skipped map[string]bool // log-once for forks / missing clones
 	OnSave  func()          // called after every state save, on the ticking goroutine
+	Events  Events          // defaults to a no-op
+	Locks   *Locks          // shared with whatever runs in worktrees
 }
 
 func New(cfg config.Config, gh github.Client, st *State) *Tracker {
-	return &Tracker{cfg: cfg, gh: gh, state: st, skipped: map[string]bool{}}
-}
-
-// onTracked is where the next iteration launches a review. Logging only for now.
-func onTracked(tr *Tracked) {
-	slog.Info("tracking PR", "pr", tr.Key(), "title", tr.Title, "worktree", tr.Worktree, "created", tr.CreatedWorktree)
-}
-
-// onUpdated is where the next iteration re-triggers a review. Logging only for now.
-func onUpdated(tr *Tracked, newCommits bool, replies int) {
-	slog.Info("PR updated", "pr", tr.Key(), "new_commits", newCommits, "new_replies", replies)
+	return &Tracker{cfg: cfg, gh: gh, state: st, skipped: map[string]bool{}, Events: nopEvents{}, Locks: &Locks{}}
 }
 
 // Snapshot copies the tracked PRs, sorted by ID. Call it on the ticking goroutine
@@ -141,11 +133,12 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 	}
 	t.state.PRs[key] = tr
 	t.save() // before anything else can fail: a created worktree must never be forgotten
-	onTracked(tr)
+	slog.Info("tracking PR", "pr", key, "title", tr.Title, "worktree", tr.Worktree, "created", tr.CreatedWorktree)
 	if tr.SyncedSHA != pr.HeadSHA {
 		t.sync(ctx, tr)
-		t.save()
 	}
+	t.announce(tr)
+	t.save()
 	return true
 }
 
@@ -153,7 +146,10 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 	key := tr.Key()
 	defer t.save()
 	if _, err := os.Stat(tr.Worktree); errors.Is(err, os.ErrNotExist) {
-		t.forgetMissing(ctx, tr)
+		if unlock, ok := t.lock(tr); ok {
+			defer unlock()
+			t.forgetMissing(ctx, tr)
+		}
 		return
 	}
 	pr, err := t.gh.PR(ctx, tr.PRRef)
@@ -164,6 +160,11 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 	}
 	isCandidate = isCandidate || stillMine(pr, t.cfg.User)
 	if reason := dropReason(pr, t.cfg.User, isCandidate, t.cfg.IncludeDrafts); reason != "" {
+		unlock, ok := t.lock(tr)
+		if !ok {
+			return // retried next tick, once whatever holds the worktree has let go
+		}
+		defer unlock()
 		if tr.CreatedWorktree {
 			if err := worktree.Remove(ctx, t.repoDir(tr.Repo), tr.HeadRef, tr.CreatedBranch); err != nil {
 				tr.LastError = err.Error()
@@ -173,18 +174,51 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 		}
 		delete(t.state.PRs, key)
 		slog.Info("dropped PR", "pr", key, "reason", reason, "removed_worktree", tr.CreatedWorktree)
+		t.Events.Dropped(*tr, reason)
 		return
 	}
 	tr.LastError = ""
 	newCommits := pr.HeadSHA != tr.HeadSHA
 	n, latest := newReplies(pr, t.cfg.User, tr.LastSeenAt)
 	if newCommits || n > 0 {
-		tr.HeadSHA, tr.LastSeenAt, tr.PendingUpdates = pr.HeadSHA, latest, true
-		onUpdated(tr, newCommits, n)
+		tr.HeadSHA, tr.LastSeenAt = pr.HeadSHA, latest
+		tr.UnannouncedReplies += n
+		slog.Info("PR updated", "pr", key, "new_commits", newCommits, "new_replies", n)
 	}
-	if tr.SyncedSHA != pr.HeadSHA {
+	if tr.SyncedSHA != tr.HeadSHA {
+		unlock, ok := t.lock(tr)
+		if !ok {
+			return
+		}
 		t.sync(ctx, tr)
+		unlock()
 	}
+	t.announce(tr)
+}
+
+// lock takes tr's worktree lock, or asks its holder to let go (we retry next tick).
+func (t *Tracker) lock(tr *Tracked) (unlock func(), ok bool) {
+	if unlock, ok = t.Locks.TryLock(tr.Key()); !ok {
+		slog.Info("worktree busy, asking for it back", "pr", tr.Key())
+		t.Events.Reclaim(*tr)
+	}
+	return unlock, ok
+}
+
+// announce tells Events about a PR once its worktree is at the head: first
+// time, new commits, or replies that arrived since the last announcement.
+func (t *Tracker) announce(tr *Tracked) {
+	switch {
+	case tr.SyncedSHA != tr.HeadSHA:
+		return // not ready; a conflict or busy worktree defers this to a later tick
+	case tr.AnnouncedSHA == "":
+		t.Events.Tracked(*tr)
+	case tr.AnnouncedSHA != tr.HeadSHA || tr.UnannouncedReplies > 0:
+		t.Events.Updated(*tr, tr.AnnouncedSHA != tr.HeadSHA, tr.UnannouncedReplies)
+	default:
+		return
+	}
+	tr.AnnouncedSHA, tr.UnannouncedReplies = tr.HeadSHA, 0
 }
 
 // forgetMissing handles a worktree deleted outside waterboy: drop the entry (the
@@ -202,6 +236,7 @@ func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 	}
 	delete(t.state.PRs, tr.Key())
 	slog.Info("worktree deleted outside waterboy, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
+	t.Events.Dropped(*tr, "worktree deleted outside waterboy")
 }
 
 func (t *Tracker) sync(ctx context.Context, tr *Tracked) {

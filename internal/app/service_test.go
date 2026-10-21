@@ -13,9 +13,8 @@ import (
 
 func TestHealth(t *testing.T) {
 	for want, tr := range map[string]tracker.Tracked{
-		"conflict": {HeadSHA: "b", ConflictHeadSHA: "b", LastError: "conflict", PendingUpdates: true},
-		"error":    {HeadSHA: "b", ConflictHeadSHA: "a", LastError: "502", PendingUpdates: true},
-		"pending":  {HeadSHA: "b", PendingUpdates: true},
+		"conflict": {HeadSHA: "b", ConflictHeadSHA: "b", LastError: "conflict"},
+		"error":    {HeadSHA: "b", ConflictHeadSHA: "a", LastError: "502"},
 		"ok":       {HeadSHA: "b"},
 	} {
 		if got := health(tr); got != want {
@@ -32,7 +31,7 @@ func TestServiceSnapshot(t *testing.T) {
 	}}
 	a := &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"}
 	cfg, tr := testkit.Tracker(t, gh,
-		&tracker.Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y", PendingUpdates: true},
+		&tracker.Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y"},
 		a,
 	)
 	s := NewService(cfg, tr, NewLogBuffer(10))
@@ -48,10 +47,10 @@ func TestServiceSnapshot(t *testing.T) {
 	if len(st.PRs) != 2 || st.PRs[0].ID != testkit.RefA.Key() || st.PRs[1].ID != refB.Key() {
 		t.Fatalf("PRs not sorted by ID: %+v", st.PRs)
 	}
-	if st.Summary() != "2 tracked · 1 pending" {
+	if st.Summary() != "2 tracked" {
 		t.Fatalf("summary = %q", st.Summary())
 	}
-	if pr, ok := s.PR(refB.Key()); !ok || pr.Health != "pending" {
+	if pr, ok := s.PR(refB.Key()); !ok || pr.Health != "ok" {
 		t.Fatalf("PR(b) = %+v, %v", pr, ok)
 	}
 	if _, ok := s.PR("ethyca/nope#9"); ok {

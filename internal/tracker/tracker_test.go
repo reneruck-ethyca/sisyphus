@@ -3,8 +3,10 @@ package tracker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,14 +89,16 @@ func TestTickRecordsNewReply(t *testing.T) {
 		PRRef: refA, State: "open", HeadRepo: "ethyca/a", HeadSHA: "a",
 		Comments: []github.Comment{{User: "alice", CreatedAt: at(2)}},
 	}}}
-	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", LastSeenAt: at(1)})
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", AnnouncedSHA: "a", LastSeenAt: at(1)})
+	rec := record(tr)
 	if err := tr.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := tr.state.PRs[refA.Key()]
-	if !got.PendingUpdates || !got.LastSeenAt.Equal(at(2)) {
+	if !got.LastSeenAt.Equal(at(2)) || got.UnannouncedReplies != 0 {
 		t.Fatalf("got %+v", got)
 	}
+	rec.want(t, "updated a commits=false replies=1")
 }
 
 func TestTickKeepsRequestedPRMissingFromSearch(t *testing.T) {
@@ -134,6 +138,7 @@ func TestTickForgetsManuallyDeletedWorktree(t *testing.T) {
 	_, clone := gittest.Setup(t)
 	gh := &github.Fake{}
 	tr := newTestTracker(t, gh)
+	rec := record(tr)
 	tr.cfg.ReposRoot = filepath.Dir(clone)
 	ref := github.PRRef{Repo: "ethyca/clone", Number: 1}
 	wt := filepath.Join(t.TempDir(), "wt")
@@ -147,6 +152,7 @@ func TestTickForgetsManuallyDeletedWorktree(t *testing.T) {
 	if len(tr.state.PRs) != 0 || gh.PRCalls != 0 {
 		t.Fatalf("still tracked: %+v calls=%d", tr.state.PRs, gh.PRCalls)
 	}
+	rec.want(t, "dropped worktree deleted outside waterboy")
 	if worktree.BranchExists(context.Background(), clone, "pr-branch") {
 		t.Fatal("created branch with nothing unpushed should be deleted")
 	}
@@ -170,4 +176,113 @@ func TestTickKeepsUnpushedBranchOfDeletedWorktree(t *testing.T) {
 	if !worktree.BranchExists(context.Background(), clone, "pr-branch") {
 		t.Fatal("branch with unpushed commits must be kept")
 	}
+}
+
+// recorder captures tracker events as short strings.
+type recorder struct{ got []string }
+
+func record(tr *Tracker) *recorder {
+	r := &recorder{}
+	tr.Events = r
+	return r
+}
+
+func (r *recorder) Tracked(tr Tracked) { r.got = append(r.got, "tracked "+tr.HeadSHA) }
+func (r *recorder) Updated(tr Tracked, commits bool, replies int) {
+	r.got = append(r.got, fmt.Sprintf("updated %s commits=%v replies=%d", tr.HeadSHA, commits, replies))
+}
+func (r *recorder) Reclaim(Tracked)               { r.got = append(r.got, "reclaim") }
+func (r *recorder) Dropped(_ Tracked, why string) { r.got = append(r.got, "dropped "+why) }
+
+func (r *recorder) want(t *testing.T, want ...string) {
+	t.Helper()
+	if !slices.Equal(r.got, want) {
+		t.Fatalf("events = %q, want %q", r.got, want)
+	}
+}
+
+func openPR(head string) github.PR {
+	return github.PR{PRRef: refA, State: "open", HeadRepo: "ethyca/a", HeadRef: "feature/x", HeadSHA: head, RequestedReviewers: []string{"me"}}
+}
+
+func TestTickAnnouncesTrackedOnce(t *testing.T) {
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): openPR("a")}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a"})
+	rec := record(tr)
+	tr.Tick(context.Background())
+	tr.Tick(context.Background())
+	rec.want(t, "tracked a")
+}
+
+// New commits on a PR whose worktree a review is using: the tick doesn't sync,
+// asks for the worktree back, and announces only once it has synced.
+func TestTickDefersBusySyncThenAnnounces(t *testing.T) {
+	up, clone := gittest.Setup(t)
+	old := gittest.Git(t, clone, "rev-parse", "HEAD")
+	head := gittest.Commit(t, up, "a.txt", "three")
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): openPR(head)}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadRef: "feature/x", HeadSHA: old, SyncedSHA: old, AnnouncedSHA: old, Worktree: clone})
+	rec := record(tr)
+	ctx := context.Background()
+
+	unlock, ok := tr.Locks.TryLock(refA.Key())
+	if !ok {
+		t.Fatal("lock")
+	}
+	tr.Tick(ctx)
+	if got, _ := worktree.HeadSHA(ctx, clone); got != old {
+		t.Fatal("synced a busy worktree")
+	}
+	rec.want(t, "reclaim")
+
+	unlock()
+	tr.Tick(ctx)
+	if got, _ := worktree.HeadSHA(ctx, clone); got != head {
+		t.Fatalf("not synced: %s", got)
+	}
+	rec.want(t, "reclaim", "updated "+head+" commits=true replies=0")
+}
+
+func TestTickDropWaitsForBusyWorktree(t *testing.T) {
+	closed := github.PR{PRRef: refA, State: "closed"}
+	tr := newTestTracker(t, &github.Fake{PRs: map[string]github.PR{refA.Key(): closed}}, &Tracked{PRRef: refA})
+	rec := record(tr)
+	unlock, _ := tr.Locks.TryLock(refA.Key())
+	tr.Tick(context.Background())
+	if tr.state.PRs[refA.Key()] == nil {
+		t.Fatal("dropped while busy")
+	}
+	unlock()
+	tr.Tick(context.Background())
+	if tr.state.PRs[refA.Key()] != nil {
+		t.Fatal("not dropped")
+	}
+	rec.want(t, "reclaim", "dropped closed")
+}
+
+func TestLocks(t *testing.T) {
+	var l Locks
+	unlock, ok := l.TryLock("a")
+	if !ok {
+		t.Fatal("first TryLock")
+	}
+	if _, ok := l.TryLock("a"); ok {
+		t.Fatal("second TryLock should fail")
+	}
+	if u, ok := l.TryLock("b"); !ok {
+		t.Fatal("other id")
+	} else {
+		u()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := l.Lock(ctx, "a"); err == nil {
+		t.Fatal("Lock should give up when ctx ends")
+	}
+	unlock()
+	u, err := l.Lock(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u()
 }

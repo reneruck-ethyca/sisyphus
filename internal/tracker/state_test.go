@@ -14,7 +14,7 @@ func TestStateRoundTrip(t *testing.T) {
 	s := &State{PRs: map[string]*Tracked{"ethyca/a#1": {
 		PRRef: github.PRRef{Repo: "ethyca/a", Number: 1}, HeadRef: "feature/x", HeadSHA: "abc", SyncedSHA: "abc",
 		Worktree: "/w", CreatedWorktree: true, CreatedBranch: true, TrackedAt: at(1), LastSeenAt: at(2),
-		PendingUpdates: true, LastError: "boom",
+		AnnouncedSHA: "abc", LastError: "boom",
 	}}}
 	if err := s.Save(p); err != nil {
 		t.Fatal(err)

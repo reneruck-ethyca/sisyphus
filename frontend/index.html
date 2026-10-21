@@ -96,7 +96,6 @@
         field("Head", esc(p.head_sha)),
         field("Synced", esc(p.synced_sha) || "—"),
         field("Worktree", esc(p.worktree) + (p.created_worktree ? "" : " <span class=muted>(reused)</span>")),
-        field("Pending updates", p.pending_updates ? "yes" : "no"),
         field("Tracked since", time(p.tracked_at)),
         field("Last seen", time(p.last_seen_at)),
       ].join("")}</dl>`;

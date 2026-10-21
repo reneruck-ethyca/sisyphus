@@ -25,20 +25,14 @@ type Status struct {
 }
 
 func (s Status) Summary() string {
-	pending := 0
-	for _, pr := range s.PRs {
-		if pr.PendingUpdates {
-			pending++
-		}
-	}
-	return fmt.Sprintf("%d tracked · %d pending", len(s.PRs), pending)
+	return fmt.Sprintf("%d tracked", len(s.PRs))
 }
 
 // PRView is a tracked PR as UIs see it: a copy of its state plus derived fields.
 type PRView struct {
 	tracker.Tracked
 	ID     string `json:"id"`     // "owner/repo#n"
-	Health string `json:"health"` // "conflict" | "error" | "pending" | "ok"
+	Health string `json:"health"` // "conflict" | "error" | "ok"
 }
 
 func health(tr tracker.Tracked) string {
@@ -47,8 +41,6 @@ func health(tr tracker.Tracked) string {
 		return "conflict"
 	case tr.LastError != "":
 		return "error"
-	case tr.PendingUpdates:
-		return "pending"
 	}
 	return "ok"
 }
