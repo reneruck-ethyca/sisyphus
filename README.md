@@ -88,11 +88,11 @@ Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
 
 ## Rules
 
-A PR is dropped (and its worktree removed, if waterboy created it) when it is merged or closed,
-you approved it, someone else approved it and your latest review isn't "changes requested",
-it became a draft (unless `include_drafts`), or it no longer requests a review from you or one of your
-teams. Having reviewed it doesn't keep it: GitHub removes your request once you (or the agent, as
-you) review, so the PR is dropped; when the author re-requests your review, it's tracked again as new.
+A PR is picked up only when it requests a review from you or one of your teams. Until you've
+reviewed it, it's dropped (and its worktree removed, if waterboy created it) when it's merged or
+closed, someone else approved it, it became a draft (unless `include_drafts`), or it no longer requests
+a review from you or your teams. Once you've reviewed it (by hand, or the agent as you), only merging
+or closing drops it: new commits and replies keep getting follow-up reviews, approvals included.
 Fork PRs are skipped.
 
 Syncing on new commits fast-forwards the worktree. After a force-push it hard-resets only if
@@ -135,7 +135,7 @@ final result with turns and cost); the raw output is the run's `log`. Runs live 
 queue and the last 10 runs per PR are in `<state dir>/reviews.json`. Containers keep running when
 waterboy quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
 
-The agent may approve. An approval posted as you makes the tracker drop the PR on its next tick.
+The agent may approve; the PR stays tracked until it merges or closes.
 
 
 ## Reset

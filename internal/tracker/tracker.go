@@ -94,7 +94,8 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 		slog.Warn("fetching PR", "pr", key, "err", err)
 		return false
 	}
-	if dropReason(pr, t.cfg.User, requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts) != "" {
+	// Picked up only on a request; reviewedByMe keeps PRs already tracked, not new ones.
+	if !requested(pr, t.cfg.User, t.teams) || dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "" {
 		return false
 	}
 	if pr.HeadRepo != pr.Repo {

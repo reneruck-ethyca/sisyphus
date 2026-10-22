@@ -24,6 +24,7 @@ func latestStates(reviews []github.Review) map[string]string {
 }
 
 // dropReason says why a PR should not be (or no longer be) tracked; "" = keep.
+// Once I've reviewed it, only merging or closing drops it.
 func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string {
 	if pr.Merged {
 		return "merged"
@@ -31,20 +32,19 @@ func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string
 	if pr.State != "open" {
 		return "closed"
 	}
-	states := latestStates(pr.Reviews)
-	if states[me] == "APPROVED" {
-		return "approved by you"
+	if reviewedByMe(pr, me) {
+		return ""
 	}
-	if states[me] != "CHANGES_REQUESTED" {
-		users := make([]string, 0, len(states))
-		for u := range states {
-			users = append(users, u)
-		}
-		sort.Strings(users)
-		for _, u := range users {
-			if u != me && states[u] == "APPROVED" {
-				return "approved by " + u
-			}
+	// Not reviewed by me yet: someone else's approval means it doesn't need me.
+	states := latestStates(pr.Reviews)
+	users := make([]string, 0, len(states))
+	for u := range states {
+		users = append(users, u)
+	}
+	sort.Strings(users)
+	for _, u := range users {
+		if states[u] == "APPROVED" {
+			return "approved by " + u
 		}
 	}
 	if pr.Draft && !includeDrafts {
@@ -56,9 +56,13 @@ func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string
 	return ""
 }
 
+// reviewedByMe: I've submitted a review (a pending draft review doesn't count).
+func reviewedByMe(pr github.PR, me string) bool {
+	return slices.ContainsFunc(pr.Reviews, func(r github.Review) bool { return r.User == me && r.State != "PENDING" })
+}
+
 // requested reports whether the PR payload asks me for a review: as a requested
-// reviewer, or through a requested team I'm on. Having reviewed doesn't count
-// (GitHub drops the request once you review; the author re-requests for more).
+// reviewer, or through a requested team I'm on. Needed to pick a PR up.
 func requested(pr github.PR, me string, myTeams []string) bool {
 	return slices.Contains(pr.RequestedReviewers, me) ||
 		slices.ContainsFunc(pr.RequestedTeams, func(t string) bool { return slices.Contains(myTeams, t) })

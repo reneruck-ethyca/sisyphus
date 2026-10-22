@@ -313,9 +313,9 @@ func TestForget(t *testing.T) {
 	unlock()
 }
 
-// Only PRs whose payload requests a review from me (or a team I'm on) are
-// tracked; having reviewed one doesn't keep it, and search results don't either.
-func TestTickTracksOnlyRequestedPRs(t *testing.T) {
+// Tracked PRs stay while they request a review from me (or a team I'm on), or
+// once I've reviewed them; search results don't count.
+func TestTickKeepsRequestedOrReviewedPRs(t *testing.T) {
 	team := github.PRRef{Repo: "ethyca/b", Number: 2}
 	other := github.PRRef{Repo: "ethyca/c", Number: 3}
 	reviewed := github.PRRef{Repo: "ethyca/d", Number: 4}
@@ -329,8 +329,20 @@ func TestTickTracksOnlyRequestedPRs(t *testing.T) {
 	if err := tr.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := slices.Sorted(maps.Keys(tr.state.PRs)); !slices.Equal(got, []string{refA.Key(), team.Key()}) {
+	if got := slices.Sorted(maps.Keys(tr.state.PRs)); !slices.Equal(got, []string{refA.Key(), team.Key(), reviewed.Key()}) {
 		t.Fatalf("tracked %q", got)
+	}
+}
+
+// Having reviewed a PR keeps it tracked, but never gets it picked up.
+func TestDiscoverNeedsARequest(t *testing.T) {
+	reviewed := github.PRRef{Repo: "ethyca/d", Number: 4}
+	gh := &github.Fake{Cands: []github.PRRef{reviewed}, PRs: map[string]github.PR{
+		reviewed.Key(): {PRRef: reviewed, State: "open", HeadRepo: "ethyca/d", Reviews: []github.Review{rv("me", "COMMENTED", 1)}},
+	}}
+	tr := newTestTracker(t, gh)
+	if err := tr.Tick(context.Background()); err != nil || len(tr.state.PRs) != 0 {
+		t.Fatalf("picked up an unrequested PR: %v %+v", err, tr.state.PRs)
 	}
 }
 
