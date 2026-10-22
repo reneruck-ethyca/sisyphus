@@ -354,3 +354,20 @@ func TestTickTeamsErrorDropsNothing(t *testing.T) {
 		t.Fatalf("err %v, tracked %+v", err, tr.state.PRs)
 	}
 }
+
+// A worktree that's already gone (deleted by hand, or by an earlier partial
+// reset) has nothing to remove: forget the PR instead of failing on wtp.
+func TestForgetWorktreeAlreadyGone(t *testing.T) {
+	_, clone := gittest.Setup(t)
+	tr := newTestTracker(t, &github.Fake{})
+	tr.cfg.ReposRoot = filepath.Dir(clone)
+	ref := github.PRRef{Repo: "ethyca/clone", Number: 1}
+	tr.state.PRs[ref.Key()] = &Tracked{PRRef: ref, HeadRef: "gone-branch", Worktree: filepath.Join(t.TempDir(), "gone"),
+		CreatedWorktree: true, CreatedBranch: true}
+	if err := tr.Forget(context.Background(), ref.Key()); err != nil {
+		t.Fatal(err)
+	}
+	if tr.state.PRs[ref.Key()] != nil {
+		t.Fatal("still tracked")
+	}
+}

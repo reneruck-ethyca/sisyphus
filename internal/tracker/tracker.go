@@ -237,6 +237,11 @@ func (t *Tracker) Forget(ctx context.Context, id string) error {
 		return fmt.Errorf("waiting for %s's worktree: %w", id, err)
 	}
 	defer unlock()
+	if _, err := os.Stat(tr.Worktree); errors.Is(err, os.ErrNotExist) {
+		t.forgetMissing(ctx, tr) // already gone: nothing for wtp to remove
+		t.save()
+		return nil
+	}
 	if tr.CreatedWorktree {
 		if err := worktree.Remove(ctx, t.repoDir(tr.Repo), tr.HeadRef, tr.CreatedBranch); err != nil {
 			return err
