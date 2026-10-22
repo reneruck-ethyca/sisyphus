@@ -564,14 +564,32 @@ func TestUnconfiguredRepoIsNotReviewed(t *testing.T) {
 	}
 }
 
+func TestMissingEnvFileSkipsReviewUntilCreated(t *testing.T) {
+	secrets := filepath.Join(t.TempDir(), "review.env")
+	f := newFixture(t, func(c *config.Review) { c.EnvFile = secrets })
+	f.r.Tracked(f.tr)
+	f.r.Updated(f.tr, true, 0)
+	if len(f.r.st.Queue) != 0 {
+		t.Fatalf("queued a review without its env file: %+v", f.r.st.Queue)
+	}
+	os.WriteFile(secrets, nil, 0o600)
+	f.r.Updated(f.tr, true, 0)
+	if len(f.r.st.Queue) != 1 {
+		t.Fatalf("queue = %+v, want the review once the env file exists", f.r.st.Queue)
+	}
+}
+
 func TestSpecForConfiguredRepo(t *testing.T) {
 	settings := filepath.Join(t.TempDir(), "settings.json")
 	os.WriteFile(settings, []byte(`{"enabledPlugins":{}}`), 0o644)
 	prompt := filepath.Join(t.TempDir(), "p.md")
 	os.WriteFile(prompt, []byte("Review {{.PR.URL}} in {{.Workdir}} ({{.Reason}})"), 0o644)
+	secrets, aEnv := filepath.Join(t.TempDir(), "secrets.env"), filepath.Join(t.TempDir(), "a.env")
+	os.WriteFile(secrets, nil, 0o600)
+	os.WriteFile(aEnv, nil, 0o600)
 	f := newFixture(t, func(c *config.Review) {
-		c.EnvFile, c.ClaudeSettings, c.PluginsVolume, c.MaxBudgetUSD = "/secrets.env", settings, "wb-plugins", 2.5
-		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", EnvFile: "/a.env", PromptFile: prompt,
+		c.EnvFile, c.ClaudeSettings, c.PluginsVolume, c.MaxBudgetUSD = secrets, settings, "wb-plugins", 2.5
+		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", EnvFile: aEnv, PromptFile: prompt,
 			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules"}}
 	})
 	f.start(t)
@@ -581,7 +599,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	run := f.runs()[0]
 
 	if s.Image != "reviewer:a" || s.Workdir != "/a" || s.Env["PYTHONPATH"] != "/a/src" || s.Env["CLAUDE_CONFIG_DIR"] != "/waterboy/claude" ||
-		s.Env["WATERBOY_WORKTREE"] != "/a" || !slices.Equal(s.EnvFiles, []string{"/a.env", "/secrets.env"}) {
+		s.Env["WATERBOY_WORKTREE"] != "/a" || !slices.Equal(s.EnvFiles, []string{aEnv, secrets}) {
 		t.Fatalf("spec = %+v", s)
 	}
 	mounts := map[string]container.Mount{}

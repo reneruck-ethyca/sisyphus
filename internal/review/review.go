@@ -119,7 +119,7 @@ type Reviewer struct {
 	unavailable string // why the runtime can't start containers right now
 	retrying    bool   // a runtime re-check is scheduled
 	subs        map[chan RunEvent]struct{}
-	skipped     map[string]bool // repos without review config, logged once
+	skipped     map[string]bool // repos without review config and missing env files, logged once
 }
 
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
@@ -131,6 +131,9 @@ func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir stri
 	}
 	if r.st.Runs == nil {
 		r.st.Runs = map[string][]Run{}
+	}
+	for name, repo := range cfg.Repos { // surface a missing secrets file at startup
+		r.envFilesExist(name, repo)
 	}
 	return r, nil
 }
@@ -169,20 +172,45 @@ func (r *Reviewer) Dropped(tr tracker.Tracked, _ string) {
 	r.changed()
 }
 
-// reviewable: only repos with a review.repos entry are reviewed. (Fork PRs never
-// get here: the tracker doesn't track them.)
+// reviewable: only repos with a review.repos entry and all their env files are
+// reviewed. (Fork PRs never get here: the tracker doesn't track them.)
 func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
-	if _, ok := r.cfg.Repos[tr.Repo]; ok {
-		return true
+	repo, ok := r.cfg.Repos[tr.Repo]
+	if !ok {
+		if r.once(tr.Repo) {
+			slog.Info("not reviewing: no review.repos entry", "repo", tr.Repo)
+		}
+		return false
 	}
+	return r.envFilesExist(tr.Repo, repo)
+}
+
+// envFilesExist reports whether repo's env files are there; docker refuses to
+// start a review without them. Re-checked on every event, so creating a missing
+// file needs no restart. Each missing file is logged once.
+func (r *Reviewer) envFilesExist(name string, repo config.RepoReview) bool {
+	ok := true
+	for _, f := range []string{repo.EnvFile, r.cfg.EnvFile} {
+		if f == "" {
+			continue
+		}
+		if _, err := os.Stat(f); err != nil {
+			ok = false
+			if r.once("env:" + f) {
+				slog.Error("not reviewing: env file missing", "repo", name, "file", f, "err", err)
+			}
+		}
+	}
+	return ok
+}
+
+// once reports whether key is new to r.skipped, marking it seen.
+func (r *Reviewer) once(key string) bool {
 	r.mu.Lock()
-	first := !r.skipped[tr.Repo]
-	r.skipped[tr.Repo] = true
-	r.mu.Unlock()
-	if first {
-		slog.Info("not reviewing: no review.repos entry", "repo", tr.Repo)
-	}
-	return false
+	defer r.mu.Unlock()
+	first := !r.skipped[key]
+	r.skipped[key] = true
+	return first
 }
 
 // Forget wipes a PR's review state ("" = every PR's): its queued job, run records
