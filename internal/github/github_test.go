@@ -8,6 +8,7 @@ import (
 func TestParsePR(t *testing.T) {
 	pull := []byte(`{"state":"open","merged":false,"draft":true,"html_url":"https://github.com/ethyca/fidesplus/pull/7",
 		"title":"T","number":7,"user":{"login":"carol"},
+		"requested_reviewers":[{"login":"me"}],"requested_teams":[{"slug":"eng","name":"Eng"}],
 		"head":{"ref":"feature/x","sha":"abc","repo":{"full_name":"ethyca/fidesplus"}},
 		"base":{"repo":{"full_name":"ethyca/fidesplus"}}}`)
 	reviews := []byte(`[{"user":{"login":"ci","type":"Bot"},"state":"APPROVED","body":"","submitted_at":"2026-10-20T12:01:00Z"}]`)
@@ -18,7 +19,8 @@ func TestParsePR(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !pr.Draft || pr.HeadRef != "feature/x" || pr.HeadSHA != "abc" || pr.HeadRepo != "ethyca/fidesplus" ||
-		pr.Repo != "ethyca/fidesplus" || pr.Number != 7 || pr.Author != "carol" || pr.State != "open" {
+		pr.Repo != "ethyca/fidesplus" || pr.Number != 7 || pr.Author != "carol" || pr.State != "open" ||
+		len(pr.RequestedReviewers) != 1 || len(pr.RequestedTeams) != 1 || pr.RequestedTeams[0] != "eng" {
 		t.Errorf("bad pr: %+v", pr)
 	}
 	if len(pr.Reviews) != 1 || !pr.Reviews[0].Bot || len(pr.Comments) != 2 || pr.Comments[1].User != "alice" {

@@ -34,7 +34,7 @@ func TestDropReason(t *testing.T) {
 		{"bot approval ignored", open(bot), true, false, ""},
 		{"draft excluded", github.PR{State: "open", Draft: true}, true, false, "draft"},
 		{"draft included", github.PR{State: "open", Draft: true}, true, true, ""},
-		{"no longer candidate", open(), false, false, "no longer requested"},
+		{"not requested", open(), false, false, "review not requested from you"},
 	}
 	for _, c := range cases {
 		if got := dropReason(c.pr, "me", c.cand, c.drafts); got != c.want {
@@ -64,14 +64,21 @@ func TestNewReplies(t *testing.T) {
 }
 
 // Review #3: search lag must not drop a PR the payload still shows as ours.
-func TestStillMine(t *testing.T) {
-	if !stillMine(github.PR{RequestedReviewers: []string{"me"}}, "me") {
-		t.Error("requested reviewer")
-	}
-	if !stillMine(github.PR{Reviews: []github.Review{rv("me", "COMMENTED", 1)}}, "me") {
-		t.Error("reviewed by me")
-	}
-	if stillMine(github.PR{RequestedReviewers: []string{"alice"}, Reviews: []github.Review{rv("alice", "COMMENTED", 1)}}, "me") {
-		t.Error("not mine")
+func TestRequested(t *testing.T) {
+	teams := []string{"eng"}
+	for _, c := range []struct {
+		name string
+		pr   github.PR
+		want bool
+	}{
+		{"requested from me", github.PR{RequestedReviewers: []string{"alice", "me"}}, true},
+		{"requested from my team", github.PR{RequestedTeams: []string{"eng"}}, true},
+		{"requested from another team", github.PR{RequestedTeams: []string{"fides-security-team"}}, false},
+		{"only reviewed by me", github.PR{Reviews: []github.Review{rv("me", "CHANGES_REQUESTED", 1)}}, false},
+		{"someone else", github.PR{RequestedReviewers: []string{"alice"}}, false},
+	} {
+		if got := requested(c.pr, "me", teams); got != c.want {
+			t.Errorf("%s: requested = %v", c.name, got)
+		}
 	}
 }

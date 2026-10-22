@@ -24,6 +24,7 @@ type Tracker struct {
 	gh      github.Client
 	state   *State
 	skipped map[string]bool // log-once for forks / missing clones
+	teams   []string        // my teams in the org, refreshed every tick
 	OnSave  func()          // called after every state save, on the ticking goroutine
 	Events  Events          // defaults to a no-op
 	Locks   *Locks          // shared with whatever runs in worktrees
@@ -68,17 +69,19 @@ func (t *Tracker) Tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("searching candidates: %w", err)
 	}
-	cand := map[string]bool{}
+	// Without my teams a team-requested PR can't be judged, so touch nothing.
+	if t.teams, err = t.gh.Teams(ctx, t.cfg.Org); err != nil {
+		return fmt.Errorf("listing your teams: %w", err)
+	}
 	added := map[string]bool{}
 	for _, ref := range refs {
-		cand[ref.Key()] = true
 		if t.state.PRs[ref.Key()] == nil && t.discover(ctx, ref) {
 			added[ref.Key()] = true
 		}
 	}
 	for key, tr := range t.state.PRs {
 		if !added[key] {
-			t.update(ctx, tr, cand[key])
+			t.update(ctx, tr)
 		}
 	}
 	return nil
@@ -91,7 +94,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 		slog.Warn("fetching PR", "pr", key, "err", err)
 		return false
 	}
-	if dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "" {
+	if dropReason(pr, t.cfg.User, requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts) != "" {
 		return false
 	}
 	if pr.HeadRepo != pr.Repo {
@@ -142,7 +145,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 	return true
 }
 
-func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
+func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 	key := tr.Key()
 	defer t.save()
 	if _, err := os.Stat(tr.Worktree); errors.Is(err, os.ErrNotExist) {
@@ -158,8 +161,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked, isCandidate bool) {
 		slog.Warn("fetching PR", "pr", key, "err", err)
 		return
 	}
-	isCandidate = isCandidate || stillMine(pr, t.cfg.User)
-	if reason := dropReason(pr, t.cfg.User, isCandidate, t.cfg.IncludeDrafts); reason != "" {
+	if reason := dropReason(pr, t.cfg.User, requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts); reason != "" {
 		unlock, ok := t.lock(tr)
 		if !ok {
 			return // retried next tick, once whatever holds the worktree has let go

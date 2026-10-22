@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"slices"
 	"sort"
 	"time"
 
@@ -23,7 +24,7 @@ func latestStates(reviews []github.Review) map[string]string {
 }
 
 // dropReason says why a PR should not be (or no longer be) tracked; "" = keep.
-func dropReason(pr github.PR, me string, isCandidate, includeDrafts bool) string {
+func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string {
 	if pr.Merged {
 		return "merged"
 	}
@@ -49,26 +50,18 @@ func dropReason(pr github.PR, me string, isCandidate, includeDrafts bool) string
 	if pr.Draft && !includeDrafts {
 		return "draft"
 	}
-	if !isCandidate {
-		return "no longer requested"
+	if !isRequested {
+		return "review not requested from you"
 	}
 	return ""
 }
 
-// stillMine reports whether the PR payload itself says it awaits me: I'm a
-// requested reviewer or have reviewed. Guards against search lag/incomplete results.
-func stillMine(pr github.PR, me string) bool {
-	for _, u := range pr.RequestedReviewers {
-		if u == me {
-			return true
-		}
-	}
-	for _, r := range pr.Reviews {
-		if r.User == me {
-			return true
-		}
-	}
-	return false
+// requested reports whether the PR payload asks me for a review: as a requested
+// reviewer, or through a requested team I'm on. Having reviewed doesn't count
+// (GitHub drops the request once you review; the author re-requests for more).
+func requested(pr github.PR, me string, myTeams []string) bool {
+	return slices.Contains(pr.RequestedReviewers, me) ||
+		slices.ContainsFunc(pr.RequestedTeams, func(t string) bool { return slices.Contains(myTeams, t) })
 }
 
 // newReplies counts human comments and review bodies not by me that are newer

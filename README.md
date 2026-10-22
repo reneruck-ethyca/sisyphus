@@ -3,7 +3,8 @@
 macOS menu-bar service that keeps a worktree for every PR waiting on your review and runs a
 review container in it. On each tick it:
 
-1. **discovers** open PRs in `org` where review is requested from `user` or `user` has reviewed,
+1. **discovers** open PRs in `org` that request a review from `user`, directly or through one of
+   `user`'s teams,
    and checks each out into a worktree (reusing an existing worktree on that branch, else `wtp add`),
 2. **updates** tracked PRs: notices new commits / new replies, syncs the worktree,
 3. **cleans up** PRs that are done: removes worktrees it created, forgets reused ones.
@@ -89,7 +90,9 @@ Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
 
 A PR is dropped (and its worktree removed, if waterboy created it) when it is merged or closed,
 you approved it, someone else approved it and your latest review isn't "changes requested",
-it became a draft (unless `include_drafts`), or it no longer shows up as requested/reviewed by you.
+it became a draft (unless `include_drafts`), or it no longer requests a review from you or one of your
+teams. Having reviewed it doesn't keep it: GitHub removes your request once you (or the agent, as
+you) review, so the PR is dropped; when the author re-requests your review, it's tracked again as new.
 Fork PRs are skipped.
 
 Syncing on new commits fast-forwards the worktree. After a force-push it hard-resets only if
@@ -97,8 +100,9 @@ the worktree is still exactly where waterboy last put it. Reused worktrees and p
 branches are never reset or deleted. Modified tracked files, unpushed local commits, diverged
 history, or an incoming file colliding with an untracked one are a conflict.
 
-A PR missing from search results is only dropped if its own payload agrees (you're not a
-requested reviewer and haven't reviewed), so search lag can't delete worktrees.
+GitHub search (`--review-requested`) only finds candidates; the PR's own payload decides, both when
+a PR is picked up and on every tick (`requested_reviewers`, and `requested_teams` against your teams).
+If your teams can't be fetched, the tick does nothing rather than drop team-requested PRs.
 
 ## Reviews
 

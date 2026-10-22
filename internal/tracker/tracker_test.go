@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -86,7 +87,7 @@ func TestTickSkipsForkAndMissingClone(t *testing.T) {
 
 func TestTickRecordsNewReply(t *testing.T) {
 	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): {
-		PRRef: refA, State: "open", HeadRepo: "ethyca/a", HeadSHA: "a",
+		PRRef: refA, State: "open", HeadRepo: "ethyca/a", HeadSHA: "a", RequestedReviewers: []string{"me"},
 		Comments: []github.Comment{{User: "alice", CreatedAt: at(2)}},
 	}}}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", AnnouncedSHA: "a", LastSeenAt: at(1)})
@@ -310,4 +311,34 @@ func TestForget(t *testing.T) {
 		t.Fatalf("forgot a locked PR: %v", err)
 	}
 	unlock()
+}
+
+// Only PRs whose payload requests a review from me (or a team I'm on) are
+// tracked; having reviewed one doesn't keep it, and search results don't either.
+func TestTickTracksOnlyRequestedPRs(t *testing.T) {
+	team := github.PRRef{Repo: "ethyca/b", Number: 2}
+	other := github.PRRef{Repo: "ethyca/c", Number: 3}
+	reviewed := github.PRRef{Repo: "ethyca/d", Number: 4}
+	gh := &github.Fake{Cands: []github.PRRef{refA, team, other, reviewed}, MyTeams: []string{"eng"}, PRs: map[string]github.PR{
+		refA.Key():     {PRRef: refA, State: "open", RequestedReviewers: []string{"me"}},
+		team.Key():     {PRRef: team, State: "open", RequestedTeams: []string{"eng"}},
+		other.Key():    {PRRef: other, State: "open", RequestedTeams: []string{"fides-security-team"}},
+		reviewed.Key(): {PRRef: reviewed, State: "open", Reviews: []github.Review{rv("me", "CHANGES_REQUESTED", 1)}},
+	}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA}, &Tracked{PRRef: team}, &Tracked{PRRef: other}, &Tracked{PRRef: reviewed})
+	if err := tr.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := slices.Sorted(maps.Keys(tr.state.PRs)); !slices.Equal(got, []string{refA.Key(), team.Key()}) {
+		t.Fatalf("tracked %q", got)
+	}
+}
+
+// Without knowing my teams, a team-requested PR can't be judged: drop nothing.
+func TestTickTeamsErrorDropsNothing(t *testing.T) {
+	gh := &github.Fake{TeamsErr: errors.New("502"), PRs: map[string]github.PR{refA.Key(): {PRRef: refA, State: "open", RequestedTeams: []string{"eng"}}}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA})
+	if err := tr.Tick(context.Background()); err == nil || tr.state.PRs[refA.Key()] == nil {
+		t.Fatalf("err %v, tracked %+v", err, tr.state.PRs)
+	}
 }

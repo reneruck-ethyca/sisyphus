@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/proc"
@@ -40,6 +41,7 @@ type PR struct {
 	HeadRef, HeadSHA   string
 	HeadRepo           string   // "owner/name"; "" if the fork was deleted
 	RequestedReviewers []string // logins of individually requested reviewers
+	RequestedTeams     []string // slugs of requested teams
 	Reviews            []Review
 	Comments           []Comment // issue + inline review comments
 }
@@ -47,7 +49,11 @@ type PR struct {
 // Client is everything waterboy needs from Client; swap the gh CLI out here.
 type Client interface {
 	CurrentUser(ctx context.Context) (string, error)
+	// Candidates finds open PRs that may await user's review. Search results lag
+	// and are fuzzy: only the PR payload (PR) decides.
 	Candidates(ctx context.Context, org, user string) ([]PRRef, error)
+	// Teams returns the slugs of user's teams in org.
+	Teams(ctx context.Context, org string) ([]string, error)
 	PR(ctx context.Context, ref PRRef) (PR, error)
 }
 
@@ -61,7 +67,7 @@ func (CLI) CurrentUser(ctx context.Context) (string, error) {
 func (CLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
 	seen := map[string]bool{}
 	var refs []PRRef
-	for _, filter := range []string{"--review-requested=" + user, "--reviewed-by=" + user} {
+	for _, filter := range []string{"--review-requested=" + user} {
 		out, err := proc.Run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, filter,
 			"--json", "repository,number", "--limit", "200")
 		if err != nil {
@@ -80,6 +86,15 @@ func (CLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
 	}
 	sort.Slice(refs, func(i, j int) bool { return refs[i].Key() < refs[j].Key() })
 	return refs, nil
+}
+
+func (CLI) Teams(ctx context.Context, org string) ([]string, error) {
+	out, err := proc.Run(ctx, "", "gh", "api", "user/teams", "--paginate",
+		"--jq", fmt.Sprintf(`.[] | select(.organization.login == %q) | .slug`, org))
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
 }
 
 // ponytail: per_page=100, no pagination — same ceiling as pr-review-queue.sh.
@@ -138,7 +153,10 @@ func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
 		Title              string   `json:"title"`
 		User               ghUser   `json:"user"`
 		RequestedReviewers []ghUser `json:"requested_reviewers"`
-		Head               struct {
+		RequestedTeams     []struct {
+			Slug string `json:"slug"`
+		} `json:"requested_teams"`
+		Head struct {
 			Ref  string  `json:"ref"`
 			SHA  string  `json:"sha"`
 			Repo *ghRepo `json:"repo"`
@@ -158,6 +176,9 @@ func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
 	}
 	for _, u := range p.RequestedReviewers {
 		pr.RequestedReviewers = append(pr.RequestedReviewers, u.Login)
+	}
+	for _, t := range p.RequestedTeams {
+		pr.RequestedTeams = append(pr.RequestedTeams, t.Slug)
 	}
 	if p.Head.Repo != nil {
 		pr.HeadRepo = p.Head.Repo.FullName
