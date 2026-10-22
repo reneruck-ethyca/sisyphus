@@ -48,7 +48,7 @@
   {{$pr := .}}
   {{range .Review.Runs}}
     <tr>
-      <td class="nowrap"><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}"><code>{{.ID}}</code></a>{{if .Overdue}} <span class="overdue" title="running longer than review.timeout">⚠</span>{{end}}{{with .Claude}}<br><span class="muted">{{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}</span>{{end}}</td>
+      <td class="nowrap"><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}"><code>{{.ID}}</code></a>{{if .Overdue}} <span class="overdue" title="running longer than review.timeout">⚠</span>{{end}}{{with .Claude}}<br><span class="muted">{{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}</span>{{end}}{{with .Posted}}{{with .URL}}<br><a href="{{.}}">posted ↗</a>{{end}}{{end}}</td>
       <td>{{.Job.Reason}}</td>
       <td class="nowrap"><code>{{printf "%.12s" .Job.PR.HeadSHA}}</code></td>
       <td><span class="health {{.Status}}">{{.Status}}</span></td>
@@ -77,6 +77,7 @@
 <div class="muted">{{.Job.Reason}} · head <code>{{printf "%.12s" .Job.PR.HeadSHA}}</code> · started {{when .Started}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}
   · <a href="{{$base}}/log">raw log</a> · <a href="{{$base}}/prompt.md">prompt</a> · <a href="{{$base}}/out/">out/</a></div>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
+{{with .Posted}}<p>Posted {{if .Event}}<b>{{.Event}}</b>{{else}}replies{{end}}{{if .Comments}} · {{.Comments}} inline{{end}}{{if .Replies}} · {{.Replies}} replies{{end}}{{if .Fallback}} · as a plain comment (GitHub refused the review){{end}}{{with .URL}} · <a href="{{.}}">view on GitHub ↗</a>{{end}}</p>{{end}}
 <div id="events" data-src="/api{{$base}}/events?from={{$.Next}}" data-live="{{eq .Status "running"}}">
 {{range $.Events}}{{template "event" .}}{{end}}
 </div>

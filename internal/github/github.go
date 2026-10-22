@@ -98,23 +98,51 @@ func (CLI) Teams(ctx context.Context, org string) ([]string, error) {
 }
 
 // ponytail: per_page=100, no pagination — same ceiling as pr-review-queue.sh.
-func (CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
-	base := fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number)
-	paths := []string{
-		base,
-		base + "/reviews?per_page=100",
-		base + "/comments?per_page=100",
-		fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", ref.Repo, ref.Number),
+func (c CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
+	d, err := c.Discussion(ctx, ref)
+	if err != nil {
+		return PR{}, err
 	}
-	bodies := make([][]byte, len(paths))
+	return parsePR(d[0].Body, d[1].Body, d[2].Body, d[3].Body)
+}
+
+// DiscussionFile is one raw GitHub API response about a PR.
+type DiscussionFile struct {
+	Name string // pr.json, reviews.json, review_comments.json, issue_comments.json
+	Body []byte
+}
+
+// Discussion fetches a PR, its reviews, its inline review comments and its
+// issue comments, as the GitHub API returns them.
+func (CLI) Discussion(ctx context.Context, ref PRRef) ([]DiscussionFile, error) {
+	base := fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number)
+	files := []DiscussionFile{
+		{Name: "pr.json"}, {Name: "reviews.json"}, {Name: "review_comments.json"}, {Name: "issue_comments.json"},
+	}
+	paths := []string{base, base + "/reviews?per_page=100", base + "/comments?per_page=100",
+		fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", ref.Repo, ref.Number)}
 	for i, p := range paths {
 		out, err := proc.Run(ctx, "", "gh", "api", p)
 		if err != nil {
-			return PR{}, err
+			return nil, err
 		}
-		bodies[i] = []byte(out)
+		files[i].Body = []byte(out)
 	}
-	return parsePR(bodies[0], bodies[1], bodies[2], bodies[3])
+	return files, nil
+}
+
+// CreateReview posts a review from file (the GitHub create-review payload)
+// and returns the review's URL.
+func (CLI) CreateReview(ctx context.Context, ref PRRef, file string) (string, error) {
+	return proc.Run(ctx, "", "gh", "api", "--method", "POST",
+		fmt.Sprintf("repos/%s/pulls/%d/reviews", ref.Repo, ref.Number), "--input", file, "--jq", ".html_url")
+}
+
+// ReplyToComment answers in the thread of an inline review comment.
+func (CLI) ReplyToComment(ctx context.Context, ref PRRef, commentID int64, body string) error {
+	_, err := proc.Run(ctx, "", "gh", "api", "--method", "POST",
+		fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", ref.Repo, ref.Number, commentID), "-f", "body="+body)
+	return err
 }
 
 func parseSearch(out []byte) ([]PRRef, error) {

@@ -2,12 +2,14 @@ package review
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -662,5 +664,136 @@ func TestForget(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.dir, "runs")); !os.IsNotExist(err) {
 		t.Fatalf("runs dir still there: %v", err)
+	}
+}
+
+// fakeGH records what the reviewer posts.
+type fakeGH struct {
+	mu         sync.Mutex
+	failCreate int      // CreateReview fails this many times first
+	reviews    []string // posted payloads
+	replies    []string // "id: body"
+}
+
+func (g *fakeGH) Discussion(context.Context, github.PRRef) ([]github.DiscussionFile, error) {
+	return []github.DiscussionFile{{Name: "pr.json", Body: []byte(`{"title":"T"}`)}, {Name: "review_comments.json", Body: []byte(`[{"id":7}]`)}}, nil
+}
+func (g *fakeGH) CreateReview(_ context.Context, _ github.PRRef, file string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	b, _ := os.ReadFile(file)
+	g.reviews = append(g.reviews, string(b))
+	if g.failCreate > 0 {
+		g.failCreate--
+		return "", errors.New("HTTP 422: Unprocessable Entity (line must be part of the diff)")
+	}
+	return "https://github.com/ethyca/a/pull/1#pullrequestreview-1", nil
+}
+func (g *fakeGH) ReplyToComment(_ context.Context, _ github.PRRef, id int64, body string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.replies = append(g.replies, fmt.Sprintf("%d: %s", id, body))
+	return nil
+}
+func (g *fakeGH) posted() ([]string, []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.reviews), slices.Clone(g.replies)
+}
+
+// runWithReview runs one review whose agent writes reviewJSON to /out/review.json.
+func runWithReview(t *testing.T, gh *fakeGH, reviewJSON string, mutate ...func(*config.Review)) (*fixture, Run) {
+	t.Helper()
+	f := newFixture(t, append([]func(*config.Review){func(c *config.Review) { c.Post = true }}, mutate...)...)
+	f.r.GitHub = gh
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	if reviewJSON != "" {
+		os.WriteFile(filepath.Join(f.runs()[0].Dir, "out", "review.json"), []byte(reviewJSON), 0o644)
+	}
+	f.succeed(f.containers()[0].ID, "")
+	waitFor(t, "run to finish", func() bool { rs := f.runs(); return len(rs) == 1 && rs[0].Status != Running })
+	return f, f.runs()[0]
+}
+
+func TestPostsReviewFromHost(t *testing.T) {
+	gh := &fakeGH{}
+	f, run := runWithReview(t, gh, `{"event":"REQUEST_CHANGES","body":"One bug.","comments":[{"path":"a.txt","line":1,"body":"off by one"}],
+		"replies":[{"comment_id":7,"body":"Fixed in the latest push, thanks."}]}`)
+	if run.Status != Succeeded || run.Posted == nil || run.Posted.URL == "" || run.Posted.Event != "REQUEST_CHANGES" || run.Posted.Comments != 1 || run.Posted.Replies != 1 {
+		t.Fatalf("run = %+v posted = %+v", run, run.Posted)
+	}
+	reviews, replies := gh.posted()
+	var p map[string]any
+	json.Unmarshal([]byte(reviews[0]), &p)
+	if len(reviews) != 1 || p["commit_id"] != f.tr.HeadSHA || p["event"] != "REQUEST_CHANGES" ||
+		!strings.HasSuffix(p["body"].(string), "🤖 Reviewed by waterboy") || len(p["comments"].([]any)) != 1 {
+		t.Fatalf("posted %q", reviews)
+	}
+	if !slices.Equal(replies, []string{"7: Fixed in the latest push, thanks.\n\n🤖 Reviewed by waterboy"}) {
+		t.Fatalf("replies = %q", replies)
+	}
+}
+
+// GitHub refuses inline comments outside the diff, or approving your own PR:
+// fall back to one plain comment carrying everything.
+func TestPostFallsBackToPlainComment(t *testing.T) {
+	gh := &fakeGH{failCreate: 1}
+	_, run := runWithReview(t, gh, `{"event":"APPROVE","body":"LGTM.","comments":[{"path":"a.txt","line":99,"body":"nit"}]}`)
+	reviews, _ := gh.posted()
+	var p map[string]any
+	json.Unmarshal([]byte(reviews[1]), &p)
+	if len(reviews) != 2 || p["event"] != "COMMENT" || p["comments"] != nil || !run.Posted.Fallback ||
+		!strings.Contains(p["body"].(string), "a.txt:99") || !strings.Contains(p["body"].(string), "APPROVE") {
+		t.Fatalf("fallback = %q, posted %+v", reviews, run.Posted)
+	}
+	if run.Status != Succeeded {
+		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestPostFailureFailsTheRun(t *testing.T) {
+	_, run := runWithReview(t, &fakeGH{failCreate: 2}, `{"event":"COMMENT","body":"hi"}`)
+	if run.Status != Failed || !strings.Contains(run.Error, "posting review") || run.Posted == nil || run.Posted.Error == "" {
+		t.Fatalf("run = %+v posted = %+v", run, run.Posted)
+	}
+}
+
+func TestNothingToPost(t *testing.T) {
+	gh := &fakeGH{}
+	_, run := runWithReview(t, gh, "") // no review.json: the agent decided nothing needed saying
+	if reviews, replies := gh.posted(); run.Status != Succeeded || run.Posted != nil || len(reviews)+len(replies) != 0 {
+		t.Fatalf("run = %+v, posted %q %q", run, reviews, replies)
+	}
+}
+
+func TestBadReviewFileFails(t *testing.T) {
+	_, run := runWithReview(t, &fakeGH{}, `{"event":"LGTM","body":"x"}`)
+	if run.Status != Failed || !strings.Contains(run.Error, "event") {
+		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestDryRunDoesNotPost(t *testing.T) {
+	gh := &fakeGH{}
+	_, run := runWithReview(t, gh, `{"event":"COMMENT","body":"hi"}`, func(c *config.Review) { c.Post = false })
+	if reviews, _ := gh.posted(); run.Status != Succeeded || len(reviews) != 0 || run.Posted != nil {
+		t.Fatalf("dry run posted: %q %+v", reviews, run)
+	}
+}
+
+func TestDiscussionIsHandedToTheAgent(t *testing.T) {
+	f := newFixture(t)
+	f.r.GitHub = &fakeGH{}
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	dir := filepath.Join(f.runs()[0].Dir, "context")
+	if b, _ := os.ReadFile(filepath.Join(dir, "review_comments.json")); string(b) != `[{"id":7}]` {
+		t.Fatalf("context file = %q", b)
+	}
+	if !slices.Contains(f.rt.Started()[0].Mounts, container.Mount{Source: dir, Target: "/waterboy/context", ReadOnly: true}) {
+		t.Fatalf("context not mounted: %+v", f.rt.Started()[0].Mounts)
 	}
 }

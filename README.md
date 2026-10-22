@@ -73,11 +73,12 @@ Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
 | `hook_timeout` | `30m` | per hook run |
 | `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; only loopback `Host`s and same-origin POSTs are accepted |
 | `review.disabled` | `false` | don't run reviews |
+| `review.post` | `true` | post the agent's review to GitHub; `false` = dry run (review stays in `out/review.json`) |
 | `review.model` | `opus` | Claude model |
 | `review.max_turns` | `100` | Claude turn limit; hitting it fails the run |
 | `review.max_budget_usd` | `0` (none) | spend limit (only enforced with API-key auth) |
 | `review.prompt_file` | built-in | Go `text/template` prompt (see `internal/review/prompt.md`) |
-| `review.env_file` | `~/.config/waterboy/review.env` | `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN` (the agent posts reviews as that token's user) |
+| `review.env_file` | `~/.config/waterboy/review.env` | `CLAUDE_CODE_OAUTH_TOKEN`, and a read-only `GH_TOKEN` for `gh pr diff` (waterboy posts with your host `gh` login) |
 | `review.env` | `[]` | names of variables copied from waterboy's environment |
 | `review.claude_settings` | — | a `settings.json` given to Claude in each run |
 | `review.plugins_volume` | `waterboy-claude-plugins` | Docker volume mounted as Claude's `plugins/` |
@@ -119,8 +120,15 @@ Each run is Claude Code headless in the repo's image (`make reviewer-image` buil
 1. the repo's cache volumes (`waterboy-<repo>-<path>`, e.g. `.venv`, `node_modules`) are mounted over
    the worktree and its `setup` runs (`uv sync`, `npm install`, …); a failing setup fails the run;
 2. `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`
-   gets the rendered prompt (`prompt.md` in the run dir) and reviews, runs tests, and posts its review
-   to the PR with `gh`. A fresh session each run; its transcript stays in the run's `claude/` dir.
+   gets the rendered prompt (`prompt.md` in the run dir), reads the PR's discussion from
+   `/waterboy/context/` (fetched on the host: PR, reviews, inline comments with ids, issue comments),
+   reviews, runs tests, and writes its review to `/out/review.json`. A fresh session each run; its
+   transcript stays in the run's `claude/` dir;
+3. waterboy posts that review from the host with your `gh` login (`review.post`, default on; off is a
+   dry run): the verdict, body (plus a "🤖 Reviewed by waterboy" footer) and inline comments, pinned to
+   the reviewed head, and replies in inline threads. If GitHub refuses the review (an inline comment
+   outside the diff, or approving your own PR) it's posted once more as one plain comment carrying
+   everything. No `review.json` means nothing to say. The agent itself never needs the GitHub API.
 
 The worktree is mounted read/write at the repo's `workdir` (`/fidesplus`); its `.git` and the clone's
 `.git` are read-only (a container that could write them could plant hooks or config that host-side git

@@ -16,15 +16,20 @@ review the code again only if the discussion calls for it.
 This is your first review of this PR.
 {{- end}}
 
-1. Read the PR description and the whole discussion, including inline review comments and any
-   earlier reviews of yours: `gh pr view {{.PR.Number}} --repo {{.PR.Repo}} --comments` and
-   `gh api repos/{{.PR.Repo}}/pulls/{{.PR.Number}}/comments`.
-2. Review the change (`gh pr diff {{.PR.Number}} --repo {{.PR.Repo}}`) for correctness, security,
-   tests and fit with the codebase (see CLAUDE.md). Run the tests that cover it where that's practical.
-3. Post exactly one review: `gh api repos/{{.PR.Repo}}/pulls/{{.PR.Number}}/reviews --method POST --input review.json`
-   with `commit_id` "{{.PR.HeadSHA}}", `event` APPROVE, REQUEST_CHANGES or COMMENT (whichever honestly
-   reflects the PR), a `body`, and inline `comments` (path, line, side). Be concise and specific; skip
-   praise and nitpicks that don't matter. End the body with "🤖 Reviewed by waterboy".
-   For a replies-only follow-up you may answer in the existing threads instead
-   (`gh api repos/{{.PR.Repo}}/pulls/{{.PR.Number}}/comments/<comment id>/replies -f body=...`).
-4. Write a short summary of what you posted to /out/review.md.
+1. Read the PR and its whole discussion in /waterboy/context/: `pr.json` (description, base branch),
+   `reviews.json`, `review_comments.json` (inline comments, with their `id`s) and `issue_comments.json`.
+   Your own earlier reviews are in there too.
+2. Review the change (`gh pr diff {{.PR.Number}} --repo {{.PR.Repo}}`) for correctness, security, tests
+   and fit with the codebase (see CLAUDE.md). Run the tests that cover it where that's practical.
+3. Don't post anything to GitHub yourself. Write your review to /out/review.json and waterboy posts it:
+   ```json
+   {"event": "APPROVE | REQUEST_CHANGES | COMMENT",
+    "body": "the review summary (markdown)",
+    "comments": [{"path": "src/file.py", "line": 42, "body": "inline comment (markdown)"}],
+    "replies": [{"comment_id": 123, "body": "answer in that inline thread"}]}
+   ```
+   Pick the event that honestly reflects the PR. Be concise and specific; skip praise and nitpicks
+   that don't matter. Inline `line`s are line numbers in the new version of the file and must be inside
+   the diff (add `"side": "LEFT"` for removed lines, `"start_line"` for a range). `comments` and
+   `replies` are optional. For a replies-only follow-up, leave `event` empty and fill `replies`.
+   If nothing needs saying, don't write the file.

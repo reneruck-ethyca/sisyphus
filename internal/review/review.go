@@ -57,6 +57,7 @@ type Run struct {
 	Error     string        `json:"error,omitempty"`
 	Dir       string        `json:"dir"`
 	Claude    *ClaudeResult `json:"claude,omitempty"`  // Claude's final result line, once it has one
+	Posted    *Posted       `json:"posted,omitempty"`  // what waterboy posted to GitHub
 	Overdue   bool          `json:"overdue,omitempty"` // still running past review.timeout (set by Status)
 }
 
@@ -107,6 +108,7 @@ type Reviewer struct {
 	locks *tracker.Locks
 	dir   string // reviews.json and runs/ live here
 
+	GitHub   GitHub // host-side GitHub access: discussion files, posting; nil = neither
 	Kick     func() // asks for a tick soon; called once a reclaimed worktree is free
 	OnChange func() // called after every change, on any goroutine
 
@@ -532,6 +534,11 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	if err := os.WriteFile(filepath.Join(run.Dir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return container.Spec{}, err
 	}
+	if r.GitHub != nil {
+		if err := r.writeDiscussion(ctx, tr.PRRef, filepath.Join(run.Dir, "context")); err != nil {
+			return container.Spec{}, err
+		}
+	}
 	if r.cfg.ClaudeSettings != "" {
 		b, err := os.ReadFile(r.cfg.ClaudeSettings)
 		if err != nil {
@@ -572,6 +579,9 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 		container.Mount{Source: filepath.Join(run.Dir, "prompt.md"), Target: "/waterboy/prompt.md", ReadOnly: true},
 		container.Mount{Source: filepath.Join(run.Dir, "claude"), Target: claudeDir}, // fresh per run
 	)
+	if r.GitHub != nil {
+		mounts = append(mounts, container.Mount{Source: filepath.Join(run.Dir, "context"), Target: "/waterboy/context", ReadOnly: true})
+	}
 	if r.cfg.PluginsVolume != "" {
 		mounts = append(mounts, container.Mount{Source: r.cfg.PluginsVolume, Target: claudeDir + "/plugins"})
 		owned = append(owned, claudeDir+"/plugins")
@@ -750,6 +760,16 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		}
 	}
 	bg := context.WithoutCancel(appCtx)
+	if status == Succeeded && r.cfg.Post && r.GitHub != nil {
+		posted, err := r.post(bg, run)
+		if posted != nil {
+			r.record(id, run.ID, func(x *Run) { x.Posted = posted })
+			slog.Info("review posted", "pr", id, "run", run.ID, "url", posted.URL, "event", posted.Event, "fallback", posted.Fallback)
+		}
+		if err != nil {
+			status, why = Failed, fmt.Errorf("posting review: %w", err)
+		}
+	}
 	if err := r.rt.Remove(bg, run.Container); err != nil {
 		slog.Warn("removing review container", "run", run.ID, "err", err)
 	}

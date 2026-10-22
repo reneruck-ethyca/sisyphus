@@ -64,6 +64,7 @@ func main() {
 		if rev, err = review.New(cfg.Review, container.Docker{}, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
 			fatal(err)
 		}
+		rev.GitHub = gh
 	}
 	if *reset != "" {
 		if err := resetState(ctx, tr, rev, *reset); err != nil {

@@ -42,6 +42,7 @@ type Config struct {
 // Review configures the Claude Code review runs.
 type Review struct {
 	Disabled       bool                  `json:"disabled"`
+	Post           bool                  `json:"post"` // post the agent's review to GitHub (false = dry run)
 	Model          string                `json:"model"`
 	MaxTurns       int                   `json:"max_turns"`
 	MaxBudgetUSD   float64               `json:"max_budget_usd"`  // 0 = no limit (only enforced with API-key auth)
@@ -96,6 +97,7 @@ func Load(path string) (Config, error) {
 		HookTimeout: Duration{30 * time.Minute},
 		HTTPAddr:    "127.0.0.1:7465",
 		Review: Review{
+			Post:          true,
 			Model:         "opus",
 			MaxTurns:      100,
 			EnvFile:       "~/.config/waterboy/review.env",
