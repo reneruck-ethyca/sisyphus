@@ -70,7 +70,6 @@ type Service struct {
 	rev     *review.Reviewer // nil when reviews are disabled
 	logs    *LogBuffer
 	runNow  chan struct{}
-	resets  chan string
 
 	mu      sync.Mutex
 	tracked []tracker.Tracked // last tracker snapshot
@@ -80,7 +79,7 @@ type Service struct {
 
 // NewService wires the tracker, the reviewer (nil = reviews disabled) and the log buffer.
 func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *LogBuffer) *Service {
-	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1), resets: make(chan string, 16)}
+	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1)}
 	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String(), Reviews: rev != nil}
 	tr.OnSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
 	if rev != nil {
@@ -157,39 +156,6 @@ func (s *Service) RunNow() {
 	}
 }
 
-// Reset forgets a PR ("" = all of them): stops its review, drops its review
-// history, removes the worktree waterboy created and stops tracking it. A tick
-// follows, which rediscovers what's still waiting for review from scratch.
-func (s *Service) Reset(prID string) {
-	slog.Info("reset requested", "pr", cmp.Or(prID, "all"))
-	select {
-	case s.resets <- prID:
-	default:
-		slog.Warn("too many resets queued, ignoring", "pr", prID)
-	}
-}
-
-func (s *Service) reset(ctx context.Context, prID string) {
-	ids := []string{prID}
-	if prID == "" {
-		ids = nil
-		for _, tr := range s.tracker.Snapshot() {
-			ids = append(ids, tr.Key())
-		}
-	}
-	if s.rev != nil {
-		s.rev.Forget(prID) // stops its run, so the worktree lock frees up
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	for _, id := range ids {
-		if err := s.tracker.Forget(ctx, id); err != nil {
-			slog.Error("reset", "pr", id, "err", err)
-		}
-	}
-	s.refreshPRs()
-}
-
 // RunQueued reports whether a RunNow is waiting for the loop to pick it up.
 func (s *Service) RunQueued() bool { return len(s.runNow) > 0 }
 
@@ -208,8 +174,6 @@ func (s *Service) Run(ctx context.Context) {
 		select {
 		case <-ticker.C:
 		case <-s.runNow:
-		case id := <-s.resets:
-			s.reset(ctx, id)
 		case <-ctx.Done():
 			return
 		}

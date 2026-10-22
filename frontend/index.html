@@ -46,9 +46,6 @@
   .running, .queued { color: var(--pending); } .succeeded { color: var(--ok); }
   .failed, .timeout, .lost { color: var(--conflict); } .cancelled { color: var(--muted); }
   pre { font: 12px/1.5 ui-monospace, monospace; background: var(--side); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
-  button.quiet { background: none; color: var(--muted); border: 1px solid var(--line); padding: 1px 8px; font-size: 12px; }
-  button.quiet:hover { color: var(--conflict); border-color: var(--conflict); }
-  header button.quiet { margin-left: 8px; }
   button.link { margin: 0; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
   .runhead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
   .runhead h3 { margin: 24px 0 4px; }
@@ -136,8 +133,7 @@
     return `<header><h1>waterboy</h1>
         <span class="muted">${esc(s.user)} · ${esc(s.org)} · every ${esc(s.interval)} ·
         ${s.running ? "running…" : "last run " + time(s.last_run)}</span>
-        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><a href="#logs">Logs</a>
-        <button class="quiet" data-reset="" data-confirm="Reset everything? Stops all reviews, forgets their history, removes the worktrees waterboy created, and starts over.">Reset all</button></header>`;
+        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><a href="#logs">Logs</a></header>`;
   }
 
   const sidebar = sel => `<aside>${status.prs.map(p => `<div class="pr${p.id === sel ? " sel" : ""}" data-id="${esc(p.id)}">
@@ -179,8 +175,7 @@
     let p;
     try { p = await call("PR", id); } catch (e) { return `<p class="err">${esc(e.message ?? e)}</p>`; }
     const field = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
-    return `<h2>${esc(p.title)} <span class="health ${p.health}">${p.health}</span>
-        <button class="quiet" data-reset="${esc(p.id)}" data-confirm="Reset ${esc(p.id)}? Stops its review, forgets its review history, removes its worktree if waterboy created it, and rediscovers it from scratch.">Reset PR</button></h2>
+    return `<h2>${esc(p.title)} <span class="health ${p.health}">${p.health}</span></h2>
       ${p.last_error ? `<p class="err">${esc(p.last_error)}</p>` : ""}
       <dl>${[
         field("PR", `<a href="${esc(p.url)}" data-external>${esc(p.id)}</a>`),
@@ -204,12 +199,6 @@
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
-    if ("reset" in e.target.dataset) {
-      if (!confirm(e.target.dataset.confirm)) return;
-      e.target.disabled = true;
-      if (e.target.dataset.reset) location.hash = "";
-      return call("Reset", e.target.dataset.reset);
-    }
     if (e.target.dataset.open) return call("OpenRun", route().pr, e.target.dataset.open);
     const a = e.target.closest("a[data-external]");
     if (a) { e.preventDefault(); return Browser.OpenURL(a.href); }

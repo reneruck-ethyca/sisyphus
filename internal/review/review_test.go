@@ -637,8 +637,14 @@ func TestForget(t *testing.T) {
 	waitFor(t, "container start", f.started(1))
 	f.r.Tracked(other) // queued behind it (max_concurrent 1)
 
-	f.r.Forget(refA.Key())
+	aDir := f.runs()[0].Dir
+	if err := f.r.Forget(context.Background(), refA.Key()); err != nil {
+		t.Fatal(err)
+	}
 	waitFor(t, "a's run stopped and forgotten", func() bool { return len(f.runs()) == 0 && f.r.Status()[refA.Key()].State == "" })
+	if _, err := os.Stat(aDir); !os.IsNotExist(err) {
+		t.Fatalf("a's run dir still there: %v", err)
+	}
 	if u, ok := f.locks.TryLock(refA.Key()); !ok {
 		t.Fatal("a's worktree still locked")
 	} else {
@@ -646,9 +652,15 @@ func TestForget(t *testing.T) {
 	}
 	waitFor(t, "b starts", func() bool { return f.r.Status()[other.Key()].State == "running" })
 
-	f.r.Forget("") // everything
+	waitFor(t, "b's container", f.started(1))
+	if err := f.r.Forget(context.Background(), ""); err != nil { // everything
+		t.Fatal(err)
+	}
 	waitFor(t, "all forgotten", func() bool { return len(f.r.Status()) == 0 })
-	if len(f.r.st.Queue) != 0 {
-		t.Fatalf("queue = %+v", f.r.st.Queue)
+	if len(f.r.st.Queue) != 0 || len(f.containers()) != 0 {
+		t.Fatalf("queue = %+v, containers = %+v", f.r.st.Queue, f.containers())
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, "runs")); !os.IsNotExist(err) {
+		t.Fatalf("runs dir still there: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -31,6 +32,7 @@ func checkTools(names ...string) error {
 func main() {
 	configPath := flag.String("config", config.DefaultPath(), "config file (optional)")
 	once := flag.Bool("once", false, "run a single tick and exit (no tray)")
+	reset := flag.String("reset", "", `wipe state for one PR ("owner/repo#n") or "all", then exit; stop the app first (make reset does)`)
 	flag.Parse()
 
 	// ponytail: 1000 lines covers several ticks; older lines are in the log file.
@@ -47,11 +49,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	gh := github.CLI{}
-	if cfg.User == "" {
-		if cfg.User, err = gh.CurrentUser(ctx); err != nil {
-			fatal(fmt.Errorf("resolving GitHub user: %w", err))
-		}
-	}
 	st, err := tracker.LoadState(cfg.StateFile)
 	if err != nil {
 		fatal(err)
@@ -61,6 +58,17 @@ func main() {
 	if !cfg.Review.Disabled {
 		if rev, err = review.New(cfg.Review, container.Docker{}, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
 			fatal(err)
+		}
+	}
+	if *reset != "" {
+		if err := resetState(ctx, tr, rev, *reset); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if cfg.User == "" {
+		if cfg.User, err = gh.CurrentUser(ctx); err != nil {
+			fatal(fmt.Errorf("resolving GitHub user: %w", err))
 		}
 	}
 	svc := app.NewService(cfg, tr, rev, logs)
@@ -77,6 +85,40 @@ func main() {
 	if err := runApp(cfg, svc); err != nil {
 		fatal(err)
 	}
+}
+
+// resetState wipes one PR ("owner/repo#n") or "all": review containers, review
+// history and run directories, the worktrees waterboy created, and the tracked
+// entries. The next start rediscovers whatever still awaits review, as new. The
+// app must not be running (it would write its state back).
+func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, which string) error {
+	id := which
+	if which == "all" {
+		id = ""
+	}
+	var ids []string
+	for _, t := range tr.Snapshot() {
+		if id == "" || t.Key() == id {
+			ids = append(ids, t.Key())
+		}
+	}
+	if id != "" && len(ids) == 0 {
+		slog.Warn("PR isn't tracked; clearing its reviews only", "pr", id)
+	}
+	var errs []error
+	if rev != nil {
+		errs = append(errs, rev.Forget(ctx, id))
+	}
+	for _, id := range ids {
+		if err := tr.Forget(ctx, id); err != nil {
+			errs = append(errs, fmt.Errorf("%s stays tracked: %w", id, err))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("reset %s: %w", which, err)
+	}
+	slog.Info("reset done", "which", which, "forgot", len(ids))
+	return nil
 }
 
 func fatal(err error) {

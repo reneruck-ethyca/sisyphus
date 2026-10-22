@@ -1,4 +1,4 @@
-.PHONY: build test plist install-agent uninstall-agent reviewer-image
+.PHONY: build test plist install-agent uninstall-agent reviewer-image start stop restart reset
 
 LABEL := com.reneruck.waterboy
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -24,6 +24,30 @@ plist:
 	plutil -replace EnvironmentVariables.HOME -string "$(HOME)" $(PLIST)
 	plutil -replace StandardOutPath -string "$(HOME)/Library/Logs/waterboy.log" $(PLIST)
 	plutil -replace StandardErrorPath -string "$(HOME)/Library/Logs/waterboy.log" $(PLIST)
+
+LOG := $(HOME)/Library/Logs/waterboy.log
+
+# Stops waterboy however it runs (LaunchAgent or by hand) and waits for it to exit.
+stop:
+	@launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
+	@pkill -x waterboy 2>/dev/null || true
+	@for i in $$(seq 1 50); do pgrep -x waterboy >/dev/null || exit 0; sleep 0.2; done; \
+		echo "waterboy didn't stop" >&2; exit 1
+
+# Starts waterboy: through the LaunchAgent if it's installed, else in the background.
+# Either way it logs to $(LOG).
+start: build
+	@if [ -f $(PLIST) ]; then launchctl bootstrap gui/$$(id -u) $(PLIST) && echo "waterboy started (LaunchAgent)"; \
+	else mkdir -p $(dir $(LOG)) && nohup $(CURDIR)/bin/waterboy >> $(LOG) 2>&1 & echo "waterboy started, logging to $(LOG)"; fi
+
+restart: stop start
+
+# Wipes waterboy's state and starts it again: review containers, review history and
+# run dirs, the worktrees it created, and what it tracks; the restart rediscovers PRs
+# as new. Everything by default; PR='owner/repo#n' for one PR.
+reset: build stop
+	bin/waterboy -reset '$(or $(PR),all)'
+	@$(MAKE) --no-print-directory start
 
 install-agent: build plist
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true

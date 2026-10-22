@@ -38,6 +38,9 @@ make build                     # bin/waterboy (needs cgo / Xcode CLT)
 bin/waterboy -once             # single tick, no tray or window; good for testing
 bin/waterboy                   # menu-bar app ("WB"): status, Open window, Open dashboard, Run now, Open state file, Quit
 make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/waterboy.log
+make start | stop | restart    # through the LaunchAgent if installed, else in the background
+make reset                     # stop, wipe all state (see below), start again
+make reset PR='ethyca/fidesplus#123'   # …just that PR
 make uninstall-agent
 ```
 
@@ -130,10 +133,13 @@ waterboy quits and are re-attached on start; a run whose container is gone is ma
 
 The agent may approve. An approval posted as you makes the tracker drop the PR on its next tick.
 
-**Reset** (dashboard and window: "Reset PR" on a PR, "Reset all" in the header; API: `POST
-/api/prs/{owner}/{repo}/{number}/reset`, `POST /api/reset`) stops the PR's review, forgets its review
-history (run directories stay on disk), removes the worktree if waterboy created it, and stops tracking
-it. A run follows right away and rediscovers whatever still awaits your review, as new.
+
+## Reset
+
+`make reset` (or `bin/waterboy -reset all|owner/repo#n` with the app stopped) removes waterboy's review
+containers, review history and run directories, the worktrees it created (a worktree it can't remove
+keeps its PR tracked, and the error says why), and the tracked entries. On start, waterboy rediscovers
+whatever still awaits your review as new: fresh worktree, fresh review.
 
 ## `on_conflict` hook
 

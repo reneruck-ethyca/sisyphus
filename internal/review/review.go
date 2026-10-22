@@ -182,9 +182,10 @@ func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
 	return false
 }
 
-// Forget drops a PR's queued job and run records ("" = every PR's) and stops its
-// running review. Run directories stay on disk.
-func (r *Reviewer) Forget(prID string) {
+// Forget wipes a PR's review state ("" = every PR's): its queued job, run records
+// and run directories, and its review containers; a review this process is
+// running is stopped. Meant for `waterboy -reset`, with the app stopped.
+func (r *Reviewer) Forget(ctx context.Context, prID string) error {
 	match := func(id string) bool { return prID == "" || id == prID }
 	r.mu.Lock()
 	r.st.Queue = slices.DeleteFunc(r.st.Queue, func(j Job) bool { return match(j.PR.Key()) })
@@ -204,8 +205,18 @@ func (r *Reviewer) Forget(prID string) {
 	for _, c := range cancels {
 		c(errReset)
 	}
-	slog.Info("forgot reviews", "pr", cmp.Or(prID, "all"))
+	labels := map[string]string{"waterboy": "1"}
+	if prID != "" {
+		labels["waterboy.pr"] = prID
+	}
+	cs, err := r.rt.List(ctx, labels)
+	for _, c := range cs {
+		err = errors.Join(err, r.rt.Remove(ctx, c.ID))
+	}
+	err = errors.Join(err, os.RemoveAll(filepath.Join(r.dir, "runs", prPath(prID))))
+	slog.Info("forgot reviews", "pr", cmp.Or(prID, "all"), "containers_removed", len(cs))
 	r.changed()
+	return err
 }
 
 var rank = map[string]int{"replies": 1, "commits": 2, "new": 3}
