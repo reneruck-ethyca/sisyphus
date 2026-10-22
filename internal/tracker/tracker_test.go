@@ -371,3 +371,13 @@ func TestForgetWorktreeAlreadyGone(t *testing.T) {
 		t.Fatal("still tracked")
 	}
 }
+
+// An empty user would turn the search into "every open PR in the org".
+func TestTickRefusesEmptyUser(t *testing.T) {
+	gh := &github.Fake{Cands: []github.PRRef{refA}}
+	tr := newTestTracker(t, gh)
+	tr.cfg.User = ""
+	if err := tr.Tick(context.Background()); err == nil || gh.PRCalls != 0 {
+		t.Fatalf("err %v, PR calls %d", err, gh.PRCalls)
+	}
+}

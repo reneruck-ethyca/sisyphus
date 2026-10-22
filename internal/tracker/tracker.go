@@ -65,6 +65,9 @@ func (t *Tracker) skipOnce(key, why string) {
 // Tick runs one discover → update → cleanup pass. It only returns an error when
 // the candidate search fails, in which case nothing is touched.
 func (t *Tracker) Tick(ctx context.Context) error {
+	if t.cfg.User == "" { // the search would match every open PR in the org
+		return errors.New("no GitHub user configured")
+	}
 	refs, err := t.gh.Candidates(ctx, t.cfg.Org, t.cfg.User)
 	if err != nil {
 		return fmt.Errorf("searching candidates: %w", err)

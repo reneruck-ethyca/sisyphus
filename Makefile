@@ -19,7 +19,7 @@ test:
 plist:
 	mkdir -p $(dir $(PLIST)) $(HOME)/Library/Logs
 	cp launchagent.plist $(PLIST)
-	plutil -replace ProgramArguments.0 -string "$(CURDIR)/bin/waterboy" $(PLIST)
+	plutil -replace ProgramArguments -json '["$(CURDIR)/bin/waterboy"]' $(PLIST)
 	plutil -replace EnvironmentVariables.PATH -string "$$PATH" $(PLIST)
 	plutil -replace EnvironmentVariables.HOME -string "$(HOME)" $(PLIST)
 	plutil -replace StandardOutPath -string "$(HOME)/Library/Logs/waterboy.log" $(PLIST)

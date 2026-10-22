@@ -49,6 +49,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	gh := github.CLI{}
+	if cfg.User == "" && *reset == "" { // before tracker.New: it keeps its own copy of cfg
+		if cfg.User, err = gh.CurrentUser(ctx); err != nil {
+			fatal(fmt.Errorf("resolving GitHub user: %w", err))
+		}
+	}
 	st, err := tracker.LoadState(cfg.StateFile)
 	if err != nil {
 		fatal(err)
@@ -65,11 +70,6 @@ func main() {
 			fatal(err)
 		}
 		return
-	}
-	if cfg.User == "" {
-		if cfg.User, err = gh.CurrentUser(ctx); err != nil {
-			fatal(fmt.Errorf("resolving GitHub user: %w", err))
-		}
 	}
 	svc := app.NewService(cfg, tr, rev, logs)
 	slog.Info("waterboy starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
