@@ -50,6 +50,12 @@
   .runhead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
   .runhead h3 { margin: 24px 0 4px; }
   .overdue { color: var(--error); }
+  .reviewing { display: flex; gap: 10px; flex-wrap: wrap; }
+  .reviewing a.active { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: 10px; background: var(--hover);
+    color: var(--fg); text-decoration: none; font: 12px ui-monospace, monospace; }
+  .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--pending); animation: pulse 1.4s ease-in-out infinite; }
+  .active.overdue .pulse { background: var(--error); }
+  @keyframes pulse { 50% { opacity: .25; } }
   #events { margin-top: 12px; display: flex; flex-direction: column; gap: 5px; }
   .ev { white-space: pre-wrap; word-break: break-word; }
   .ev.output, .ev.init, .ev.system { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); }
@@ -67,6 +73,7 @@
 
   const call = (m, ...a) => Call.ByName("main.UI." + m, ...a);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+  const since = t => { const s = Math.max(0, Math.round((Date.now() - new Date(t)) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${s % 60}s` : `${Math.floor(s / 3600)}h${Math.floor(s % 3600 / 60)}m`; };
   const time = t => !t || t.startsWith("0001") ? "never" : new Date(t).toLocaleString();
   const app = document.getElementById("app");
   let status, logs = [];
@@ -133,6 +140,9 @@
     return `<header><h1>waterboy</h1>
         <span class="muted">${esc(s.user)} · ${esc(s.org)} · every ${esc(s.interval)} ·
         ${s.running ? "running…" : "last run " + time(s.last_run)}</span>
+        <span class="reviewing">${(s.reviewing ?? []).map(a => `<a class="active${a.overdue ? " overdue" : ""}" href="${runHash(a.pr, a.run)}"
+          title="container ${esc(a.container || "starting")}"><span class="pulse"></span>${esc(a.pr)} · ${esc(a.container_name || a.container.slice(0, 12) || "starting…")}
+          · ${since(a.started)}${a.overdue ? " ⚠" : ""}</a>`).join("") || `<span class="muted">no review running</span>`}</span>
         <button id="run" ${s.running ? "disabled" : ""}>Run now</button><a href="#logs">Logs</a></header>`;
   }
 

@@ -48,7 +48,8 @@ type Run struct {
 	ID        string        `json:"id"`
 	Job       Job           `json:"job"`
 	Image     string        `json:"image"`
-	Container string        `json:"container,omitempty"`
+	Container string        `json:"container,omitempty"`      // ID
+	Name      string        `json:"container_name,omitempty"` // docker name
 	Started   time.Time     `json:"started"`
 	Finished  time.Time     `json:"finished"`
 	Status    string        `json:"status"`
@@ -482,7 +483,7 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 		return
 	}
 	run.Container = cid
-	r.record(id, run.ID, func(x *Run) { x.Container = cid })
+	r.record(id, run.ID, func(x *Run) { x.Container, x.Name = cid, spec.Name })
 	slog.Info("review started", "pr", id, "run", run.ID, "reason", run.Job.Reason, "container", cid)
 	r.follow(appCtx, runCtx, run, unlock, false)
 }

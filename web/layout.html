@@ -66,6 +66,12 @@
   .ev.bad, .ev.bad summary { color: var(--bad); }
   .ev.result { font-weight: 600; padding: .5rem .75rem; border: 1px solid var(--line); border-radius: 6px; }
   .overdue { color: var(--warn); }
+  .reviewing { display: flex; gap: .75rem; flex-wrap: wrap; font-size: 13px; }
+  .reviewing a.active { display: inline-flex; align-items: center; gap: .4rem; padding: .05rem .6rem; border-radius: 1rem;
+    background: var(--code); color: var(--fg); text-decoration: none; font: 12px ui-monospace, monospace; }
+  .pulse { width: .5rem; height: .5rem; border-radius: 50%; background: var(--info); animation: pulse 1.4s ease-in-out infinite; }
+  .active.overdue .pulse { background: var(--warn); }
+  @keyframes pulse { 50% { opacity: .25; } }
   @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; } }
 </style>
 </head>

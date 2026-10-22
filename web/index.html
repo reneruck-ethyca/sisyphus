@@ -4,6 +4,9 @@
   <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
   <span>{{if .Running}}Running…{{else}}Last run {{when .LastRun}}{{end}} · {{.Summary}}</span>
   <button id="run" {{if .Running}}disabled{{end}}>Run now</button>
+  <span class="reviewing">{{range .Reviewing}}<a class="active{{if .Overdue}} overdue{{end}}" href="{{runPath .PR .Run}}"
+    title="container {{or .Container "starting"}}"><span class="pulse"></span>{{.PR}} · {{or .Name (printf "%.12s" .Container) "starting…"}} · {{since .Started}}{{if .Overdue}} ⚠{{end}}</a>
+    {{else}}<span class="muted">no review running</span>{{end}}</span>
   <nav><a href="/logs">Logs</a></nav>
 </header>
 <div class="cols">

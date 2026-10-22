@@ -175,6 +175,12 @@ func TestHTTPLogStream(t *testing.T) {
 // newReviewServer runs one placeholder review to completion against a real git
 // worktree and a fake container runtime, then serves the dashboard.
 func newReviewServer(t *testing.T) (*httptest.Server, *app.Service, review.Run) {
+	return reviewServer(t, true)
+}
+
+// reviewServer starts one review against a real git worktree and a fake
+// container runtime; finish lets it complete, otherwise it's left running.
+func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, review.Run) {
 	t.Helper()
 	_, clone := gittest.Setup(t)
 	head := gittest.Git(t, clone, "rev-parse", "HEAD")
@@ -198,7 +204,12 @@ func newReviewServer(t *testing.T) (*httptest.Server, *app.Service, review.Run) 
 		if time.Now().After(deadline) {
 			t.Fatal("review never finished")
 		}
-		if cs, _ := rt.List(ctx, nil); len(cs) == 1 && cs[0].Running {
+		if pr, _ := svc.PR(testkit.RefA.Key()); !finish && pr.Review.State == "running" && pr.Review.Latest().Container != "" {
+			srv := httptest.NewServer(newHandler(svc))
+			t.Cleanup(srv.Close)
+			return srv, svc, *pr.Review.Latest()
+		}
+		if cs, _ := rt.List(ctx, nil); finish && len(cs) == 1 && cs[0].Running {
 			rt.Finish(cs[0].ID, 0, "review <log>\n"+`{"type":"assistant","message":{"content":[{"type":"text","text":"Found <b>one</b> bug."}]}}`+"\n"+
 				`{"type":"result","subtype":"success","is_error":false,"num_turns":3,"duration_ms":61000,"total_cost_usd":0.5,"session_id":"s1"}`+"\n")
 		}
@@ -283,5 +294,33 @@ func TestHTTPRunEventStream(t *testing.T) {
 	}
 	if !slices.Equal(kinds, []string{"text", "result"}) {
 		t.Fatalf("streamed %q (line 0 should be skipped by from=1)", kinds)
+	}
+}
+
+func TestHTTPShowsRunningContainer(t *testing.T) {
+	srv, svc, run := reviewServer(t, false)
+	st := svc.Status()
+	if len(st.Reviewing) != 1 {
+		t.Fatalf("reviewing = %+v", st.Reviewing)
+	}
+	a := st.Reviewing[0]
+	if a.PR != testkit.RefA.Key() || a.Run != run.ID || a.Container != run.Container || !strings.HasPrefix(a.Name, "waterboy-ethyca-a-1-") {
+		t.Fatalf("active review = %+v", a)
+	}
+	_, body := get(t, srv.URL+"/")
+	for _, want := range []string{`class="active"`, `href="/prs/ethyca/a/1/runs/` + run.ID + `"`, a.Name} {
+		if !strings.Contains(body, want) {
+			t.Errorf("header missing %q", want)
+		}
+	}
+}
+
+func TestHTTPShowsNoContainerWhenIdle(t *testing.T) {
+	srv, svc, _ := newReviewServer(t)
+	if r := svc.Status().Reviewing; len(r) != 0 {
+		t.Fatalf("reviewing = %+v", r)
+	}
+	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "no review running") {
+		t.Error("idle header should say no review is running")
 	}
 }

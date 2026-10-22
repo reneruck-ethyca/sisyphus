@@ -8,6 +8,7 @@ import (
 
 	"github.com/reneruck/waterboy/internal/app"
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/review"
 	"github.com/reneruck/waterboy/internal/testkit"
 	"github.com/reneruck/waterboy/internal/tracker"
 )
@@ -42,6 +43,8 @@ func TestTrayStatus(t *testing.T) {
 		"Running… · 0 tracked":        {Running: true},
 		"Last run 09:05 failed: boom": {LastRun: at, LastError: "boom"},
 		"Last run 09:05 · 0 tracked":  {LastRun: at},
+		"Reviewing ethyca/a#1 · 1 tracked · 1 review running": {LastRun: at, Reviewing: []app.ActiveReview{{PR: "ethyca/a#1"}},
+			PRs: []app.PRView{{Review: review.PRStatus{State: "running"}}}},
 	} {
 		if got := trayStatus(st); got != want {
 			t.Errorf("trayStatus = %q, want %q", got, want)

@@ -131,6 +131,8 @@ func runApp(cfg config.Config, svc *app.Service) error {
 
 func trayStatus(st app.Status) string {
 	switch {
+	case len(st.Reviewing) > 0:
+		return "Reviewing " + st.Reviewing[0].PR + " · " + st.Summary()
 	case st.Running:
 		return "Running… · " + st.Summary()
 	case st.LastError != "":

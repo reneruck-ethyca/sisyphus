@@ -28,6 +28,12 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 		return t.Local().Format("2006-01-02 15:04:05")
 	},
+	// runPath links an active review to its live run page.
+	"runPath": func(prID, run string) string {
+		repo, n, _ := strings.Cut(prID, "#")
+		return "/prs/" + repo + "/" + n + "/runs/" + run
+	},
+	"since": func(t time.Time) string { return time.Since(t).Round(time.Second).String() },
 	// live pages update themselves; the rest refresh every 15s.
 	"live": func(title string) bool { return title == "Logs" || strings.HasPrefix(title, "Run ") },
 }).ParseFS(webFS, "web/*.html"))

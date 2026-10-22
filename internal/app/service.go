@@ -25,7 +25,19 @@ type Status struct {
 	PRs       []PRView  `json:"prs"`                  // sorted by ID
 	Reviews   bool      `json:"reviews"`              // false when review.disabled
 	// Why reviews are waiting on the container runtime ("" = they aren't).
-	RuntimeError string `json:"runtime_error,omitempty"`
+	RuntimeError string         `json:"runtime_error,omitempty"`
+	Reviewing    []ActiveReview `json:"reviewing"` // review runs in progress, oldest first
+}
+
+// ActiveReview is a review run in progress and its container.
+type ActiveReview struct {
+	PR        string    `json:"pr"`
+	Run       string    `json:"run"`
+	Reason    string    `json:"reason"`
+	Container string    `json:"container"`      // ID; "" while it's being started
+	Name      string    `json:"container_name"` // "" for one re-attached after a restart
+	Started   time.Time `json:"started"`
+	Overdue   bool      `json:"overdue"`
 }
 
 func (s Status) Summary() string {
@@ -223,7 +235,17 @@ func (s *Service) publish() {
 	for _, tr := range tracked {
 		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: reviews[tr.Key()]})
 	}
-	s.update(func(st *Status) { st.PRs, st.RuntimeError = prs, runtimeErr })
+	var active []ActiveReview
+	for id, ps := range reviews {
+		for _, r := range ps.Runs {
+			if r.Status == review.Running {
+				active = append(active, ActiveReview{PR: id, Run: r.ID, Reason: r.Job.Reason, Container: r.Container,
+					Name: r.Name, Started: r.Started, Overdue: r.Overdue})
+			}
+		}
+	}
+	slices.SortFunc(active, func(a, b ActiveReview) int { return a.Started.Compare(b.Started) })
+	s.update(func(st *Status) { st.PRs, st.RuntimeError, st.Reviewing = prs, runtimeErr, active })
 }
 
 func (s *Service) update(fn func(*Status)) {
