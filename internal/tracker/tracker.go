@@ -261,7 +261,7 @@ func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 	if _, err := proc.Run(ctx, repoDir, "git", "worktree", "prune"); err != nil {
 		slog.Warn("pruning worktrees", "pr", tr.Key(), "err", err)
 	}
-	if tr.CreatedBranch {
+	if tr.CreatedBranch && worktree.BranchExists(ctx, repoDir, tr.HeadRef) {
 		if _, err := proc.Run(ctx, repoDir, "git", "branch", "-d", "--", tr.HeadRef); err != nil {
 			slog.Warn("keeping branch of deleted worktree", "pr", tr.Key(), "branch", tr.HeadRef, "err", err)
 		}
