@@ -30,6 +30,7 @@ type Review struct {
 type Comment struct {
 	User      string
 	Bot       bool
+	Body      string
 	CreatedAt time.Time
 }
 
@@ -229,13 +230,14 @@ func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
 	for _, raw := range [][]byte{reviewComments, issueComments} {
 		var cs []struct {
 			User      ghUser    `json:"user"`
+			Body      string    `json:"body"`
 			CreatedAt time.Time `json:"created_at"`
 		}
 		if err := json.Unmarshal(raw, &cs); err != nil {
 			return PR{}, fmt.Errorf("parse comments: %w", err)
 		}
 		for _, c := range cs {
-			pr.Comments = append(pr.Comments, Comment{User: c.User.Login, Bot: c.User.Type == "Bot", CreatedAt: c.CreatedAt})
+			pr.Comments = append(pr.Comments, Comment{User: c.User.Login, Bot: c.User.Type == "Bot", Body: c.Body, CreatedAt: c.CreatedAt})
 		}
 	}
 	return pr, nil

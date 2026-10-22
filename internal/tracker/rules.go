@@ -3,6 +3,7 @@ package tracker
 import (
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/github"
@@ -71,21 +72,24 @@ func requested(pr github.PR, me string, myTeams []string) bool {
 // newReplies counts human comments and review bodies not by me that are newer
 // than since. latest is the newest timestamp seen on the PR (or since), used to
 // advance the cursor.
+// WaterboyMark ends everything waterboy posts; such posts are never replies.
+const WaterboyMark = "🤖 Reviewed by waterboy"
+
 func newReplies(pr github.PR, me string, since time.Time) (count int, latest time.Time) {
 	latest = since
-	consider := func(user string, bot bool, ts time.Time, counts bool) {
+	consider := func(user string, bot bool, body string, ts time.Time, counts bool) {
 		if ts.After(latest) {
 			latest = ts
 		}
-		if counts && !bot && user != me && ts.After(since) {
+		if counts && !bot && user != me && !strings.Contains(body, WaterboyMark) && ts.After(since) {
 			count++
 		}
 	}
 	for _, c := range pr.Comments {
-		consider(c.User, c.Bot, c.CreatedAt, true)
+		consider(c.User, c.Bot, c.Body, c.CreatedAt, true)
 	}
 	for _, r := range pr.Reviews {
-		consider(r.User, r.Bot, r.SubmittedAt, r.Body != "")
+		consider(r.User, r.Bot, r.Body, r.SubmittedAt, r.Body != "")
 	}
 	return count, latest
 }

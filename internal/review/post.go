@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/tracker"
 )
 
 // GitHub is what reviews need from GitHub, done on the host with the user's
@@ -55,7 +56,7 @@ type Posted struct {
 	Error    string `json:"error,omitempty"`
 }
 
-const footer = "\n\n🤖 Reviewed by waterboy"
+const footer = "\n\n" + tracker.WaterboyMark // also how the tracker knows not to count our posts as replies
 
 var events = []string{"APPROVE", "REQUEST_CHANGES", "COMMENT"}
 

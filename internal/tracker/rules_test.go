@@ -87,3 +87,16 @@ func TestRequested(t *testing.T) {
 		}
 	}
 }
+
+// What waterboy posts never counts as a reply, whoever's account posted it
+// (otherwise its own review triggers a follow-up review of itself).
+func TestNewRepliesIgnoresWaterboysOwnPosts(t *testing.T) {
+	own := github.Review{User: "poster", State: "COMMENTED", Body: "Looks off.\n\n" + WaterboyMark, SubmittedAt: at(2)}
+	pr := github.PR{Reviews: []github.Review{own}, Comments: []github.Comment{
+		{User: "poster", Body: "Thanks!\n\n" + WaterboyMark, CreatedAt: at(3)},
+		{User: "alice", Body: "Fixed.", CreatedAt: at(4)},
+	}}
+	if n, latest := newReplies(pr, "me", at(1)); n != 1 || !latest.Equal(at(4)) {
+		t.Fatalf("replies = %d, latest %v", n, latest)
+	}
+}
