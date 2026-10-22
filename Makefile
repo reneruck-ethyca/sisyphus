@@ -37,7 +37,9 @@ stop:
 # Starts waterboy: through the LaunchAgent if it's installed, else in the background.
 # Either way it logs to $(LOG).
 start: build
-	@if [ -f $(PLIST) ]; then launchctl bootstrap gui/$$(id -u) $(PLIST) && echo "waterboy started (LaunchAgent)"; \
+	@if [ -f $(PLIST) ]; then \
+		launchctl print gui/$$(id -u)/$(LABEL) >/dev/null 2>&1 || launchctl bootstrap gui/$$(id -u) $(PLIST); \
+		launchctl kickstart gui/$$(id -u)/$(LABEL) && echo "waterboy started (LaunchAgent)"; \
 	else mkdir -p $(dir $(LOG)) && nohup $(CURDIR)/bin/waterboy >> $(LOG) 2>&1 & echo "waterboy started, logging to $(LOG)"; fi
 
 restart: stop start
