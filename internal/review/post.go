@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -78,12 +79,19 @@ func (r *Reviewer) writeDiscussion(ctx context.Context, ref github.PRRef, dir st
 // post publishes the agent's out/review.json, if it wrote one. nil, nil means
 // there was nothing to post.
 func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
-	b, err := os.ReadFile(filepath.Join(run.Dir, "out", "review.json"))
+	// The container wrote out/: os.Root refuses a review.json that is (or
+	// passes through) a symlink leading outside it, so no host file gets posted.
+	root, err := os.OpenRoot(filepath.Join(run.Dir, "out"))
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	b, err := root.ReadFile("review.json")
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("review.json: %w", err)
 	}
 	var f ReviewFile
 	if err := json.Unmarshal(b, &f); err != nil {
@@ -134,10 +142,19 @@ func (r *Reviewer) createReview(ctx context.Context, ref github.PRRef, dir, name
 	return r.GitHub.CreateReview(ctx, ref, file)
 }
 
+// githubReason keeps only GitHub's own reason from a gh error (status and
+// message), not the command line, local paths or anything else from the host.
+var githubReason = regexp.MustCompile(`[^:]*\(HTTP \d+\)|HTTP \d+[^\n]*`)
+
 // folded turns a review GitHub refused into one comment's text.
 func folded(f ReviewFile, why error) string {
+	reason := strings.TrimSpace(githubReason.FindString(why.Error()))
+	if reason == "" {
+		reason = "unknown error"
+	}
+	reason = strings.TrimPrefix(reason, "gh: ")
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "**Verdict: %s** (posted as a comment: GitHub refused the review: %s)\n\n%s", f.Event, why, f.Body)
+	fmt.Fprintf(&sb, "**Verdict: %s** (posted as a comment: GitHub refused the review: %s)\n\n%s", f.Event, reason, f.Body)
 	for _, c := range f.Comments {
 		fmt.Fprintf(&sb, "\n\n**`%s:%d`**\n%s", c.Path, c.Line, c.Body)
 	}

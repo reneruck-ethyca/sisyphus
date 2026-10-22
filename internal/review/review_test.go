@@ -797,3 +797,29 @@ func TestDiscussionIsHandedToTheAgent(t *testing.T) {
 		t.Fatalf("context not mounted: %+v", f.rt.Started()[0].Mounts)
 	}
 }
+
+// A container could point out/review.json at a host file to get it posted.
+func TestReviewFileSymlinkIsRefused(t *testing.T) {
+	secret := filepath.Join(t.TempDir(), "secret.json")
+	os.WriteFile(secret, []byte(`{"event":"COMMENT","body":"host secret"}`), 0o644)
+	gh := &fakeGH{}
+	f := newFixture(t, func(c *config.Review) { c.Post = true })
+	f.r.GitHub = gh
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	os.Symlink(secret, filepath.Join(f.runs()[0].Dir, "out", "review.json"))
+	f.succeed(f.containers()[0].ID, "")
+	waitFor(t, "run to finish", func() bool { return f.runs()[0].Status != Running })
+	if reviews, _ := gh.posted(); len(reviews) != 0 || f.runs()[0].Status != Failed {
+		t.Fatalf("followed the symlink: posted %q, run %+v", reviews, f.runs()[0])
+	}
+}
+
+func TestFallbackDoesNotLeakLocalDetails(t *testing.T) {
+	err := errors.New("gh api --method POST repos/ethyca/a/pulls/1/reviews --input /Users/me/.local/state/waterboy/runs/x/post.json: exit status 1: gh: Unprocessable Entity (HTTP 422)")
+	body := folded(ReviewFile{Event: "APPROVE", Body: "ok"}, err)
+	if strings.Contains(body, "/Users/") || strings.Contains(body, "--input") || !strings.Contains(body, "HTTP 422") {
+		t.Fatalf("fallback body = %q", body)
+	}
+}
