@@ -60,9 +60,44 @@ func (s Status) Summary() string {
 // PRView is a tracked PR as UIs see it: a copy of its state plus derived fields.
 type PRView struct {
 	tracker.Tracked
-	ID     string          `json:"id"`     // "owner/repo#n"
-	Health string          `json:"health"` // "conflict" | "error" | "ok" (tracking, not review)
-	Review review.PRStatus `json:"review"`
+	ID         string          `json:"id"`     // "owner/repo#n"
+	Health     string          `json:"health"` // "conflict" | "error" | "ok" (tracking, not review)
+	Review     review.PRStatus `json:"review"`
+	ReviewNote string          `json:"review_note"` // why a review is or isn't happening, in a line
+}
+
+// reviewNote says in a line where the PR's review stands and why. blocked and
+// runtimeErr are what keeps queued reviews from starting ("" = nothing).
+func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, runtimeErr string) string {
+	if !reviews {
+		return "reviews are disabled"
+	}
+	short := func(sha string) string { return sha[:min(len(sha), 8)] }
+	switch rs.State {
+	case "running":
+		return "reviewing (" + rs.Runs[0].Job.Reason + ")"
+	case "queued":
+		switch {
+		case blocked != "":
+			return "queued, waiting: " + blocked
+		case runtimeErr != "":
+			return "queued, waiting for the container runtime"
+		}
+		return "queued"
+	}
+	last := rs.Latest()
+	switch {
+	case last == nil && blocked != "":
+		return "not reviewed: " + blocked
+	case last == nil:
+		return "not reviewed yet: waits for the head to be synced"
+	case last.Status != review.Succeeded:
+		return fmt.Sprintf("last review %s: %s; next one on new commits or replies", last.Status, cmp.Or(last.Error, "no details"))
+	case last.Job.PR.HeadSHA != tr.HeadSHA:
+		return fmt.Sprintf("reviewed %s; head %s not synced yet", short(last.Job.PR.HeadSHA), short(tr.HeadSHA))
+	}
+	return fmt.Sprintf("up to date: reviewed %s at %s; next one on new commits or replies",
+		short(last.Job.PR.HeadSHA), last.Finished.Local().Format("Jan 2 15:04"))
 }
 
 func health(tr tracker.Tracked) string {
@@ -208,6 +243,14 @@ func (s *Service) RunOnce(ctx context.Context) {
 			st.LastError = err.Error()
 		}
 	})
+	if s.rev != nil {
+		s.rev.Ensure(s.tracker.Snapshot()) // a first review for PRs that never got one
+		s.publish()
+	}
+	for _, pr := range s.Status().PRs { // what this sync left each PR at, and why
+		slog.Info("PR", "pr", pr.ID, "head", pr.HeadSHA[:min(len(pr.HeadSHA), 8)], "sync", cmp.Or(pr.LastError, pr.Health),
+			"review", pr.ReviewNote)
+	}
 	if err == nil {
 		slog.Info("run finished", "took", time.Since(start).Round(time.Millisecond), "summary", s.Status().Summary())
 	}
@@ -233,8 +276,14 @@ func (s *Service) publish() {
 	tracked := s.tracked
 	s.mu.Unlock()
 	prs := make([]PRView, 0, len(tracked))
+	blocked := map[string]string{}
 	for _, tr := range tracked {
-		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: reviews[tr.Key()]})
+		if _, ok := blocked[tr.Repo]; !ok && s.rev != nil {
+			blocked[tr.Repo] = s.rev.Blocked(tr.Repo)
+		}
+		rs := reviews[tr.Key()]
+		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs,
+			ReviewNote: reviewNote(tr, rs, s.rev != nil, blocked[tr.Repo], runtimeErr)})
 	}
 	var active []ActiveReview
 	for id, ps := range reviews {

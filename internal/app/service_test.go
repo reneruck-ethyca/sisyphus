@@ -114,3 +114,36 @@ func TestServiceShowsReviewState(t *testing.T) {
 		t.Fatalf("status = %+v, summary %q", st, st.Summary())
 	}
 }
+
+func TestReviewNote(t *testing.T) {
+	tr := tracker.Tracked{HeadSHA: "4f0b24f88e35"}
+	done := func(status, head, err string) review.PRStatus {
+		return review.PRStatus{Runs: []review.Run{{Status: status, Error: err, Job: review.Job{Reason: "new", PR: tracker.Tracked{HeadSHA: head}},
+			Finished: time.Date(2026, 10, 23, 12, 0, 0, 0, time.Local)}}}
+	}
+	running := done(review.Running, "4f0b24f88e35", "")
+	running.State = "running"
+	queued := review.PRStatus{State: "queued"}
+	for _, c := range []struct {
+		name             string
+		rs               review.PRStatus
+		reviews          bool
+		blocked, runtime string
+		want             string
+	}{
+		{"disabled", review.PRStatus{}, false, "", "", "reviews are disabled"},
+		{"running", running, true, "", "", "reviewing (new)"},
+		{"queued", queued, true, "", "", "queued"},
+		{"queued, blocked", queued, true, "env file missing: /x", "", "queued, waiting: env file missing: /x"},
+		{"queued, no runtime", queued, true, "", "docker down", "queued, waiting for the container runtime"},
+		{"never, blocked", review.PRStatus{}, true, "no review.repos entry for o/r", "", "not reviewed: no review.repos entry for o/r"},
+		{"never", review.PRStatus{}, true, "", "", "not reviewed yet: waits for the head to be synced"},
+		{"failed", done(review.Failed, "4f0b24f88e35", "boom"), true, "", "", "last review failed: boom; next one on new commits or replies"},
+		{"old head", done(review.Succeeded, "aaaaaaaaaaaa", ""), true, "", "", "reviewed aaaaaaaa; head 4f0b24f8 not synced yet"},
+		{"up to date", done(review.Succeeded, "4f0b24f88e35", ""), true, "", "", "up to date: reviewed 4f0b24f8 at Oct 23 12:00; next one on new commits or replies"},
+	} {
+		if got := reviewNote(tr, c.rs, c.reviews, c.blocked, c.runtime); got != c.want {
+			t.Errorf("%s: got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+}

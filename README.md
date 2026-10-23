@@ -116,7 +116,13 @@ A run is started when a PR is first tracked (`new`), after new commits (`commits
 run still going on the old head) and after new replies (`replies`, queued behind a running one). Each
 PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and one running container,
 which holds the PR's worktree lock: the tracker doesn't sync or remove that worktree meanwhile, asks
-for it back instead, and catches up on the next tick. Only repos in `review.repos` are reviewed.
+for it back instead, and catches up on the next tick. Only repos in `review.repos` are reviewed. A
+tracked PR that never had a review gets one queued after the next tick. Jobs whose env files are missing
+stay queued, say so, and start within a minute of the file appearing.
+
+Every tick logs one `PR` line per tracked PR: its head, sync state, and where its review stands and
+why (`queued, waiting: env file missing: …`, `up to date: reviewed 4f0b24f8 at …; next one on new
+commits or replies`, …). The UIs show the same line on the PR page and as the review cell's tooltip.
 
 Each run is Claude Code headless in the repo's image (`make reviewer-image` builds
 `waterboy-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default

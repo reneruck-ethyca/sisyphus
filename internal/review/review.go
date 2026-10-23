@@ -140,7 +140,7 @@ func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir stri
 		r.st.Stacks = map[string]*StackRun{}
 	}
 	for name, repo := range cfg.Repos { // surface a missing secrets file at startup
-		r.envFilesExist(name, repo)
+		r.envFilesMissing(name, repo)
 	}
 	return r, nil
 }
@@ -180,36 +180,63 @@ func (r *Reviewer) Dropped(tr tracker.Tracked, _ string) {
 	r.changed()
 }
 
-// reviewable: only repos with a review.repos entry and all their env files are
-// reviewed. (Fork PRs never get here: the tracker doesn't track them.)
+// reviewable: only repos with a review.repos entry are reviewed. (Fork PRs never
+// get here: the tracker doesn't track them.)
 func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
-	repo, ok := r.cfg.Repos[tr.Repo]
-	if !ok {
+	if _, ok := r.cfg.Repos[tr.Repo]; !ok {
 		if r.once(tr.Repo) {
 			slog.Info("not reviewing: no review.repos entry", "repo", tr.Repo)
 		}
 		return false
 	}
-	return r.envFilesExist(tr.Repo, repo)
+	return true
 }
 
-// envFilesExist reports whether repo's env files are there; docker refuses to
-// start a review without them. Re-checked on every event, so creating a missing
-// file needs no restart. Each missing file is logged once.
-func (r *Reviewer) envFilesExist(name string, repo config.RepoReview) bool {
-	ok := true
+// Blocked says why repo's reviews can't run now ("" = they can): no review
+// config, or a missing env file, which docker refuses to start without. Queued
+// jobs wait for it; it's re-checked every minute, so creating a missing file
+// needs no restart.
+func (r *Reviewer) Blocked(repo string) string {
+	cfg, ok := r.cfg.Repos[repo]
+	if !ok {
+		return "no review.repos entry for " + repo
+	}
+	return r.envFilesMissing(repo, cfg)
+}
+
+// envFilesMissing names the first of repo's env files that isn't there ("" = all
+// are). Each missing file is logged once.
+func (r *Reviewer) envFilesMissing(name string, repo config.RepoReview) string {
 	for _, f := range []string{repo.EnvFile, r.cfg.EnvFile} {
 		if f == "" {
 			continue
 		}
 		if _, err := os.Stat(f); err != nil {
-			ok = false
 			if r.once("env:" + f) {
-				slog.Error("not reviewing: env file missing", "repo", name, "file", f, "err", err)
+				slog.Error("reviews wait: env file missing", "repo", name, "file", f, "err", err)
 			}
+			return "env file missing: " + f
 		}
 	}
-	return ok
+	return ""
+}
+
+// Ensure queues a first review for tracked PRs that never had one (tracked
+// while their repo wasn't reviewable, or before a crash). Call after each tick.
+func (r *Reviewer) Ensure(prs []tracker.Tracked) {
+	for _, tr := range prs {
+		if _, ok := r.cfg.Repos[tr.Repo]; !ok || tr.AnnouncedSHA == "" || tr.AnnouncedSHA != tr.HeadSHA {
+			continue // not reviewed here, or not synced to its head yet
+		}
+		id := tr.Key()
+		r.mu.Lock()
+		none := len(r.st.Runs[id]) == 0 && r.active[id] == nil &&
+			!slices.ContainsFunc(r.st.Queue, func(j Job) bool { return j.PR.Key() == id })
+		r.mu.Unlock()
+		if none {
+			r.enqueue(Job{PR: tr, Reason: "new"})
+		}
+	}
 }
 
 // once reports whether key is new to r.skipped, marking it seen.
@@ -276,7 +303,11 @@ func (r *Reviewer) enqueue(j Job) {
 	}
 	r.saveLocked()
 	r.mu.Unlock()
-	slog.Info("review queued", "pr", j.PR.Key(), "reason", j.Reason, "head", j.PR.HeadSHA)
+	if why := r.Blocked(j.PR.Repo); why != "" {
+		slog.Warn("review queued, waiting", "pr", j.PR.Key(), "reason", j.Reason, "head", j.PR.HeadSHA, "waiting_for", why)
+	} else {
+		slog.Info("review queued", "pr", j.PR.Key(), "reason", j.Reason, "head", j.PR.HeadSHA)
+	}
 	r.changed()
 }
 
@@ -404,9 +435,13 @@ func (r *Reviewer) lose(run Run, err error) {
 // Containers keep running when ctx ends, so a restart can re-attach to them.
 func (r *Reviewer) Run(ctx context.Context) {
 	for {
-		r.dispatch(ctx)
+		var recheck <-chan time.Time
+		if r.dispatch(ctx) {
+			recheck = time.After(retryEvery) // jobs wait on Blocked: look again
+		}
 		select {
 		case <-r.wake:
+		case <-recheck:
 		case <-ctx.Done():
 			return
 		}
@@ -451,12 +486,23 @@ func (r *Reviewer) checkRuntime(ctx context.Context) bool {
 	return err == nil
 }
 
-func (r *Reviewer) dispatch(ctx context.Context) {
+// dispatch starts what it can and reports whether queued jobs wait on Blocked.
+func (r *Reviewer) dispatch(ctx context.Context) (waiting bool) {
 	r.mu.Lock()
 	pending := len(r.st.Queue) > 0 && len(r.active) < r.cfg.MaxConcurrent
 	r.mu.Unlock()
 	if !pending || !r.checkRuntime(ctx) {
-		return
+		return false
+	}
+	r.mu.Lock()
+	repos := map[string]bool{}
+	for _, j := range r.st.Queue {
+		repos[j.PR.Repo] = true
+	}
+	r.mu.Unlock()
+	blocked := map[string]string{} // checked outside mu: Blocked stats files and takes mu
+	for repo := range repos {
+		blocked[repo] = r.Blocked(repo)
 	}
 	r.mu.Lock()
 	type start struct {
@@ -467,8 +513,11 @@ func (r *Reviewer) dispatch(ctx context.Context) {
 	for i := 0; i < len(r.st.Queue) && len(r.active) < r.cfg.MaxConcurrent; {
 		j := r.st.Queue[i]
 		id := j.PR.Key()
-		if r.active[id] != nil {
-			i++ // one run per PR; this job waits for the current one
+		if blocked[j.PR.Repo] != "" {
+			waiting = true
+		}
+		if r.active[id] != nil || blocked[j.PR.Repo] != "" {
+			i++ // one run per PR, and none while its repo is blocked; the job waits
 			continue
 		}
 		r.st.Queue = slices.Delete(r.st.Queue, i, i+1)
@@ -489,6 +538,7 @@ func (r *Reviewer) dispatch(ctx context.Context) {
 		r.changed()
 		go r.execute(ctx, s.runCtx, s.run)
 	}
+	return waiting
 }
 
 func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {

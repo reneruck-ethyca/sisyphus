@@ -14,7 +14,7 @@
   {{$sel := ""}}{{with .PR}}{{$sel = .ID}}{{end}}
   {{range .PRs}}
     <a href="/prs/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} class="sel"{{end}}>
-      <div class="row"><span class="dot {{.Health}}" title="{{.Health}}"></span><strong>{{.ID}}</strong><span class="review">{{template "review" .Review}}</span></div>
+      <div class="row"><span class="dot {{.Health}}" title="{{.Health}}"></span><strong>{{.ID}}</strong><span class="review" title="{{.ReviewNote}}">{{template "review" .Review}}</span></div>
       <div class="title">{{.Title}}</div>
     </a>
   {{else}}
@@ -42,6 +42,7 @@
 </dl>
 {{if $.Run}}{{template "run" $}}{{else}}
 <h3>Reviews {{with .Review.State}}<span class="health {{.}}">{{.}}</span>{{end}}</h3>
+<p class="muted">{{.ReviewNote}}</p>
 <table>
   <thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th>Finished</th><th>Error</th></tr></thead>
   <tbody>

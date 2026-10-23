@@ -564,18 +564,35 @@ func TestUnconfiguredRepoIsNotReviewed(t *testing.T) {
 	}
 }
 
-func TestMissingEnvFileSkipsReviewUntilCreated(t *testing.T) {
+// A review whose env file is missing waits in the queue, says why, and starts
+// once the file exists.
+func TestMissingEnvFileHoldsReviewUntilCreated(t *testing.T) {
 	secrets := filepath.Join(t.TempDir(), "review.env")
 	f := newFixture(t, func(c *config.Review) { c.EnvFile = secrets })
+	f.start(t)
 	f.r.Tracked(f.tr)
-	f.r.Updated(f.tr, true, 0)
-	if len(f.r.st.Queue) != 0 {
-		t.Fatalf("queued a review without its env file: %+v", f.r.st.Queue)
+	if got := f.r.Blocked(refA.Repo); got != "env file missing: "+secrets {
+		t.Fatalf("Blocked = %q", got)
+	}
+	time.Sleep(5 * retryEvery)
+	if len(f.rt.Started()) != 0 || f.r.Status()[refA.Key()].State != "queued" {
+		t.Fatalf("started %d, state %q", len(f.rt.Started()), f.r.Status()[refA.Key()].State)
 	}
 	os.WriteFile(secrets, nil, 0o600)
-	f.r.Updated(f.tr, true, 0)
-	if len(f.r.st.Queue) != 1 {
-		t.Fatalf("queue = %+v, want the review once the env file exists", f.r.st.Queue)
+	waitFor(t, "review to start once the env file exists", f.started(1))
+}
+
+// A PR tracked while it couldn't be reviewed gets its first review later.
+func TestEnsureQueuesFirstReview(t *testing.T) {
+	f := newFixture(t)
+	tr := f.tr
+	tr.AnnouncedSHA = tr.HeadSHA
+	unsynced := tracker.Tracked{PRRef: github.PRRef{Repo: "ethyca/b", Number: 2}, HeadSHA: "b2", AnnouncedSHA: "b1"}
+	other := tracker.Tracked{PRRef: github.PRRef{Repo: "ethyca/zzz", Number: 3}, HeadSHA: "z", AnnouncedSHA: "z"}
+	f.r.Ensure([]tracker.Tracked{tr, unsynced, other})
+	f.r.Ensure([]tracker.Tracked{tr})
+	if len(f.r.st.Queue) != 1 || f.r.st.Queue[0].PR.Key() != refA.Key() || f.r.st.Queue[0].Reason != "new" {
+		t.Fatalf("queue = %+v", f.r.st.Queue)
 	}
 }
 

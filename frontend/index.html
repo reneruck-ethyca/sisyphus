@@ -154,7 +154,7 @@
   }
 
   const sidebar = sel => `<aside>${status.prs.map(p => `<div class="pr${p.id === sel ? " sel" : ""}" data-id="${esc(p.id)}">
-      <div class="row"><span class="dot ${esc(p.health)}" title="${esc(p.health)}"></span><strong>${esc(p.id)}</strong>${reviewCell(p.review)}</div>
+      <div class="row"><span class="dot ${esc(p.health)}" title="${esc(p.health)}"></span><strong>${esc(p.id)}</strong><span title="${esc(p.review_note ?? "")}">${reviewCell(p.review)}</span></div>
       <div class="title" title="${esc(p.title)}">${esc(p.title)}</div></div>`).join("")
     || `<p class="muted" style="padding: 0 12px">No PRs tracked.</p>`}</aside>`;
 
@@ -226,6 +226,7 @@
         field("Last seen", time(p.last_seen_at)),
       ].join("")}</dl>
       <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}</h3>
+      <p class="muted">${esc(p.review_note ?? "")}</p>
       ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Started</th><th>Claude</th></tr></thead><tbody>
         ${p.review.runs.map(r => `<tr>
           <td><a href="${runHash(p.id, r.id)}">${esc(r.id)}</a>${r.overdue ? ` <span class="overdue" title="running longer than review.timeout">⚠</span>` : ""}</td>
