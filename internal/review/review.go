@@ -666,7 +666,10 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	// builds stay out and installs survive between runs. Volumes start root-owned.
 	var owned []string
 	for _, c := range repo.Cache {
-		target := filepath.Join(workdir, c)
+		target := c // an absolute path is a container path (a cache in $HOME); relative ones are in the worktree
+		if !filepath.IsAbs(c) {
+			target = filepath.Join(workdir, c)
+		}
 		mounts = append(mounts, container.Mount{Source: volumeName(tr.Repo, c), Target: target})
 		owned = append(owned, target)
 	}
@@ -728,8 +731,10 @@ func (r *Reviewer) script(repo config.RepoReview, owned []string) string {
 	for _, d := range owned {
 		fmt.Fprintf(&sb, "sudo -n chown \"$(id -u):$(id -g)\" %s 2>/dev/null || true\n", shellQuote(d))
 	}
-	if repo.Setup != "" {
-		sb.WriteString("echo '── waterboy: setup ──'\n" + repo.Setup + "\n")
+	for _, step := range setupSteps(repo.Setup) { // announced and timed, so the run log shows where it is
+		label := strings.Join(strings.Fields(strings.ReplaceAll(step, "\\\n", " ")), " ")
+		fmt.Fprintf(&sb, "echo %s\nt=$SECONDS\n%s\necho \"── waterboy: took $((SECONDS-t))s\"\n",
+			shellQuote("── waterboy: setup: "+label+" ──"), step)
 	}
 	sb.WriteString("echo '── waterboy: claude ──'\n")
 	args := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
@@ -742,6 +747,28 @@ func (r *Reviewer) script(repo config.RepoReview, owned []string) string {
 	}
 	sb.WriteString("exec " + strings.Join(args, " ") + " < /waterboy/prompt.md\n")
 	return sb.String()
+}
+
+// setupSteps splits a setup script into its commands: one per line, a line
+// ending in a backslash continuing on the next.
+func setupSteps(setup string) []string {
+	var steps []string
+	cur := ""
+	for _, line := range strings.Split(setup, "\n") {
+		cur += line
+		if strings.HasSuffix(line, "\\") {
+			cur += "\n"
+			continue
+		}
+		if strings.TrimSpace(cur) != "" {
+			steps = append(steps, cur)
+		}
+		cur = ""
+	}
+	if strings.TrimSpace(cur) != "" {
+		steps = append(steps, cur)
+	}
+	return steps
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

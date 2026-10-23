@@ -78,8 +78,8 @@ type RepoReview struct {
 	Workdir    string            `json:"workdir"` // container path for the worktree; "" = its host path
 	EnvFile    string            `json:"env_file"`
 	Env        map[string]string `json:"env"`
-	Setup      string            `json:"setup"` // shell, run in workdir before Claude starts
-	Cache      []string          `json:"cache"` // workdir-relative dirs kept in per-repo volumes
+	Setup      string            `json:"setup"` // shell, run in workdir before Claude starts; each line is a logged, timed step
+	Cache      []string          `json:"cache"` // dirs kept in per-repo volumes: workdir-relative, or absolute container paths
 	PromptFile string            `json:"prompt_file"`
 	Stack      *Stack            `json:"stack,omitempty"` // nil = no local services
 }
@@ -107,14 +107,19 @@ var fidesplus = RepoReview{
 	Env: map[string]string{"PYTHONPATH": "/fidesplus/src", "RUNNING_IN_DOCKER": "TRUE",
 		// The stack's services by name on its network (devcontainer.env points at host.docker.internal).
 		"FIDES__DATABASE__SERVER": "fidesplus-db", "FIDES__DATABASE__PORT": "5432",
-		"FIDES__REDIS__HOST": "fidesplus-redis", "FIDES__REDIS__PORT": "6379"},
+		"FIDES__REDIS__HOST": "fidesplus-redis", "FIDES__REDIS__PORT": "6379",
+		"UV_CACHE_DIR": "/waterboy/cache/uv", "npm_config_cache": "/waterboy/cache/npm",
+		"UV_LINK_MODE": "copy"}, // the uv cache is another volume: hardlinks can't cross it
 	Setup: `uv sync --all-groups
 uv pip install --no-deps -e .
 cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 (cd src/fidesplus/gpp_js_integration && npm install && npm run build)
 (cd clients && npm install)`,
 	Cache: []string{".venv", "src/fides/bin", "src/fidesplus/gpp_js_integration/node_modules",
-		"src/fidesplus/gpp_js_integration/compiled", "clients/node_modules"},
+		"src/fidesplus/gpp_js_integration/compiled", "clients/node_modules",
+		// Download caches, so a rebuilt .venv or node_modules doesn't fetch everything again. Not under
+		// $HOME: a volume's missing parent dirs (~/.cache) would be created root-owned.
+		"/waterboy/cache/uv", "/waterboy/cache/npm"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}"},
 }
@@ -221,8 +226,8 @@ func (r Review) check() error {
 			}
 		}
 		for _, c := range repo.Cache {
-			if !filepath.IsLocal(c) {
-				return fmt.Errorf("repos[%q].cache %q must be a path inside the worktree", name, c)
+			if !filepath.IsLocal(c) && !filepath.IsAbs(c) {
+				return fmt.Errorf("repos[%q].cache %q must be a path inside the worktree or an absolute container path", name, c)
 			}
 		}
 	}

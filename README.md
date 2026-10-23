@@ -128,8 +128,10 @@ Each run is Claude Code headless in the repo's image (`make reviewer-image` buil
 `waterboy-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default
 `~/Dev/fidesplus`, with Claude Code pinned):
 
-1. the repo's cache volumes (`waterboy-<repo>-<path>`, e.g. `.venv`, `node_modules`) are mounted over
-   the worktree and its `setup` runs (`uv sync`, `npm install`, …); a failing setup fails the run;
+1. the repo's cache volumes (`waterboy-<repo>-<path>`) are mounted: relative paths over the worktree
+   (`.venv`, `node_modules`), absolute ones as is (fidesplus keeps uv's and npm's download caches in
+   `/waterboy/cache/`). Then its `setup` runs, each line a step announced and timed in the run log
+   (`uv sync`, `npm install`, …; a trailing `\` continues a line); a failing step fails the run;
 2. `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`
    gets the rendered prompt (`prompt.md` in the run dir), reads the PR's discussion from
    `/waterboy/context/` (fetched on the host: PR, reviews, inline comments with ids, issue comments),

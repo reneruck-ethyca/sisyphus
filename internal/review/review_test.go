@@ -607,7 +607,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	f := newFixture(t, func(c *config.Review) {
 		c.EnvFile, c.ClaudeSettings, c.PluginsVolume, c.MaxBudgetUSD = secrets, settings, "wb-plugins", 2.5
 		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", EnvFile: aEnv, PromptFile: prompt,
-			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules"}}
+			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules", "/home/u/.cache/uv"}}
 	})
 	f.start(t)
 	f.r.Tracked(f.tr)
@@ -628,6 +628,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 		"/a/.git":                  {Source: filepath.Join(f.tr.Worktree, ".git"), Target: "/a/.git", ReadOnly: true},
 		"/a/.venv":                 {Source: "waterboy-ethyca-a-.venv", Target: "/a/.venv"},
 		"/a/clients/node_modules":  {Source: "waterboy-ethyca-a-clients-node_modules", Target: "/a/clients/node_modules"},
+		"/home/u/.cache/uv":        {Source: "waterboy-ethyca-a--home-u-.cache-uv", Target: "/home/u/.cache/uv"}, // absolute: as is
 		"/waterboy/claude/plugins": {Source: "wb-plugins", Target: "/waterboy/claude/plugins"},
 		"/waterboy/prompt.md":      {Source: filepath.Join(run.Dir, "prompt.md"), Target: "/waterboy/prompt.md", ReadOnly: true},
 		"/waterboy/claude":         {Source: filepath.Join(run.Dir, "claude"), Target: "/waterboy/claude"},
@@ -637,7 +638,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 		}
 	}
 	script := s.Command[2]
-	for _, want := range []string{"sudo -n chown", "'/a/.venv'", "'/waterboy/claude/plugins'", "uv sync",
+	for _, want := range []string{"sudo -n chown", "'/a/.venv'", "'/home/u/.cache/uv'", "'/waterboy/claude/plugins'", "uv sync",
 		"exec 'claude' '-p' '--output-format' 'stream-json' '--verbose' '--dangerously-skip-permissions' '--model' 'opus' '--max-turns' '10' '--max-budget-usd' '2.5' < /waterboy/prompt.md"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q:\n%s", want, script)
@@ -856,5 +857,24 @@ func TestFallbackDoesNotLeakLocalDetails(t *testing.T) {
 	body := folded(ReviewFile{Event: "APPROVE", Body: "ok"}, err)
 	if strings.Contains(body, "/Users/") || strings.Contains(body, "--input") || !strings.Contains(body, "HTTP 422") {
 		t.Fatalf("fallback body = %q", body)
+	}
+}
+
+// Each setup line is its own step, announced and timed in the run log.
+func TestSetupStepsAreAnnouncedAndTimed(t *testing.T) {
+	r := &Reviewer{cfg: config.Review{Model: "opus", MaxTurns: 1}}
+	script := r.script(config.RepoReview{Setup: "uv sync --all-groups\n\n(cd clients && \\\n  npm install)\n"}, nil)
+	want := `echo '── waterboy: setup: uv sync --all-groups ──'
+t=$SECONDS
+uv sync --all-groups
+echo "── waterboy: took $((SECONDS-t))s"
+echo '── waterboy: setup: (cd clients && npm install) ──'
+t=$SECONDS
+(cd clients && \
+  npm install)
+echo "── waterboy: took $((SECONDS-t))s"
+`
+	if !strings.Contains(script, want) {
+		t.Fatalf("script:\n%s\nwant it to contain:\n%s", script, want)
 	}
 }
