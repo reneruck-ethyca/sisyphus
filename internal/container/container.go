@@ -22,6 +22,7 @@ type Spec struct {
 	EnvFiles []string          // KEY=value files; later ones win
 	Mounts   []Mount
 	Workdir  string
+	Network  string // "" = the default bridge
 	Labels   map[string]string
 }
 

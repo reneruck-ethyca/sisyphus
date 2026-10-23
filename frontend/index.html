@@ -126,6 +126,7 @@
       <div class="muted">${esc(run.job.reason)} · head ${esc(run.job.pr.head_sha.slice(0, 12))} · started ${time(run.started)}
         ${c ? ` · ${c.num_turns} turns · $${c.cost_usd.toFixed(2)}` : ""}</div>
       ${run.error ? `<p class="err">${esc(run.error)}</p>` : ""}
+      ${run.stack ? `<p class="muted">Stack <code>${esc(run.stack.project)}</code> from <code>${esc(run.stack.dir)}</code>${run.stack.offset ? ` · PORT_OFFSET ${run.stack.offset}` : ""}</p>` : ""}
       ${run.posted ? `<p>Posted ${run.posted.event ? `<b>${esc(run.posted.event)}</b>` : "replies"}${run.posted.comments ? ` · ${run.posted.comments} inline` : ""}${run.posted.replies ? ` · ${run.posted.replies} replies` : ""}${run.posted.fallback ? " · as a plain comment (GitHub refused the review)" : ""}${run.posted.url ? ` · <a href="${esc(run.posted.url)}" data-external>view on GitHub ↗</a>` : ""}</p>` : ""}
       <div id="events">${(out.events ?? []).map(evHTML).join("")}</div>`;
   }

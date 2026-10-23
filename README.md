@@ -89,7 +89,8 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.timeout` | `60m` | runs longer than this are flagged in the UIs, never stopped |
 | `review.max_concurrent` | `1` | review containers at a time |
 | `review.cleanup` | `true` | after each run, reset worktrees waterboy created to the reviewed head |
-| `review.repos` | `ethyca/fidesplus` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`; only these repos are reviewed |
+| `review.stack_from` | `worktree` | where local stacks start: `worktree` (the PR's own stack files, run on the host) or `safe` (each repo's `stack.safe_dir`); see [Local stack](#local-stack) |
+| `review.repos` | `ethyca/fidesplus` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`, `stack`; only these repos are reviewed |
 
 ## Rules
 
@@ -149,11 +150,36 @@ waterboy quits and are re-attached on start; a run whose container is gone is ma
 
 The agent may approve; the PR stays tracked until it merges or closes.
 
+## Local stack
+
+A repo with a `stack` gets its own services (DB, cache) per PR, next to the review container.
+fidesplus uses its per-worktree nox stacks: `{"up": "uv run nox -s dev_datastores", "project":
+"fidesplus-{id}"}`, i.e. Postgres and Redis.
+
+Before the container starts, waterboy runs `up` on the host with `WORKTREE_ID=pr-<n>` (so a PR keeps
+its compose project, `fidesplus-pr-<n>`, and volumes whichever mode started it), output in the run's
+`stack.log`. The container joins `<project>_default` and reaches the services by name
+(`fidesplus-db:5432`, `fidesplus-redis:6379`); host ports don't matter to it. If `up` fails on a host
+port that's taken ("port is already allocated"), waterboy retries with the next `PORT_OFFSET` slot and
+remembers the one that worked for that PR. Any other failure fails the run.
+
+After the run the stack is stopped, not removed, so the PR's next review starts on the same DB. It's
+removed with its volumes (`docker compose -p <project> down`, volumes by label) when the PR is
+dropped or reset.
+
+Where `up` runs (`stack.from`, else `review.stack_from`):
+
+- `worktree` (default): in the PR's worktree, so the PR's own `noxfiles/` and `docker-compose.yml` run
+  on your host. Fine for private, trusted repos.
+- `safe`: in `stack.safe_dir` (default: the repo's clone under `repos_root`, `~/Dev/fidesplus`), so the
+  PR's code only ever runs in the container. That checkout's own nox code is what runs, on whatever
+  branch it's on.
+
 
 ## Reset
 
 `make reset` (or `bin/waterboy -reset all|owner/repo#n` with the app stopped) removes waterboy's review
-containers, review history and run directories, the worktrees it created (a worktree it can't remove
+containers, local stacks, review history and run directories, the worktrees it created (a worktree it can't remove
 keeps its PR tracked, and the error says why), and the tracked entries. On start, waterboy rediscovers
 whatever still awaits your review as new: fresh worktree, fresh review.
 

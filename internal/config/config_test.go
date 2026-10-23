@@ -146,3 +146,31 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("new file: org = %q", cfg.Org)
 	}
 }
+
+func TestLoadConfigStack(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := Load(filepath.Join(home, "nope.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := cfg.Review.Repos["ethyca/fidesplus"].Stack
+	if cfg.Review.StackFrom != StackFromWorktree || st == nil || st.From != "" || st.SafeDir != home+"/Dev/fidesplus" ||
+		st.Up != "uv run nox -s dev_datastores" || st.Project != "fidesplus-{id}" {
+		t.Fatalf("stack defaults: %q %+v", cfg.Review.StackFrom, st)
+	}
+	if fidesplus.Stack.SafeDir != "" {
+		t.Fatal("Load changed the built-in defaults")
+	}
+	for _, bad := range []string{
+		`{"review": {"stack_from": "yolo"}}`,
+		`{"review": {"repos": {"o/r": {"image": "i", "stack": {"from": "x", "up": "u", "project": "p"}}}}}`,
+		`{"review": {"repos": {"o/r": {"image": "i", "stack": {"up": "u"}}}}}`,
+	} {
+		p := filepath.Join(home, "c.json")
+		os.WriteFile(p, []byte(bad), 0o644)
+		if _, err := Load(p); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

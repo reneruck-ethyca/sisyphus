@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,8 +67,9 @@ type Review struct {
 	PluginsVolume  string                `json:"plugins_volume"`  // Docker volume with Claude plugins ("" = none)
 	Timeout        Duration              `json:"timeout"`         // runs past this are flagged, never stopped
 	MaxConcurrent  int                   `json:"max_concurrent"`
-	Cleanup        bool                  `json:"cleanup"` // reset worktrees waterboy created after each run
-	Repos          map[string]RepoReview `json:"repos"`   // only these repos are reviewed
+	Cleanup        bool                  `json:"cleanup"`    // reset worktrees waterboy created after each run
+	StackFrom      string                `json:"stack_from"` // where stacks start: "worktree" (PR code on the host) | "safe"
+	Repos          map[string]RepoReview `json:"repos"`      // only these repos are reviewed
 }
 
 // RepoReview is how one repo's PRs are reviewed.
@@ -79,14 +81,33 @@ type RepoReview struct {
 	Setup      string            `json:"setup"` // shell, run in workdir before Claude starts
 	Cache      []string          `json:"cache"` // workdir-relative dirs kept in per-repo volumes
 	PromptFile string            `json:"prompt_file"`
+	Stack      *Stack            `json:"stack,omitempty"` // nil = no local services
 }
+
+// Stack is the local services (DB, cache) a review needs. Up runs on the host
+// before the review container starts; the container joins <project>_default.
+type Stack struct {
+	From    string `json:"from"`     // "worktree" | "safe"; "" = review.stack_from
+	SafeDir string `json:"safe_dir"` // where "safe" runs Up; "" = the repo's clone under repos_root
+	Up      string `json:"up"`       // shell; gets WORKTREE_ID=pr-<n>, and PORT_OFFSET when retrying a port clash
+	Project string `json:"project"`  // compose project Up creates; "{id}" = WORKTREE_ID
+}
+
+// Stack sources.
+const (
+	StackFromWorktree = "worktree"
+	StackFromSafe     = "safe"
+)
 
 // fidesplus mirrors its devcontainer (.devcontainer/devcontainer.json, post-create.sh).
 var fidesplus = RepoReview{
 	Image:   "waterboy-reviewer:fidesplus",
 	Workdir: "/fidesplus",
 	EnvFile: "~/Dev/fidesplus/.devcontainer/devcontainer.env",
-	Env:     map[string]string{"PYTHONPATH": "/fidesplus/src", "RUNNING_IN_DOCKER": "TRUE"},
+	Env: map[string]string{"PYTHONPATH": "/fidesplus/src", "RUNNING_IN_DOCKER": "TRUE",
+		// The stack's services by name on its network (devcontainer.env points at host.docker.internal).
+		"FIDES__DATABASE__SERVER": "fidesplus-db", "FIDES__DATABASE__PORT": "5432",
+		"FIDES__REDIS__HOST": "fidesplus-redis", "FIDES__REDIS__PORT": "6379"},
 	Setup: `uv sync --all-groups
 uv pip install --no-deps -e .
 cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
@@ -94,6 +115,8 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 (cd clients && npm install)`,
 	Cache: []string{".venv", "src/fides/bin", "src/fidesplus/gpp_js_integration/node_modules",
 		"src/fidesplus/gpp_js_integration/compiled", "clients/node_modules"},
+	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
+	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}"},
 }
 
 func DefaultPath() string {
@@ -112,6 +135,11 @@ func Load(path string) (Config, error) {
 	r.EnvFile, r.PromptFile, r.ClaudeSettings = expandHome(r.EnvFile), expandHome(r.PromptFile), expandHome(r.ClaudeSettings)
 	for name, repo := range r.Repos {
 		repo.EnvFile, repo.PromptFile = expandHome(repo.EnvFile), expandHome(repo.PromptFile)
+		if repo.Stack != nil {
+			st := *repo.Stack // the defaults share theirs
+			st.SafeDir = expandHome(cmp.Or(st.SafeDir, filepath.Join(cfg.ReposRoot, filepath.Base(name))))
+			repo.Stack = &st
+		}
 		r.Repos[name] = repo
 	}
 	cfg.StateFile = expandHome(cfg.StateFile)
@@ -161,6 +189,7 @@ func defaults() Config {
 			Timeout:       Duration{60 * time.Minute},
 			MaxConcurrent: 1,
 			Cleanup:       true,
+			StackFrom:     StackFromWorktree,
 			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus},
 		},
 	}
@@ -169,6 +198,9 @@ func defaults() Config {
 func (r Review) check() error {
 	if r.Disabled {
 		return nil
+	}
+	if r.StackFrom != StackFromWorktree && r.StackFrom != StackFromSafe {
+		return fmt.Errorf("stack_from must be %q or %q", StackFromWorktree, StackFromSafe)
 	}
 	if r.Model == "" || r.MaxTurns < 1 || r.Timeout.Duration <= 0 || r.MaxConcurrent < 1 {
 		return errors.New("needs a model, max_turns >= 1, a positive timeout and max_concurrent >= 1")
@@ -179,6 +211,14 @@ func (r Review) check() error {
 		}
 		if repo.Workdir != "" && !filepath.IsAbs(repo.Workdir) {
 			return fmt.Errorf("repos[%q].workdir must be absolute", name)
+		}
+		if st := repo.Stack; st != nil {
+			if st.From != "" && st.From != StackFromWorktree && st.From != StackFromSafe {
+				return fmt.Errorf("repos[%q].stack.from must be %q, %q or empty", name, StackFromWorktree, StackFromSafe)
+			}
+			if st.Up == "" || st.Project == "" {
+				return fmt.Errorf("repos[%q].stack needs up and project", name)
+			}
 		}
 		for _, c := range repo.Cache {
 			if !filepath.IsLocal(c) {

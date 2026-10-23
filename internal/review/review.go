@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -58,6 +59,7 @@ type Run struct {
 	Dir       string        `json:"dir"`
 	Claude    *ClaudeResult `json:"claude,omitempty"`  // Claude's final result line, once it has one
 	Posted    *Posted       `json:"posted,omitempty"`  // what waterboy posted to GitHub
+	Stack     *StackRun     `json:"stack,omitempty"`   // the local stack it ran against
 	Overdue   bool          `json:"overdue,omitempty"` // still running past review.timeout (set by Status)
 }
 
@@ -98,8 +100,9 @@ var (
 )
 
 type store struct {
-	Queue []Job            `json:"queue"`
-	Runs  map[string][]Run `json:"runs"` // by PR ID, oldest first
+	Queue  []Job                `json:"queue"`
+	Runs   map[string][]Run     `json:"runs"`             // by PR ID, oldest first
+	Stacks map[string]*StackRun `json:"stacks,omitempty"` // each PR's latest stack, until removed
 }
 
 type Reviewer struct {
@@ -120,17 +123,21 @@ type Reviewer struct {
 	retrying    bool   // a runtime re-check is scheduled
 	subs        map[chan RunEvent]struct{}
 	skipped     map[string]bool // repos without review config and missing env files, logged once
+	sh          func(ctx context.Context, dir string, env []string, script string, out io.Writer) error
 }
 
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
 	r := &Reviewer{cfg: cfg, rt: rt, locks: locks, dir: dir, st: store{Runs: map[string][]Run{}},
 		active: map[string]context.CancelCauseFunc{}, wake: make(chan struct{}, 1),
-		subs: map[chan RunEvent]struct{}{}, skipped: map[string]bool{}}
+		subs: map[chan RunEvent]struct{}{}, skipped: map[string]bool{}, sh: shell}
 	if err := jsonfile.Load(r.storePath(), &r.st); err != nil {
 		return nil, err
 	}
 	if r.st.Runs == nil {
 		r.st.Runs = map[string][]Run{}
+	}
+	if r.st.Stacks == nil {
+		r.st.Stacks = map[string]*StackRun{}
 	}
 	for name, repo := range cfg.Repos { // surface a missing secrets file at startup
 		r.envFilesExist(name, repo)
@@ -169,6 +176,7 @@ func (r *Reviewer) Dropped(tr tracker.Tracked, _ string) {
 	r.saveLocked()
 	r.mu.Unlock()
 	r.cancel(id, errDropped)
+	go r.dropStack(id) // after the cancelled run lets go of the worktree
 	r.changed()
 }
 
@@ -244,6 +252,7 @@ func (r *Reviewer) Forget(ctx context.Context, prID string) error {
 	for _, c := range cs {
 		err = errors.Join(err, r.rt.Remove(ctx, c.ID))
 	}
+	err = errors.Join(err, r.removeStacks(match))
 	err = errors.Join(err, os.RemoveAll(filepath.Join(r.dir, "runs", prPath(prID))))
 	slog.Info("forgot reviews", "pr", cmp.Or(prID, "all"), "containers_removed", len(cs))
 	r.changed()
@@ -498,6 +507,15 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 		fail(fmt.Errorf("worktree is at %.12s, not the announced head %.12s", head, tr.HeadSHA))
 		return
 	}
+	if st := r.cfg.Repos[tr.Repo].Stack; st != nil {
+		sr, err := r.startStack(runCtx, run, st)
+		run.Stack = sr // finish stops it, whatever happens from here
+		r.record(id, run.ID, func(x *Run) { x.Stack = sr })
+		if err != nil {
+			fail(err)
+			return
+		}
+	}
 	spec, err := r.spec(runCtx, run)
 	if err != nil {
 		fail(err)
@@ -636,9 +654,14 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 			envFiles = append(envFiles, f)
 		}
 	}
+	network := ""
+	if run.Stack != nil {
+		network = run.Stack.Network()
+	}
 	return container.Spec{
-		Name:  "waterboy-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
-		Image: repo.Image, Command: []string{"bash", "-c", r.script(repo, owned)}, Env: env, EnvFiles: envFiles,
+		Network: network,
+		Name:    "waterboy-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
+		Image:   repo.Image, Command: []string{"bash", "-c", r.script(repo, owned)}, Env: env, EnvFiles: envFiles,
 		Mounts: mounts, Workdir: workdir,
 		Labels: map[string]string{"waterboy": "1", "waterboy.run": run.ID, "waterboy.pr": tr.Key()},
 	}, nil
@@ -879,6 +902,9 @@ func (r *Reviewer) finish(run Run, status string, code int, err error, unlock fu
 		msg = err.Error()
 	}
 	r.record(id, run.ID, func(x *Run) { x.Status, x.ExitCode, x.Error, x.Finished = status, code, msg, time.Now() })
+	if run.Stack != nil {
+		r.stopStack(run.Stack.Project) // still holding the worktree, so the next run's up comes after
+	}
 	if unlock != nil {
 		unlock()
 	}

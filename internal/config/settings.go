@@ -33,6 +33,7 @@ var fields = []Field{
 	{Key: "review.timeout", Type: "text", Help: "runs longer than this are flagged, never stopped"},
 	{Key: "review.max_concurrent", Type: "number", Help: "review containers at a time"},
 	{Key: "review.cleanup", Type: "bool", Help: "reset worktrees waterboy created after each run"},
+	{Key: "review.stack_from", Type: "text", Help: "where local stacks start: worktree (the PR's code, on the host) or safe (repos_root clone)"},
 	{Key: "review.env_file", Type: "text", Help: "CLAUDE_CODE_OAUTH_TOKEN and a read-only GH_TOKEN"},
 	{Key: "review.prompt_file", Type: "text", Help: "Go text/template prompt; empty = built-in"},
 	{Key: "review.claude_settings", Type: "text", Help: "settings.json given to Claude in each run"},

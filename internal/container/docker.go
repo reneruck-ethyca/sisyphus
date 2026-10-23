@@ -59,6 +59,9 @@ func runArgs(s Spec) (args, env []string, err error) {
 	if s.Name != "" {
 		args = append(args, "--name", s.Name)
 	}
+	if s.Network != "" {
+		args = append(args, "--network", s.Network)
+	}
 	for _, k := range slices.Sorted(maps.Keys(s.Labels)) {
 		args = append(args, "--label", k+"="+s.Labels[k])
 	}

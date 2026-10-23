@@ -77,6 +77,7 @@
 <div class="muted">{{.Job.Reason}} · head <code>{{printf "%.12s" .Job.PR.HeadSHA}}</code> · started {{when .Started}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}
   · <a href="{{$base}}/log">raw log</a> · <a href="{{$base}}/prompt.md">prompt</a> · <a href="{{$base}}/out/">out/</a></div>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
+{{with .Stack}}<p class="muted">Stack <code>{{.Project}}</code> from <code>{{.Dir}}</code>{{if .Offset}} · PORT_OFFSET {{.Offset}}{{end}} · <a href="{{$base}}/stack.log">stack log</a></p>{{end}}
 {{with .Posted}}<p>Posted {{if .Event}}<b>{{.Event}}</b>{{else}}replies{{end}}{{if .Comments}} · {{.Comments}} inline{{end}}{{if .Replies}} · {{.Replies}} replies{{end}}{{if .Fallback}} · as a plain comment (GitHub refused the review){{end}}{{with .URL}} · <a href="{{.}}">view on GitHub ↗</a>{{end}}</p>{{end}}
 <div id="events" data-src="/api{{$base}}/events?from={{$.Next}}" data-live="{{eq .Status "running"}}">
 {{range $.Events}}{{template "event" .}}{{end}}
