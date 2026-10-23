@@ -337,7 +337,7 @@ func TestHTTPRunEventStream(t *testing.T) {
 			kinds = append(kinds, e.Kind)
 		}
 	}
-	if !slices.Equal(kinds, []string{"text", "result"}) {
+	if !slices.Equal(kinds, []string{"text", "result", "output"}) { // output: what came of posting
 		t.Fatalf("streamed %q (line 0 should be skipped by from=1)", kinds)
 	}
 }

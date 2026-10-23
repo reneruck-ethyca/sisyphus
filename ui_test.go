@@ -56,7 +56,7 @@ func TestUIRunEvents(t *testing.T) {
 	_, svc, run := newReviewServer(t)
 	ui := &UI{svc}
 	out, err := ui.RunEvents(testkit.RefA.Key(), run.ID)
-	if err != nil || len(out.Events) != 3 || out.Events[1].Text != "Found <b>one</b> bug." || out.Next != 3 {
+	if err != nil || len(out.Events) != 4 || out.Events[1].Text != "Found <b>one</b> bug." || out.Next != 4 {
 		t.Fatalf("RunEvents = %+v, %v", out, err)
 	}
 	if _, err := ui.RunEvents(testkit.RefA.Key(), "nope"); err == nil {

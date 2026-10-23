@@ -96,8 +96,8 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 	case last.Job.PR.HeadSHA != tr.HeadSHA:
 		return fmt.Sprintf("reviewed %s; head %s not synced yet", short(last.Job.PR.HeadSHA), short(tr.HeadSHA))
 	}
-	return fmt.Sprintf("up to date: reviewed %s at %s; next one on new commits or replies",
-		short(last.Job.PR.HeadSHA), last.Finished.Local().Format("Jan 2 15:04"))
+	return fmt.Sprintf("up to date: reviewed %s at %s, %s; next one on new commits or replies",
+		short(last.Job.PR.HeadSHA), last.Finished.Local().Format("Jan 2 15:04"), cmp.Or(last.PostNote, "not posted"))
 }
 
 func health(tr tracker.Tracked) string {

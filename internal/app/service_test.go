@@ -140,7 +140,7 @@ func TestReviewNote(t *testing.T) {
 		{"never", review.PRStatus{}, true, "", "", "not reviewed yet: waits for the head to be synced"},
 		{"failed", done(review.Failed, "4f0b24f88e35", "boom"), true, "", "", "last review failed: boom; next one on new commits or replies"},
 		{"old head", done(review.Succeeded, "aaaaaaaaaaaa", ""), true, "", "", "reviewed aaaaaaaa; head 4f0b24f8 not synced yet"},
-		{"up to date", done(review.Succeeded, "4f0b24f88e35", ""), true, "", "", "up to date: reviewed 4f0b24f8 at Oct 23 12:00; next one on new commits or replies"},
+		{"up to date", done(review.Succeeded, "4f0b24f88e35", ""), true, "", "", "up to date: reviewed 4f0b24f8 at Oct 23 12:00, not posted; next one on new commits or replies"},
 	} {
 		if got := reviewNote(tr, c.rs, c.reviews, c.blocked, c.runtime); got != c.want {
 			t.Errorf("%s: got %q\nwant %q", c.name, got, c.want)

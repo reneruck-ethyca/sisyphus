@@ -133,7 +133,7 @@ func TestTrackedRunsReview(t *testing.T) {
 	f.succeed(f.containers()[0].ID, "looks good\n")
 	waitFor(t, "run to finish", f.lastStatus(Succeeded))
 	run := f.runs()[0]
-	if b, _ := os.ReadFile(filepath.Join(run.Dir, "log")); string(b) != "looks good\n"+okResult {
+	if b, _ := os.ReadFile(filepath.Join(run.Dir, "log")); string(b) != "looks good\n"+okResult+"── waterboy: not posted: review.post is off (dry run); the review is in out/review.json\n" {
 		t.Fatalf("log = %q", b)
 	}
 	if _, err := os.Stat(filepath.Join(run.Dir, "run.json")); err != nil {
@@ -322,7 +322,7 @@ func TestShutdownThenReattach(t *testing.T) {
 	f.start(t)
 	f.succeed(f.containers()[0].ID, "replayed\n")
 	waitFor(t, "re-attached run to finish", f.lastStatus(Succeeded))
-	if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "log")); string(b) != "replayed\n"+okResult {
+	if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "log")); string(b) != "replayed\n"+okResult+"── waterboy: not posted: review.post is off (dry run); the review is in out/review.json\n" {
 		t.Fatalf("log = %q", b)
 	}
 }
@@ -536,7 +536,9 @@ func TestClaudeOutputStreamsAndIsRecorded(t *testing.T) {
 		t.Fatalf("claude result = %+v", run.Claude)
 	}
 	evs, next, err := f.r.Events(refA.Key(), run.ID)
-	if err != nil || len(evs) != 4 || evs[3].Kind != "result" || evs[1].Line != 1 || next != 3 {
+	// After Claude's output: what came of posting (here: a dry run).
+	if err != nil || len(evs) != 5 || evs[3].Kind != "result" || evs[1].Line != 1 || next != 4 ||
+		evs[4].Line != 3 || !strings.HasPrefix(evs[4].Text, "── waterboy: not posted") {
 		t.Fatalf("Events = %+v, next %d, %v", evs, next, err)
 	}
 }
@@ -876,5 +878,26 @@ echo "── waterboy: took $((SECONDS-t))s"
 `
 	if !strings.Contains(script, want) {
 		t.Fatalf("script:\n%s\nwant it to contain:\n%s", script, want)
+	}
+}
+
+func TestPostNote(t *testing.T) {
+	for _, c := range []struct {
+		p       *Posted
+		err     error
+		posting bool
+		want    string
+	}{
+		{nil, nil, false, "not posted: review.post is off (dry run); the review is in out/review.json"},
+		{nil, nil, true, "nothing posted: the agent wrote no out/review.json"},
+		{nil, errors.New("HTTP 502"), true, "posting failed: HTTP 502"},
+		{&Posted{Event: "REQUEST_CHANGES", Comments: 3, URL: "https://x/r1"}, nil, true, "posted REQUEST_CHANGES with 3 inline comments: https://x/r1"},
+		{&Posted{Replies: 2}, nil, true, "posted 2 replies"},
+		{&Posted{Event: "APPROVE", Replies: 1, URL: "u"}, nil, true, "posted APPROVE and 1 replies: u"},
+		{&Posted{Event: "COMMENT", Fallback: true, URL: "u"}, nil, true, "posted COMMENT (as one plain comment: GitHub refused the review): u"},
+	} {
+		if got := postNote(c.p, c.err, c.posting); got != c.want {
+			t.Errorf("got %q\nwant %q", got, c.want)
+		}
 	}
 }

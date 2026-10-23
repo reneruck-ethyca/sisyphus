@@ -57,10 +57,11 @@ type Run struct {
 	ExitCode  int           `json:"exit_code"`
 	Error     string        `json:"error,omitempty"`
 	Dir       string        `json:"dir"`
-	Claude    *ClaudeResult `json:"claude,omitempty"`  // Claude's final result line, once it has one
-	Posted    *Posted       `json:"posted,omitempty"`  // what waterboy posted to GitHub
-	Stack     *StackRun     `json:"stack,omitempty"`   // the local stack it ran against
-	Overdue   bool          `json:"overdue,omitempty"` // still running past review.timeout (set by Status)
+	Claude    *ClaudeResult `json:"claude,omitempty"`    // Claude's final result line, once it has one
+	Posted    *Posted       `json:"posted,omitempty"`    // what waterboy posted to GitHub
+	Stack     *StackRun     `json:"stack,omitempty"`     // the local stack it ran against
+	PostNote  string        `json:"post_note,omitempty"` // what came of posting, in a line (succeeded runs)
+	Overdue   bool          `json:"overdue,omitempty"`   // still running past review.timeout (set by Status)
 }
 
 // RunEvent is an Event of one run, as streamed to subscribers.
@@ -826,13 +827,14 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		}
 	}
 	var result *ClaudeResult
+	var lw *lineWriter
 	os.MkdirAll(run.Dir, 0o755)
 	logf, err := os.Create(filepath.Join(run.Dir, "log")) // docker replays from the start, so truncate
 	if err != nil {
 		slog.Warn("creating run log", "run", run.ID, "err", err)
 		close(logsDone)
 	} else {
-		lw := &lineWriter{file: logf, onLine: func(n int, line string) {
+		lw = &lineWriter{file: logf, onLine: func(n int, line string) {
 			evs, res := parseLine(n, line)
 			if res != nil {
 				result = res
@@ -888,12 +890,16 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		}
 	}
 	bg := context.WithoutCancel(appCtx)
-	if status == Succeeded && r.cfg.Post && r.GitHub != nil {
-		posted, err := r.post(bg, run)
-		if posted != nil {
-			r.record(id, run.ID, func(x *Run) { x.Posted = posted })
-			slog.Info("review posted", "pr", id, "run", run.ID, "url", posted.URL, "event", posted.Event, "fallback", posted.Fallback)
+	if status == Succeeded {
+		var posted *Posted
+		var err error
+		if r.cfg.Post && r.GitHub != nil {
+			posted, err = r.post(bg, run)
 		}
+		note := postNote(posted, err, r.cfg.Post && r.GitHub != nil)
+		r.record(id, run.ID, func(x *Run) { x.Posted, x.PostNote = posted, note })
+		r.appendLog(id, run, lw, "── waterboy: "+note)
+		slog.Info("review "+strings.SplitN(note, ":", 2)[0], "pr", id, "run", run.ID, "note", note)
 		if err != nil {
 			status, why = Failed, fmt.Errorf("posting review: %w", err)
 		}
@@ -908,6 +914,54 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	r.finish(run, status, code, errors.Join(why, cleanupErr), unlock)
 	if errors.Is(why, errReclaimed) && r.Kick != nil {
 		r.Kick() // the tracker is waiting for this worktree
+	}
+}
+
+// postNote says in a line what came of posting a succeeded run's review.
+func postNote(p *Posted, err error, posting bool) string {
+	switch {
+	case !posting:
+		return "not posted: review.post is off (dry run); the review is in out/review.json"
+	case err != nil:
+		return "posting failed: " + err.Error()
+	case p == nil:
+		return "nothing posted: the agent wrote no out/review.json"
+	}
+	var parts []string
+	if p.Event != "" {
+		parts = append(parts, p.Event)
+		if p.Comments > 0 {
+			parts[0] += fmt.Sprintf(" with %d inline comments", p.Comments)
+		}
+		if p.Fallback {
+			parts[0] += " (as one plain comment: GitHub refused the review)"
+		}
+	}
+	if p.Replies > 0 {
+		parts = append(parts, fmt.Sprintf("%d replies", p.Replies))
+	}
+	note := "posted " + strings.Join(parts, " and ")
+	if p.URL != "" {
+		note += ": " + p.URL
+	}
+	return note
+}
+
+// appendLog adds a waterboy line after the container's output, in the run log
+// and to live subscribers. lw is the run's log writer, done by now (nil = no log).
+func (r *Reviewer) appendLog(prID string, run Run, lw *lineWriter, line string) {
+	if lw == nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(run.Dir, "log"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		slog.Warn("appending to run log", "run", run.ID, "err", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err == nil {
+		evs, _ := parseLine(lw.n, line)
+		r.publish(prID, run.ID, evs)
 	}
 }
 
@@ -1068,6 +1122,9 @@ func (r *Reviewer) Status() map[string]PRStatus {
 	for _, s := range out {
 		for i := range s.Runs {
 			s.Runs[i].Overdue = s.Runs[i].Status == Running && time.Since(s.Runs[i].Started) > r.cfg.Timeout.Duration
+			if x := &s.Runs[i]; x.PostNote == "" && x.Posted != nil { // recorded before post_note existed
+				x.PostNote = postNote(x.Posted, nil, true)
+			}
 		}
 	}
 	return out
