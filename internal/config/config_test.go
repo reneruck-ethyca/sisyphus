@@ -86,3 +86,63 @@ func TestLoadConfigBadInterval(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	p := filepath.Join(home, "c.json")
+	os.WriteFile(p, []byte(`{"org": "acme", "hooks": {"on_conflict": "echo hi"},
+		"review": {"model": "sonnet", "repos": {"x/y": {"image": "i"}}}}`), 0o644)
+	value := func(fs []Field, key string) any {
+		for _, f := range fs {
+			if f.Key == key {
+				return f.Value
+			}
+		}
+		t.Fatalf("no field %s", key)
+		return nil
+	}
+	fs, err := Settings(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value(fs, "org") != "acme" || value(fs, "interval") != "10m" || value(fs, "review.timeout") != "1h" || value(fs, "hook_timeout") != "30m" || value(fs, "review.model") != "sonnet" ||
+		value(fs, "review.max_turns") != 100.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/waterboy/review.env" {
+		t.Fatalf("settings = %+v", fs)
+	}
+
+	if err := SaveSettings(p, map[string]any{"interval": "5m", "review.max_turns": 7, "include_drafts": true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Interval.Duration != 5*time.Minute || cfg.Review.MaxTurns != 7 || !cfg.IncludeDrafts ||
+		cfg.Org != "acme" || cfg.Review.Model != "sonnet" || cfg.Hooks["on_conflict"] != "echo hi" || cfg.Review.Repos["x/y"].Image != "i" {
+		t.Fatalf("saved config = %+v (the rest of the file must survive)", cfg)
+	}
+
+	before, _ := os.ReadFile(p)
+	for _, bad := range []map[string]any{
+		{"interval": "soon"},
+		{"review.max_concurrent": 0},
+		{"review.max_turns": "many"},
+		{"state_file": "/elsewhere"},
+	} {
+		if err := SaveSettings(p, bad); err == nil {
+			t.Errorf("%v should be rejected", bad)
+		}
+	}
+	if after, _ := os.ReadFile(p); string(after) != string(before) {
+		t.Fatalf("a rejected save changed the file:\n%s", after)
+	}
+
+	missing := filepath.Join(home, "new", "c.json")
+	if err := SaveSettings(missing, map[string]any{"org": "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := Load(missing); cfg.Org != "x" {
+		t.Fatalf("new file: org = %q", cfg.Org)
+	}
+}

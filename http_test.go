@@ -84,6 +84,51 @@ func TestHTTPRun(t *testing.T) {
 	}
 }
 
+func TestHTTPSettings(t *testing.T) {
+	srv, svc, _ := newTestServer(t)
+	code, body := get(t, srv.URL+"/settings")
+	if code != 200 || !strings.Contains(body, `name="review.model" value="opus"`) || strings.Contains(body, `http-equiv="refresh"`) {
+		t.Fatalf("/settings = %d: %s", code, body)
+	}
+	put := func(body string) int {
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/settings", strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := put(`{"org": "acme", "review.max_turns": 5}`); c != http.StatusNoContent {
+		t.Fatalf("save = %d", c)
+	}
+	if c := put(`{"interval": "soon"}`); c != http.StatusBadRequest {
+		t.Fatalf("bad save = %d", c)
+	}
+	st, err := svc.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range st.Fields {
+		if f.Key == "org" && f.Value != "acme" || f.Key == "review.max_turns" && f.Value != 5.0 || f.Key == "interval" && f.Value != "10m" {
+			t.Errorf("%s = %v", f.Key, f.Value)
+		}
+	}
+
+	restarted := make(chan struct{})
+	defer func(r func()) { restart = r }(restart)
+	restart = func() { close(restarted) }
+	resp, err := http.Post(srv.URL+"/api/restart", "", nil)
+	if err != nil || resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("%v %v", resp, err)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("didn't restart")
+	}
+}
+
 func TestHTTPPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{

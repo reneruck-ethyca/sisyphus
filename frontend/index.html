@@ -67,6 +67,11 @@
   .ev.tool_result pre { max-height: 360px; overflow: auto; }
   .ev.bad, .ev.bad summary { color: var(--conflict); }
   .ev.result { font-weight: 600; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  #settings label { display: grid; grid-template-columns: 190px 220px 1fr; gap: 4px 12px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  #settings input:not([type=checkbox]) { font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+  #settings input[type=checkbox] { justify-self: start; }
+  #settings code { font: 12px ui-monospace, monospace; }
+  .actions { display: flex; gap: 10px; align-items: center; } .actions button { flex: none; }
 </style>
 <script type="module">
   import { Call, Events, Browser } from "/wails/runtime.js";
@@ -78,12 +83,12 @@
   const app = document.getElementById("app");
   let status, logs = [];
   const LOG_MAX = 1000;
-  // Views by hash: "#logs", "#<pr id>", "#run/<pr id>/<run id>" (ids URI-encoded).
+  // Views by hash: "#logs", "#settings", "#<pr id>", "#run/<pr id>/<run id>" (ids URI-encoded).
   let shown = null; // the run on screen: {pr, run, next, status}
 
   const route = () => {
     const h = location.hash.slice(1);
-    if (h === "logs") return {view: "logs"};
+    if (h === "logs" || h === "settings") return {view: h};
     if (h.startsWith("run/")) { const [, pr, run] = h.split("/"); return {view: "run", pr: decodeURIComponent(pr), run: decodeURIComponent(run)}; }
     return h ? {view: "pr", pr: decodeURIComponent(h)} : {view: "none"};
   };
@@ -92,7 +97,7 @@
   async function render() {
     const r = route();
     shown = null;
-    const main = r.view === "logs" ? logsView() : r.view === "run" ? await runView(r.pr, r.run)
+    const main = r.view === "logs" ? logsView() : r.view === "settings" ? await settingsView() : r.view === "run" ? await runView(r.pr, r.run)
       : r.view === "pr" ? await detail(r.pr) : placeholder();
     app.innerHTML = header() + sidebar(r.pr) + `<section id="main">${notices()}${main}</section>`;
     if (r.view === "logs" || r.view === "run") scrollMain();
@@ -144,7 +149,7 @@
         <span class="reviewing">${(s.reviewing ?? []).map(a => `<a class="active${a.overdue ? " overdue" : ""}" href="${runHash(a.pr, a.run)}"
           title="container ${esc(a.container || "starting")}"><span class="pulse"></span>${esc(a.pr)} · ${esc(a.container_name || a.container.slice(0, 12) || "starting…")}
           · ${since(a.started)}${a.overdue ? " ⚠" : ""}</a>`).join("") || `<span class="muted">no review running</span>`}</span>
-        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><a href="#logs">Logs</a></header>`;
+        <button id="run" ${s.running ? "disabled" : ""}>Run now</button><a href="#logs">Logs</a><a href="#settings">Settings</a></header>`;
   }
 
   const sidebar = sel => `<aside>${status.prs.map(p => `<div class="pr${p.id === sel ? " sel" : ""}" data-id="${esc(p.id)}">
@@ -182,6 +187,28 @@
     if (follow) scrollMain();
   }
 
+  async function settingsView() {
+    let st;
+    try { st = await call("Settings"); } catch (e) { return `<p class="err">${esc(e.message ?? e)}</p>`; }
+    const input = f => f.type === "bool" ? `<input type="checkbox" name="${esc(f.key)}"${f.value ? " checked" : ""}>`
+      : `<input${f.type === "number" ? ` type="number" step="any"` : ""} name="${esc(f.key)}" value="${esc(f.value)}">`;
+    return `<h2>Settings</h2><p class="muted">${esc(st.path)} · saved settings apply after a restart. Repos, hooks and env stay in the file.</p>
+      <form id="settings">${st.fields.map(f => `<label><code>${esc(f.key)}</code>${input(f)}<span class="muted">${esc(f.help)}</span></label>`).join("")}
+      <p class="actions"><button>Save</button><button type="button" id="restart">Restart waterboy</button><span id="msg"></span></p></form>`;
+  }
+
+  const say = (text, cls) => Object.assign(document.getElementById("msg"), {textContent: text, className: cls});
+
+  async function saveSettings(form) {
+    // Only changed fields, so defaults aren't pinned into the file.
+    const changed = [...form.elements].filter(el => el.name && (el.type === "checkbox" ? el.checked !== el.defaultChecked : el.value !== el.defaultValue));
+    if (!changed.length) return say("Nothing changed.", "muted");
+    const values = Object.fromEntries(changed.map(el => [el.name, el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value]));
+    try { await call("SaveSettings", values); } catch (e) { return say(e.message ?? e, "err"); }
+    changed.forEach(el => el.type === "checkbox" ? el.defaultChecked = el.checked : el.defaultValue = el.value);
+    say("Saved. Restart to apply.", "ok");
+  }
+
   async function detail(id) {
     let p;
     try { p = await call("PR", id); } catch (e) { return `<p class="err">${esc(e.message ?? e)}</p>`; }
@@ -210,17 +237,19 @@
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
+    if (e.target.id === "restart") { say("Restarting… reopen the window from the menu bar.", "muted"); return call("Restart"); }
     if (e.target.dataset.open) return call("OpenRun", route().pr, e.target.dataset.open);
     const a = e.target.closest("a[data-external]");
     if (a) { e.preventDefault(); return Browser.OpenURL(a.href); }
     const row = e.target.closest("[data-id]");
     if (row) location.hash = encodeURIComponent(row.dataset.id);
   });
+  app.addEventListener("submit", e => { e.preventDefault(); saveSettings(e.target); });
   addEventListener("hashchange", render);
   Events.On("status", e => {
     status = e.data;
     const r = route();
-    if (r.view === "logs") return;
+    if (r.view === "logs" || r.view === "settings") return; // settings: don't wipe a form being edited
     // A run view only re-renders when that run's state changes; otherwise it would
     // lose its scroll position on every update.
     if (r.view === "run" && shown && findRun(status, r.pr, r.run)?.status === shown.status

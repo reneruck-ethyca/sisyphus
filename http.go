@@ -34,8 +34,10 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 		return "/prs/" + repo + "/" + n + "/runs/" + run
 	},
 	"since": func(t time.Time) string { return time.Since(t).Round(time.Second).String() },
-	// live pages update themselves; the rest refresh every 15s.
-	"live": func(title string) bool { return title == "Logs" || strings.HasPrefix(title, "Run ") },
+	// live pages update themselves and Settings holds a form; the rest refresh every 15s.
+	"live": func(title string) bool {
+		return title == "Logs" || title == "Settings" || strings.HasPrefix(title, "Run ")
+	},
 }).ParseFS(webFS, "web/*.html"))
 
 // startHTTP serves the dashboard and JSON API on addr. Only app.Service is used, so
@@ -100,6 +102,34 @@ func newHandler(svc *app.Service) http.Handler {
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "logs.html", svc.Logs())
 	})
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
+		st, err := svc.Settings()
+		render(w, "settings.html", settingsPage{st, err})
+	})
+	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		st, err := svc.Settings()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+	})
+	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		var values map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&values); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := svc.SaveSettings(values); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/restart", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		restartSoon()
+	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "index.html", dashboard{Status: svc.Status()})
 	})
@@ -132,6 +162,11 @@ func (d dashboard) Title() string {
 		return d.PR.ID
 	}
 	return "Status"
+}
+
+type settingsPage struct {
+	app.Settings
+	Err error
 }
 
 func findRun(pr app.PRView, id string) *review.Run {

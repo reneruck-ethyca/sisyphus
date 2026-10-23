@@ -1,0 +1,43 @@
+{{template "head" "Settings"}}
+<header>
+  <h1>waterboy settings</h1>
+  <code>{{.Path}}</code>
+  <nav><a href="/">Status</a><a href="/logs">Logs</a></nav>
+</header>
+<main>
+{{with .Err}}<p class="err notice">{{.}}</p>{{end}}
+<p class="muted notice">Saved settings apply after a restart. Repos, hooks and env stay in the file.</p>
+<form id="settings">
+{{range .Fields}}  <label><code>{{.Key}}</code>
+    {{if eq .Type "bool"}}<input type="checkbox" name="{{.Key}}"{{if .Value}} checked{{end}}>
+    {{else if eq .Type "number"}}<input type="number" step="any" name="{{.Key}}" value="{{.Value}}">
+    {{else}}<input name="{{.Key}}" value="{{.Value}}">{{end}}
+    <span class="muted">{{.Help}}</span></label>
+{{end}}  <p class="actions"><button>Save</button><button type="button" id="restart">Restart waterboy</button><span id="msg"></span></p>
+</form>
+</main>
+<script>
+  const form = document.getElementById("settings"), msg = document.getElementById("msg");
+  const say = (text, cls) => Object.assign(msg, {textContent: text, className: cls});
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    // Only changed fields, so defaults aren't pinned into the file.
+    const changed = [...form.elements].filter(el => el.name && (el.type === "checkbox" ? el.checked !== el.defaultChecked : el.value !== el.defaultValue));
+    if (!changed.length) return say("Nothing changed.", "muted");
+    const values = Object.fromEntries(changed.map(el => [el.name, el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value]));
+    const r = await fetch("/api/settings", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values)});
+    if (!r.ok) return say(await r.text(), "err");
+    changed.forEach(el => el.type === "checkbox" ? el.defaultChecked = el.checked : el.defaultValue = el.value);
+    say("Saved. Restart to apply.", "ok");
+  };
+  document.getElementById("restart").onclick = async () => {
+    await fetch("/api/restart", {method: "POST"});
+    say("Restarting…", "muted");
+    const back = async () => {
+      try { if ((await fetch("/api/status")).ok) return location.reload(); } catch {}
+      setTimeout(back, 1000);
+    };
+    setTimeout(back, 1500);
+  };
+</script>
+{{template "foot"}}

@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/reneruck/waterboy/internal/app"
 	"github.com/reneruck/waterboy/internal/config"
@@ -120,6 +122,24 @@ func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, 
 	}
 	slog.Info("reset done", "which", which, "forgot", len(ids))
 	return nil
+}
+
+// restart re-execs waterboy with the same arguments, so saved settings apply.
+// Review containers keep running and are re-attached; a tick in flight is cut
+// short, as with make restart.
+var restart = func() {
+	exe, err := os.Executable()
+	if err == nil {
+		err = syscall.Exec(exe, os.Args, os.Environ())
+	}
+	slog.Error("restart failed", "err", err)
+}
+
+// restartSoon restarts after the caller has answered.
+// ponytail: a fixed delay, not a handshake; a response takes far less on loopback.
+func restartSoon() {
+	slog.Info("restarting")
+	time.AfterFunc(300*time.Millisecond, restart)
 }
 
 func fatal(err error) {

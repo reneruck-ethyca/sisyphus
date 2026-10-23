@@ -2,7 +2,7 @@
 <header>
   <h1>waterboy logs</h1>
   <span class="muted" id="state">connecting…</span>
-  <nav><a href="/">Status</a></nav>
+  <nav><a href="/">Status</a><a href="/settings">Settings</a></nav>
 </header>
 <div id="log">
 {{range .}}<div class="{{.Level}}" data-seq="{{.Seq}}"><span class="muted">{{.Time.Local.Format "15:04:05"}}</span> {{.Level}} {{.Msg}} <span class="muted">{{.Attrs}}</span></div>

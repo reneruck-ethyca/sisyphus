@@ -26,6 +26,18 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON writes "10m", "1h30m" (not "10m0s"), as one would in the file.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = s[:len(s)-2]
+	}
+	return json.Marshal(s)
+}
+
 type Config struct {
 	User          string            `json:"user"` // empty = `gh api user`
 	Org           string            `json:"org"`
@@ -37,6 +49,7 @@ type Config struct {
 	HookTimeout   Duration          `json:"hook_timeout"`
 	HTTPAddr      string            `json:"http_addr"` // dashboard + JSON API
 	Review        Review            `json:"review"`
+	Path          string            `json:"-"` // the file this was loaded from
 }
 
 // Review configures the Claude Code review runs.
@@ -89,7 +102,50 @@ func DefaultPath() string {
 
 // Load reads path over the defaults. A missing file means all defaults.
 func Load(path string) (Config, error) {
-	cfg := Config{
+	cfg, err := read(path)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Path = path
+	cfg.ReposRoot = expandHome(cfg.ReposRoot)
+	r := &cfg.Review
+	r.EnvFile, r.PromptFile, r.ClaudeSettings = expandHome(r.EnvFile), expandHome(r.PromptFile), expandHome(r.ClaudeSettings)
+	for name, repo := range r.Repos {
+		repo.EnvFile, repo.PromptFile = expandHome(repo.EnvFile), expandHome(repo.PromptFile)
+		r.Repos[name] = repo
+	}
+	cfg.StateFile = expandHome(cfg.StateFile)
+	return cfg, nil
+}
+
+// read is path over the defaults, checked, with paths as written ("~/…").
+func read(path string) (Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return defaults(), err
+	}
+	return parse(path, b)
+}
+
+// parse is b (nil = no file) over the defaults, checked.
+func parse(path string, b []byte) (Config, error) {
+	cfg := defaults()
+	if b != nil {
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return cfg, fmt.Errorf("config %s: %w", path, err)
+		}
+	}
+	if cfg.Interval.Duration <= 0 {
+		return cfg, fmt.Errorf("config %s: interval must be positive", path)
+	}
+	if err := cfg.Review.check(); err != nil {
+		return cfg, fmt.Errorf("config %s: review: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func defaults() Config {
+	return Config{
 		Org:         "ethyca",
 		Interval:    Duration{10 * time.Minute},
 		ReposRoot:   "~/Dev",
@@ -108,30 +164,6 @@ func Load(path string) (Config, error) {
 			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus},
 		},
 	}
-	b, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return cfg, err
-	}
-	if err == nil {
-		if err := json.Unmarshal(b, &cfg); err != nil {
-			return cfg, fmt.Errorf("config %s: %w", path, err)
-		}
-	}
-	if cfg.Interval.Duration <= 0 {
-		return cfg, fmt.Errorf("config %s: interval must be positive", path)
-	}
-	if err := cfg.Review.check(); err != nil {
-		return cfg, fmt.Errorf("config %s: review: %w", path, err)
-	}
-	cfg.ReposRoot = expandHome(cfg.ReposRoot)
-	r := &cfg.Review
-	r.EnvFile, r.PromptFile, r.ClaudeSettings = expandHome(r.EnvFile), expandHome(r.PromptFile), expandHome(r.ClaudeSettings)
-	for name, repo := range r.Repos {
-		repo.EnvFile, repo.PromptFile = expandHome(repo.EnvFile), expandHome(repo.PromptFile)
-		r.Repos[name] = repo
-	}
-	cfg.StateFile = expandHome(cfg.StateFile)
-	return cfg, nil
 }
 
 func (r Review) check() error {

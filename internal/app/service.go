@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -256,4 +257,26 @@ func (s *Service) update(fn func(*Status)) {
 	for _, sub := range subs {
 		sub(st)
 	}
+}
+
+// Settings is the config file's editable fields, for the settings pages.
+type Settings struct {
+	Path   string         `json:"path"`
+	Fields []config.Field `json:"fields"`
+}
+
+// Settings reads the config file now, so it shows saved changes not yet applied.
+func (s *Service) Settings() (Settings, error) {
+	fs, err := config.Settings(s.cfg.Path)
+	return Settings{Path: s.cfg.Path, Fields: fs}, err
+}
+
+// SaveSettings writes changed fields (key → value) to the config file; they
+// apply on restart.
+func (s *Service) SaveSettings(values map[string]any) error {
+	if err := config.SaveSettings(s.cfg.Path, values); err != nil {
+		return err
+	}
+	slog.Info("settings saved, restart to apply", "file", s.cfg.Path, "changed", slices.Sorted(maps.Keys(values)))
+	return nil
 }

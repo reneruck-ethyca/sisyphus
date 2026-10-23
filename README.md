@@ -25,7 +25,7 @@ it: a queue, review containers running Claude Code, and run records.
 | `main` | wiring, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`, `frontend/`) |
 
 UIs talk to `app.Service`: `Status()`, `PR(id)`, `RunNow()`, `RunDir(pr, run)`, `OnChange(fn)`,
-`Logs()`, `SubscribeLogs()`. It hands out copies of state, so a UI or API never races a tick or a run.
+`Logs()`, `SubscribeLogs()`, `Settings()`, `SaveSettings(values)`. It hands out copies of state, so a UI or API never races a tick or a run.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process.
 The window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI`
@@ -47,8 +47,8 @@ make uninstall-agent
 
 The menu-bar app also serves a dashboard (overview + per-PR details, auto-refreshing) and a JSON
 API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `POST /api/run`,
-`GET /api/logs` (last 1000 ops log lines) and `GET /api/logs/stream` (server-sent events: backlog,
-then live). If the port is taken it logs and runs without it. Both the dashboard (`/logs`) and the
+`GET /api/logs` (last 1000 ops log lines), `GET /api/logs/stream` (server-sent events: backlog,
+then live), `GET`/`PUT /api/settings` and `POST /api/restart`. If the port is taken it logs and runs without it. Both the dashboard (`/logs`) and the
 window ("Logs") have a live log viewer. PR pages list review runs; a run's files are served at
 `/prs/{owner}/{repo}/{number}/runs/{run}/` (`log`, `run.json`, `out/`). Run files are served sandboxed (CSP `sandbox`,
 `nosniff`), so HTML a reviewer writes can't script the dashboard.
@@ -59,7 +59,11 @@ shell's PATH into the LaunchAgent.
 
 ## Config
 
-Optional JSON at `~/.config/waterboy/config.json` (`-config` to override):
+Optional JSON at `~/.config/waterboy/config.json` (`-config` to override). The dashboard (`/settings`)
+and the window ("Settings") edit the scalar fields below; `repos`, `hooks`, `env`, `state_file` and
+`http_addr` stay file-only. Saving writes only the changed fields, keeps the rest of the file, and is
+refused if the result wouldn't load. Changes apply on restart: the Restart button re-execs waterboy in
+place (same PID, so the LaunchAgent is happy; review containers are re-attached).
 
 | Field | Default | |
 |---|---|---|
