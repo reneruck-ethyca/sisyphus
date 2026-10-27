@@ -107,7 +107,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if value(fs, "org") != "acme" || value(fs, "interval") != "10m" || value(fs, "review.timeout") != "1h" || value(fs, "hook_timeout") != "30m" || value(fs, "review.model") != "sonnet" ||
-		value(fs, "review.max_turns") != 100.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/waterboy/review.env" {
+		value(fs, "review.max_turns") != 200.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/waterboy/review.env" {
 		t.Fatalf("settings = %+v", fs)
 	}
 
@@ -126,7 +126,7 @@ func TestSettings(t *testing.T) {
 	before, _ := os.ReadFile(p)
 	for _, bad := range []map[string]any{
 		{"interval": "soon"},
-		{"review.max_concurrent": 0},
+		{"review.max_concurrent": 0}, {"review.five_hour_percent": 101},
 		{"review.max_turns": "many"},
 		{"state_file": "/elsewhere"},
 	} {

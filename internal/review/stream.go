@@ -34,9 +34,10 @@ const (
 	maxToolText   = 300
 )
 
-// parseLine turns one line of container output into events. Lines that aren't
-// Claude stream-json (the setup script, shell errors) become "output" events.
-func parseLine(n int, line string) ([]Event, *ClaudeResult) {
+// parseLine turns one line of container output into events, plus the result or
+// a 5-hour window reading the line carries. Lines that aren't Claude stream-json
+// (the setup script, shell errors) become "output" events.
+func parseLine(n int, line string) ([]Event, *ClaudeResult, *Window) {
 	var m struct {
 		Type    string `json:"type"`
 		Subtype string `json:"subtype"`
@@ -52,10 +53,18 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult) {
 		CostUSD   float64  `json:"total_cost_usd"`
 		SessionID string   `json:"session_id"`
 		Errors    []string `json:"errors"`
+		RateLimit struct {
+			Windows struct {
+				FiveHour *struct {
+					Utilization float64 `json:"utilization"`
+					ResetsAt    int64   `json:"resetsAt"`
+				} `json:"five_hour"`
+			} `json:"unifiedWindows"`
+		} `json:"rate_limit_info"`
 	}
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasPrefix(trimmed, "{") || json.Unmarshal([]byte(trimmed), &m) != nil || m.Type == "" {
-		return []Event{{Line: n, Kind: "output", Text: line}}, nil
+		return []Event{{Line: n, Kind: "output", Text: line}}, nil, nil
 	}
 	ev := func(kind, tool, text string, isErr bool) Event {
 		return Event{Line: n, Kind: kind, Tool: tool, Text: text, IsError: isErr}
@@ -63,9 +72,9 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult) {
 	switch m.Type {
 	case "system":
 		if m.Subtype == "init" {
-			return []Event{ev("init", "", fmt.Sprintf("%s in %s, %d tools", m.Model, m.Cwd, len(m.Tools)), false)}, nil
+			return []Event{ev("init", "", fmt.Sprintf("%s in %s, %d tools", m.Model, m.Cwd, len(m.Tools)), false)}, nil, nil
 		}
-		return []Event{ev("system", "", m.Subtype, false)}, nil
+		return []Event{ev("system", "", m.Subtype, false)}, nil, nil
 	case "assistant", "user":
 		var blocks []struct {
 			Type    string          `json:"type"`
@@ -76,7 +85,7 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult) {
 			IsError bool            `json:"is_error"`
 		}
 		if json.Unmarshal(m.Message.Content, &blocks) != nil {
-			return nil, nil // a plain-string user message: the prompt echoed back
+			return nil, nil, nil // a plain-string user message: the prompt echoed back
 		}
 		var out []Event
 		for _, b := range blocks {
@@ -91,7 +100,7 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult) {
 				out = append(out, ev("tool_result", "", truncate(resultText(b.Content), maxResultText), b.IsError))
 			}
 		}
-		return out, nil
+		return out, nil, nil
 	case "result":
 		r := &ClaudeResult{Subtype: m.Subtype, IsError: m.IsError, SessionID: m.SessionID, NumTurns: m.NumTurns,
 			CostUSD: m.CostUSD, Duration: m.Duration, Error: strings.Join(m.Errors, "; ")}
@@ -100,11 +109,17 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult) {
 		if r.Error != "" {
 			text += ": " + r.Error
 		}
-		return []Event{ev("result", "", text, m.IsError)}, r
+		return []Event{ev("result", "", text, m.IsError)}, r, nil
 	case "stream_event":
-		return nil, nil // partial deltas; the complete assistant message follows
+		return nil, nil, nil // partial deltas; the complete assistant message follows
+	case "rate_limit_event":
+		if fh := m.RateLimit.Windows.FiveHour; fh != nil {
+			w := &Window{ResetsAt: time.Unix(fh.ResetsAt, 0), Used: fh.Utilization}
+			text := fmt.Sprintf("5-hour limit at %.0f%%, resets %s", w.Used*100, w.ResetsAt.Local().Format("15:04"))
+			return []Event{ev("system", "", text, false)}, nil, w
+		}
 	}
-	return []Event{ev("system", "", m.Type, false)}, nil
+	return []Event{ev("system", "", m.Type, false)}, nil, nil
 }
 
 // toolSummary picks the one input field that says what a tool call does.

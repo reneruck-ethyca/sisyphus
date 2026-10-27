@@ -30,9 +30,11 @@ type Status struct {
 	Reviews   bool      `json:"reviews"`              // false when review.disabled
 	// Why reviews are waiting on the container runtime ("" = they aren't).
 	RuntimeError string            `json:"runtime_error,omitempty"`
-	Reviewing    []ActiveReview    `json:"reviewing"` // review runs in progress, oldest first
-	Ignored      []tracker.Ignored `json:"ignored"`   // PRs untracked by hand
-	Activity     []Activity        `json:"activity"`  // latest review runs across PRs, newest first
+	BudgetNote   string            `json:"budget_note,omitempty"` // the 5-hour budget's use, in a line ("" = no budget)
+	BudgetWait   string            `json:"budget_wait,omitempty"` // why the budget holds reviews back ("" = it doesn't)
+	Reviewing    []ActiveReview    `json:"reviewing"`             // review runs in progress, oldest first
+	Ignored      []tracker.Ignored `json:"ignored"`               // PRs untracked by hand
+	Activity     []Activity        `json:"activity"`              // latest review runs across PRs, newest first
 }
 
 // ActiveReview is a review run in progress and its container.
@@ -75,6 +77,24 @@ type PRView struct {
 	Tone      string    `json:"tone"`
 	Group     string    `json:"group"`
 	VerdictAt time.Time `json:"verdict_at"`
+}
+
+// budgetNotes says in a line how much of the 5-hour budget reviews used, and
+// why it holds them back once used up ("" = no budget, or not held back).
+func budgetNotes(b review.Budget) (note, wait string) {
+	if b.Share == 0 {
+		return "", ""
+	}
+	pct := func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) }
+	if b.ResetsAt.IsZero() {
+		return "Reviews may use " + pct(b.Share) + " of each 5-hour window; none used in this one yet.", ""
+	}
+	resets := b.ResetsAt.Local().Format("15:04")
+	note = fmt.Sprintf("5-hour window: reviews used %s of their %s · account at %s · resets %s", pct(b.Used), pct(b.Share), pct(b.Account), resets)
+	if b.Exhausted() {
+		wait = fmt.Sprintf("Reviews used their %s share of the 5-hour window. Queued reviews start after it resets at %s.", pct(b.Share), resets)
+	}
+	return note, wait
 }
 
 // reviewNote says in a line where the PR's review stands and why. blocked and
@@ -406,10 +426,12 @@ func (s *Service) refreshPRs() {
 // publish merges the last tracker snapshot with live review state. Safe from any goroutine.
 func (s *Service) publish() {
 	var reviews map[string]review.PRStatus
+	var budget review.Budget
 	runtimeErr := ""
 	if s.rev != nil {
-		reviews, runtimeErr = s.rev.Status(), s.rev.RuntimeError()
+		reviews, runtimeErr, budget = s.rev.Status(), s.rev.RuntimeError(), s.rev.Budget()
 	}
+	note, wait := budgetNotes(budget)
 	s.mu.Lock()
 	tracked := s.tracked
 	s.mu.Unlock()
@@ -420,8 +442,12 @@ func (s *Service) publish() {
 			blocked[tr.Repo] = s.rev.Blocked(tr.Repo)
 		}
 		rs := reviews[tr.Key()]
+		why := blocked[tr.Repo]
+		if why == "" && rs.State == "queued" && wait != "" {
+			why = "the 5-hour budget, until " + budget.ResetsAt.Local().Format("15:04")
+		}
 		v := PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs, UpToDate: upToDate(tr, rs),
-			ReviewNote: reviewNote(tr, rs, s.rev != nil, blocked[tr.Repo], runtimeErr)}
+			ReviewNote: reviewNote(tr, rs, s.rev != nil, why, runtimeErr)}
 		v.Verdict, v.Tone, v.Group, v.VerdictAt = verdict(tr, v.Health, rs)
 		prs = append(prs, v)
 	}
@@ -437,6 +463,7 @@ func (s *Service) publish() {
 	slices.SortFunc(active, func(a, b ActiveReview) int { return a.Started.Compare(b.Started) })
 	s.update(func(st *Status) {
 		st.PRs, st.RuntimeError, st.Reviewing, st.Activity = prs, runtimeErr, active, activity(prs)
+		st.BudgetNote, st.BudgetWait = note, wait
 	})
 }
 

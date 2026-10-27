@@ -88,6 +88,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.plugins_volume` | `waterboy-claude-plugins` | Docker volume mounted as Claude's `plugins/` |
 | `review.timeout` | `60m` | runs longer than this are flagged in the UIs, never stopped |
 | `review.max_concurrent` | `1` | review containers at a time |
+| `review.five_hour_percent` | `0` (none) | share of each 5-hour subscription window reviews may use; past it, new reviews wait for the reset |
 | `review.cleanup` | `true` | after each run, reset worktrees waterboy created to the reviewed head |
 | `review.setup_step_timeout` | `20m` | each setup step; past it the step is killed and the run fails |
 | `review.retries` | `3` | re-runs of a review that failed before Claude started (setup, stack, container start); `0` = none |

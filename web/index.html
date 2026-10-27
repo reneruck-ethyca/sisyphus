@@ -23,6 +23,7 @@
 </div>
 
 {{define "notices"}}{{with .RuntimeError}}<p class="notice">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
+{{with .BudgetWait}}<p class="notice">{{.}}</p>{{end}}
 {{if not .Reviews}}<p class="notice quiet">Reviews are off. Turn them on in <a href="/settings">Settings</a>.</p>{{end}}{{end}}
 
 {{define "overview"}}
@@ -44,6 +45,7 @@
       <span class="facts">{{base .Repo}} #{{.Number}} · {{.ReviewNote}}{{with .Review.Latest}}{{if .Overdue}} · <span class="err">running longer than the review timeout</span>{{end}}{{end}}</span></span>
     {{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</li>{{end}}</ol>
   {{else}}<p class="muted">No review running.</p>{{end}}
+  {{with .BudgetNote}}<p class="muted">{{.}}</p>{{end}}
 </section>
 <section aria-labelledby="recent"><h2 id="recent">Recent activity</h2>
   {{with .Activity}}<ol class="list card">{{range .}}<li>

@@ -185,3 +185,24 @@ func TestUntrackAndRetrackOnTheLoop(t *testing.T) {
 		t.Fatal("reset with reviews disabled")
 	}
 }
+
+func TestBudgetNotes(t *testing.T) {
+	resets := time.Now().Add(time.Hour)
+	at := resets.Local().Format("15:04")
+	for _, c := range []struct {
+		b          review.Budget
+		note, wait string
+	}{
+		{review.Budget{}, "", ""},
+		{review.Budget{Share: 0.25}, "Reviews may use 25% of each 5-hour window; none used in this one yet.", ""},
+		{review.Budget{Share: 0.25, Used: 0.04, Account: 0.22, ResetsAt: resets},
+			"5-hour window: reviews used 4% of their 25% · account at 22% · resets " + at, ""},
+		{review.Budget{Share: 0.25, Used: 0.26, Account: 0.4, ResetsAt: resets},
+			"5-hour window: reviews used 26% of their 25% · account at 40% · resets " + at,
+			"Reviews used their 25% share of the 5-hour window. Queued reviews start after it resets at " + at + "."},
+	} {
+		if note, wait := budgetNotes(c.b); note != c.note || wait != c.wait {
+			t.Errorf("%+v:\n got %q, %q\nwant %q, %q", c.b, note, wait, c.note, c.wait)
+		}
+	}
+}

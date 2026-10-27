@@ -60,6 +60,7 @@ type Run struct {
 	Error     string        `json:"error,omitempty"`
 	Dir       string        `json:"dir"`
 	Claude    *ClaudeResult `json:"claude,omitempty"`    // Claude's final result line, once it has one
+	Usage     []Span        `json:"usage,omitempty"`     // the 5-hour windows it used, by Claude's rate-limit readings
 	Posted    *Posted       `json:"posted,omitempty"`    // what waterboy posted to GitHub
 	Stack     *StackRun     `json:"stack,omitempty"`     // the local stack it ran against
 	PostNote  string        `json:"post_note,omitempty"` // what came of posting, in a line (succeeded runs)
@@ -131,6 +132,7 @@ type Reviewer struct {
 	active      map[string]context.CancelCauseFunc // running, by PR ID
 	wake        chan struct{}
 	unavailable string // why the runtime can't start containers right now
+	overBudget  bool   // the 5-hour budget held reviews back at the last dispatch
 	retrying    bool   // a runtime re-check is scheduled
 	subs        map[chan RunEvent]struct{}
 	skipped     map[string]bool // repos without review config and missing env files, logged once
@@ -543,14 +545,44 @@ func (r *Reviewer) checkRuntime(ctx context.Context) bool {
 	return err == nil
 }
 
+// checkBudget says whether the 5-hour budget lets new reviews start, logging
+// when that changes.
+func (r *Reviewer) checkBudget() bool {
+	b := r.Budget()
+	r.mu.Lock()
+	was := r.overBudget
+	r.overBudget = b.Exhausted()
+	r.mu.Unlock()
+	switch {
+	case b.Exhausted() && !was:
+		slog.Warn("5-hour budget used, reviews wait for the reset", "used", b.Used, "share", b.Share, "resets", b.ResetsAt.Local().Format(time.TimeOnly))
+		r.changed()
+	case !b.Exhausted() && was:
+		slog.Info("5-hour budget available again")
+		r.changed()
+	}
+	return !b.Exhausted()
+}
+
+// budgetWait is how long until the window resets while the budget holds reviews back (0 = it doesn't).
+func (r *Reviewer) budgetWait() time.Duration {
+	r.mu.Lock()
+	over := r.overBudget
+	r.mu.Unlock()
+	if !over {
+		return 0
+	}
+	return max(time.Until(r.Budget().ResetsAt), time.Second)
+}
+
 // dispatch starts what it can and says when to look again for jobs waiting on
 // Blocked or a retry's backoff (0 = no need).
 func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 	r.mu.Lock()
 	pending := len(r.st.Queue) > 0 && len(r.active) < r.cfg.MaxConcurrent
 	r.mu.Unlock()
-	if !pending || !r.checkRuntime(ctx) {
-		return 0
+	if !pending || !r.checkBudget() || !r.checkRuntime(ctx) {
+		return r.budgetWait()
 	}
 	later := func(d time.Duration) {
 		if recheck == 0 || d < recheck {
@@ -923,10 +955,13 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		close(logsDone)
 	} else {
 		lw = &lineWriter{file: logf, onLine: func(n int, line string) {
-			evs, res := parseLine(n, line)
+			evs, res, w := parseLine(n, line)
 			if res != nil {
 				result = res
 				r.record(id, run.ID, func(x *Run) { x.Claude = res })
+			}
+			if w != nil {
+				r.record(id, run.ID, func(x *Run) { x.Usage = observe(x.Usage, *w) })
 			}
 			r.publish(id, run.ID, evs)
 		}}
@@ -1050,7 +1085,7 @@ func (r *Reviewer) appendLog(prID string, run Run, lw *lineWriter, line string) 
 	}
 	defer f.Close()
 	if _, err := f.WriteString(line + "\n"); err == nil {
-		evs, _ := parseLine(lw.n, line)
+		evs, _, _ := parseLine(lw.n, line)
 		r.publish(prID, run.ID, evs)
 	}
 }
@@ -1109,7 +1144,7 @@ func (r *Reviewer) Events(prID, runID string) (evs []Event, next int, err error)
 		if !strings.HasSuffix(line, "\n") {
 			break // a partial last line arrives live once complete
 		}
-		e, _ := parseLine(n, strings.TrimRight(line, "\r\n"))
+		e, _, _ := parseLine(n, strings.TrimRight(line, "\r\n"))
 		evs, next = append(evs, e...), n+1
 	}
 	return evs, next, nil

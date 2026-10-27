@@ -34,7 +34,7 @@ func TestParseLine(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, _ := parseLine(7, c.line)
+			got, _, _ := parseLine(7, c.line)
 			if len(got) != len(c.want) {
 				t.Fatalf("got %+v, want %+v", got, c.want)
 			}
@@ -49,14 +49,14 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestParseLineResult(t *testing.T) {
-	_, res := parseLine(0, `{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":3,"duration_ms":10,"total_cost_usd":0.5,"session_id":"s1","errors":["max turns"]}`)
+	_, res, _ := parseLine(0, `{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":3,"duration_ms":10,"total_cost_usd":0.5,"session_id":"s1","errors":["max turns"]}`)
 	if res == nil || !res.IsError || res.Subtype != "error_max_turns" || res.SessionID != "s1" || res.NumTurns != 3 || res.CostUSD != 0.5 || res.Error != "max turns" {
 		t.Fatalf("result = %+v", res)
 	}
 }
 
 func TestToolResultTruncated(t *testing.T) {
-	evs, _ := parseLine(0, `{"type":"user","message":{"content":[{"type":"tool_result","content":"`+strings.Repeat("x", 5000)+`"}]}}`)
+	evs, _, _ := parseLine(0, `{"type":"user","message":{"content":[{"type":"tool_result","content":"`+strings.Repeat("x", 5000)+`"}]}}`)
 	if len(evs) != 1 || len(evs[0].Text) > maxResultText+len("…") {
 		t.Fatalf("not truncated: %d", len(evs[0].Text))
 	}

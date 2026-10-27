@@ -67,6 +67,7 @@ type Review struct {
 	PluginsVolume  string                `json:"plugins_volume"`  // Docker volume with Claude plugins ("" = none)
 	Timeout        Duration              `json:"timeout"`         // runs past this are flagged, never stopped
 	MaxConcurrent  int                   `json:"max_concurrent"`
+	FiveHourPct    float64               `json:"five_hour_percent"`  // share of each 5-hour subscription window reviews may use; 0 = no limit
 	Cleanup        bool                  `json:"cleanup"`            // reset worktrees waterboy created after each run
 	StackFrom      string                `json:"stack_from"`         // where stacks start: "worktree" (PR code on the host) | "safe"
 	StepTimeout    Duration              `json:"setup_step_timeout"` // each setup step; past it the step is killed and the run fails
@@ -212,6 +213,9 @@ func (r Review) check() error {
 	}
 	if r.StackFrom != StackFromWorktree && r.StackFrom != StackFromSafe {
 		return fmt.Errorf("stack_from must be %q or %q", StackFromWorktree, StackFromSafe)
+	}
+	if r.FiveHourPct < 0 || r.FiveHourPct > 100 {
+		return errors.New("five_hour_percent must be between 0 and 100")
 	}
 	if r.StepTimeout.Duration <= 0 || r.Retries < 0 || r.RetryBackoff.Duration <= 0 {
 		return errors.New("needs a positive setup_step_timeout and retry_backoff, and retries >= 0")

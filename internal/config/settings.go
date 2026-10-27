@@ -38,6 +38,7 @@ var fields = []Field{
 	{Key: "review.max_budget_usd", Type: "number", Group: "Reviews", Label: "Spend limit (USD)", Help: "0 means no limit. Only enforced with API-key auth."},
 	{Key: "review.timeout", Type: "text", Group: "Reviews", Label: "Flag runs after", Help: "Longer runs are flagged, never stopped. E.g. 1h."},
 	{Key: "review.max_concurrent", Type: "number", Group: "Reviews", Label: "Reviews at a time", Help: "Review containers running at once."},
+	{Key: "review.five_hour_percent", Type: "number", Group: "Reviews", Label: "Share of 5-hour limit (%)", Help: "How much of each 5-hour subscription window reviews may use. Past it, new reviews wait for the window to reset. 0 means no limit."},
 	{Key: "review.retries", Type: "number", Group: "Reviews", Label: "Retries", Help: "Re-runs of a review that failed before Claude started (setup, stack). 0 means none."},
 	{Key: "review.retry_backoff", Type: "text", Group: "Reviews", Label: "Retry backoff", Help: "Wait before the first retry, doubling after each, e.g. 2m."},
 	{Key: "review.stack_from", Type: "text", Group: "Local stack", Label: "Start stacks from", Options: []string{"worktree", "safe"}, Help: "worktree: the PR's code, on the host. safe: the clone in the repos root."},

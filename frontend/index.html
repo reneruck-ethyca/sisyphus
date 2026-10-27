@@ -112,6 +112,7 @@
       <span title="${esc(i.title)}">${esc(i.repo)}#${i.number}</span><button class="linkbtn" data-action="track" data-pr="${esc(i.repo)}#${i.number}">Track again</button></div>`).join("") : ""}</aside>`;
 
   const notices = () => (status.runtime_error ? `<p class="notice">Reviews are waiting for the container runtime: ${esc(status.runtime_error)}</p>` : "")
+    + (status.budget_wait ? `<p class="notice">${esc(status.budget_wait)}</p>` : "")
     + (status.reviews ? "" : `<p class="notice quiet">Reviews are off. Turn them on in <a href="#settings">Settings</a>.</p>`);
 
   function overview() {
@@ -133,6 +134,7 @@
         ${live.length ? `<ol class="list card">${live.map(p => row(p, esc(p.review_note)
             + (p.review.runs?.[0]?.overdue ? ` · <span class="err">running longer than the review timeout</span>` : ""))).join("")}</ol>`
           : `<p class="muted">No review running.</p>`}
+        ${s.budget_note ? `<p class="muted">${esc(s.budget_note)}</p>` : ""}
       </section>
       <section aria-labelledby="recent"><h2 id="recent">Recent activity</h2>
         ${s.activity?.length ? `<ol class="list card">${s.activity.map(a => `<li>${chip(a.label, a.tone)}
