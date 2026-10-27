@@ -218,6 +218,7 @@
       ${p.last_error ? `<p class="err">${esc(p.last_error)}</p>` : ""}
       <dl>${[
         field("PR", `<a href="${esc(p.url)}" data-external>${esc(p.id)}</a>`),
+        field("Author", p.author ? `<a href="https://github.com/${esc(p.author)}" data-external>${esc(p.author)}</a>` : "—"),
         field("Branch", esc(p.head_ref)),
         field("Head", esc(p.head_sha)),
         field("Synced", esc(p.synced_sha) || "—"),

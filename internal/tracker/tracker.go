@@ -134,7 +134,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 	}
 	_, seen := newReplies(pr, t.cfg.User, time.Time{})
 	tr := &Tracked{
-		PRRef: pr.PRRef, URL: pr.URL, Title: pr.Title, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
+		PRRef: pr.PRRef, URL: pr.URL, Title: pr.Title, Author: pr.Author, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
 		SyncedSHA: synced, Worktree: wt, CreatedWorktree: createdWT, CreatedBranch: createdBranch,
 		TrackedAt: time.Now(), LastSeenAt: seen,
 	}
@@ -184,6 +184,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 		return
 	}
 	tr.LastError = ""
+	tr.Author = pr.Author // backfills PRs tracked before Author was stored
 	newCommits := pr.HeadSHA != tr.HeadSHA
 	n, latest := newReplies(pr, t.cfg.User, tr.LastSeenAt)
 	if newCommits || n > 0 {

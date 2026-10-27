@@ -15,6 +15,7 @@ type Tracked struct {
 	github.PRRef
 	URL             string    `json:"url"`
 	Title           string    `json:"title"`
+	Author          string    `json:"author"` // GitHub login of whoever opened the PR
 	HeadRef         string    `json:"head_ref"`
 	HeadSHA         string    `json:"head_sha"`   // last head seen on GitHub
 	SyncedSHA       string    `json:"synced_sha"` // worktree HEAD after our last sync; "" = never hard-reset

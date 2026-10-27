@@ -28,7 +28,7 @@ import (
 func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer) {
 	t.Helper()
 	cfg, tr := testkit.Tracker(t, &github.Fake{},
-		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x"})
+		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", Author: "octocat", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x"})
 	logs := app.NewLogBuffer(10)
 	svc := app.NewService(cfg, tr, nil, logs)
 	srv := httptest.NewServer(newHandler(svc))
@@ -133,7 +133,7 @@ func TestHTTPPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{
 		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "1 tracked", "Last run never"},
-		"/prs/ethyca/a/1": {"ethyca/a#1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `class="health ok"`},
+		"/prs/ethyca/a/1": {"ethyca/a#1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `class="health ok"`, `href="https://github.com/octocat"`},
 	} {
 		code, body := get(t, srv.URL+path)
 		if code != 200 {

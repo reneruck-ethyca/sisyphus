@@ -29,6 +29,7 @@
 <h2>{{.Title}}</h2>
 <div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span></div>
 <dl>
+  <dt>Author</dt><dd><a href="https://github.com/{{.Author}}">{{or .Author "—"}}</a></dd>
   <dt>Branch</dt><dd><code>{{.HeadRef}}</code></dd>
   <dt>Head SHA</dt><dd><code>{{.HeadSHA}}</code></dd>
   <dt>Synced SHA</dt><dd><code>{{or .SyncedSHA "—"}}</code></dd>
