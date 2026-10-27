@@ -139,7 +139,7 @@
   <div class="actions"><h1>Review run · {{stamp .Started}}</h1>{{template "chip" .}}</div>
   <div class="meta-line"><span>{{reason .Job.Reason}} · {{dur .}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}</span>
     <span>head <code>{{short .Job.PR.HeadSHA}}</code></span>{{if eq .Status "running"}}<span>container <code>{{or .Name .Container "starting…"}}</code></span>{{end}}{{if .Overdue}}<span class="err">running longer than the review timeout</span>{{end}}</div>
-  <div class="meta-line"><a href="{{$base}}/log">Raw log</a><a href="{{$base}}/prompt.md">Prompt</a><a href="{{$base}}/out/">Output files</a>{{if .Stack}}<a href="{{$base}}/stack.log">Stack log</a>{{end}}</div>
+  <div class="meta-line"><a href="{{$base}}/log">Raw log</a><a href="{{$base}}/prompt.md">Prompt</a><a href="{{$base}}/out/">Output files</a>{{if .Stack}}<a href="{{$base}}/stack.log">Stack log</a>{{end}}<button class="linkbtn" data-open="/api{{$base}}/open">Open in Finder</button></div>
 </div>
 {{with .Error}}<p class="notice">{{.}}</p>{{end}}
 {{with .Posted}}{{with .Error}}<p class="notice">Posting to GitHub failed: {{.}}</p>{{end}}{{end}}
@@ -232,17 +232,17 @@
   // open or a field has focus; open sections stay open across the reload.
   const folds = "sisyphus-open-folds:" + location.pathname;
   try { JSON.parse(sessionStorage.getItem(folds) ?? "[]").forEach(id => document.getElementById(id)?.setAttribute("open", "")); } catch {}
-  {{if not .Run}}let seen;
-  const poll = async () => {
-    try {
-      const now = await (await fetch("/api/status")).text();
-      seen ??= now;
-      if (now === seen || document.hidden || document.querySelector(".menu[open]") || document.activeElement?.matches("input, select, textarea")) return;
-      try { sessionStorage.setItem(folds, JSON.stringify([...document.querySelectorAll("details.fold[open]")].map(d => d.id))); } catch {}
-      location.reload();
-    } catch {} // sisyphus restarting: try again next time
+  {{if not .Run}}let seen, pending;
+  const onStatus = (now) => {
+    seen ??= now;
+    if (now === seen) return;
+    pending = now; // reload once the page is visible and nothing is being used
+    if (document.hidden || document.querySelector(".menu[open]") || document.activeElement?.matches("input, select, textarea")) return;
+    try { sessionStorage.setItem(folds, JSON.stringify([...document.querySelectorAll("details.fold[open]")].map(d => d.id))); } catch {}
+    location.reload();
   };
-  poll();
-  setInterval(poll, 15000);{{end}}
+  // Pushed on every change; after a restart the stream reconnects and the fresh status differs, so the page reloads.
+  new EventSource("/api/status/stream").onmessage = (m) => onStatus(m.data);
+  setInterval(() => pending && onStatus(pending), 5000);{{end}}
 </script>
 {{template "foot"}}

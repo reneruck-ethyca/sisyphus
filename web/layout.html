@@ -33,6 +33,14 @@
     return !v ? (s < 0 ? "in a moment" : "just now") : s < 0 ? `in ${v}` : `${v} ago`;
   };
   setInterval(() => document.querySelectorAll("time[data-rel]").forEach(el => el.textContent = rel(el.dateTime)), 30000);
+  // In the app window the webview can't leave the dashboard: external links open in the browser via sisyphus.
+  if (navigator.userAgent.includes("sisyphus-window")) document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href]");
+    if (!a || a.origin === location.origin) return;
+    e.preventDefault();
+    fetch("/api/open", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: "url=" + encodeURIComponent(a.href)});
+  });
+  document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => fetch(b.dataset.open, {method: "POST"}));
   const run = document.getElementById("run");
   if (run) run.onclick = async () => {
     run.disabled = true;

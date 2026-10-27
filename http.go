@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"strconv"
@@ -26,8 +27,10 @@ import (
 //go:embed web/*.html web/style.css
 var webFS embed.FS
 
-// styleCSS is shared with the Wails window (see ui.go).
 var styleCSS, _ = webFS.ReadFile("web/style.css")
+
+// openInBrowser opens a URL with the system handler; a var so tests don't.
+var openInBrowser = func(url string) error { return exec.Command("open", url).Run() }
 
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"when": func(t time.Time) string {
@@ -127,12 +130,16 @@ func runDuration(r review.Run) string {
 	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
 }
 
-// startHTTP serves the dashboard and JSON API on addr. Only app.Service is used, so
+// startHTTP serves the dashboard and JSON API on addr, or on a free loopback
+// port when addr is taken: the window needs it. Only app.Service is used, so
 // the handlers see the same snapshots as the tray.
 func startHTTP(addr string, svc *app.Service) (string, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return "", err
+		slog.Warn("dashboard address in use, picking a free port", "addr", addr, "err", err)
+		if ln, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
+			return "", err
+		}
 	}
 	go func() {
 		if err := http.Serve(ln, newHandler(svc)); err != nil {
@@ -150,6 +157,35 @@ func newHandler(svc *app.Service) http.Handler {
 	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, svc.Status())
+	})
+	mux.HandleFunc("GET /api/status/stream", func(w http.ResponseWriter, r *http.Request) {
+		streamStatus(w, r, svc)
+	})
+	// The window can't navigate away from the dashboard, so its pages send
+	// external links here; only GitHub, where everything sisyphus links to lives.
+	mux.HandleFunc("POST /api/open", func(w http.ResponseWriter, r *http.Request) {
+		u := r.FormValue("url")
+		if !strings.HasPrefix(u, "https://github.com/") {
+			http.Error(w, "only https://github.com/ links are opened", http.StatusForbidden)
+			return
+		}
+		if err := openInBrowser(u); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/runs/{run}/open", func(w http.ResponseWriter, r *http.Request) {
+		dir, ok := svc.RunDir(prID(r), r.PathValue("run"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if err := openInBrowser(dir); err != nil { // Finder, for a directory
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}", func(w http.ResponseWriter, r *http.Request) {
 		pr, ok := svc.PR(prID(r))
@@ -440,6 +476,37 @@ func streamRun(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 		}
 	}
 }
+
+// streamStatus sends the status as JSON now and after every change, at most
+// every statusEvery per client, as server-sent events. Pages reload when it differs.
+func streamStatus(w http.ResponseWriter, r *http.Request, svc *app.Service) {
+	changed, cancel := svc.SubscribeStatus()
+	defer cancel()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	rc := http.NewResponseController(w)
+	send := func() bool {
+		b, _ := json.Marshal(svc.Status())
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
+	for send() {
+		select {
+		case <-changed:
+		case <-r.Context().Done():
+			return
+		}
+		select { // coalesce a burst of changes (a run's log lines) into one send
+		case <-time.After(statusEvery):
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+var statusEvery = 2 * time.Second
 
 // streamLogs sends the backlog, then every new entry, as server-sent events
 // until the client goes away.

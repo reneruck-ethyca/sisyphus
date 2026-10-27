@@ -53,8 +53,8 @@ make uninstall-agent
 
 The dashboard (`http_addr`) and the window show the same things: every tracked PR with its sync and
 review state, a PR page with its review runs, its stack and the [PR actions](#pr-actions), each run
-streamed live, a live log viewer and the settings. If the port is taken, sisyphus logs it and runs
-without the dashboard. If Docker is down, reviews wait in the queue and are retried every minute; at
+streamed live, a live log viewer and the settings: the window is the dashboard in a webview. If the
+port is taken, sisyphus logs it and serves on a free one (the window and "Open dashboard" use it). If Docker is down, reviews wait in the queue and are retried every minute; at
 login, re-attaching to running reviews waits for it too.
 
 ## Config
@@ -291,7 +291,7 @@ it: a queue, review containers running Claude Code, local stacks, run records an
 | `internal/app` | `Service`: the boundary UIs talk to |
 | `internal/proc`, `internal/jsonfile` | external commands with timeouts; atomic JSON state files |
 | `internal/gittest`, `internal/testkit` | test helpers |
-| `main` | wiring, CLI flags, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`, `frontend/`) |
+| `main` | wiring, CLI flags, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`) |
 
 UIs talk to `app.Service` (`Status`, `PR`, `RunNow`, `ReviewNow`, `ResetReviews`, `Wipe`, `Untrack`,
 `Retrack`, `Stack`, `RunDir`, `RunEvents`, `SubscribeRunEvents`, `OnChange`, `Logs`, `SubscribeLogs`,
@@ -299,9 +299,9 @@ UIs talk to `app.Service` (`Status`, `PR`, `RunNow`, `ReviewNow`, `ResetReviews`
 the tracker locks, so PR actions wait for a tick in progress.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process. The
-window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI` struct via
-`/wails/runtime.js` and re-renders on the `status` event pushed from `OnChange`. No Wails CLI or npm
-needed; `go build` is enough.
+window is a webview on the dashboard's URL: one UI, server-rendered. Its user agent carries
+`sisyphus-window`, which the pages use to send external links to `POST /api/open` (GitHub only) so
+the webview never leaves the dashboard. No Wails CLI, npm or JS bindings; `go build` is enough.
 
 The dashboard (`web/`, server-rendered) serves `/`, `/prs/{owner}/{repo}/{number}`, a run at
 `…/runs/{run}` with its files under `…/runs/{run}/` (`log`, `run.json`, `out/`, …; served sandboxed with
@@ -311,6 +311,8 @@ CSP `sandbox` and `nosniff`, so HTML a reviewer writes can't script the dashboar
 | | |
 |---|---|
 | `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}` | status snapshots |
+| `GET /api/status/stream` | the status on every change (server-sent events); pages reload on it |
+| `POST /api/open` (`url=`), `POST …/runs/{run}/open` | open a GitHub link in the browser; a run's directory in Finder |
 | `POST /api/run` | tick now |
 | `POST /api/prs/{owner}/{repo}/{number}/review` | Review now |
 | `POST /api/prs/{owner}/{repo}/{number}/reset` \| `wipe` \| `untrack` \| `track` | [PR actions](#pr-actions); `track` undoes untrack |

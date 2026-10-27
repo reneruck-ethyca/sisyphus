@@ -447,3 +447,78 @@ func TestHTTPPRActions(t *testing.T) {
 		t.Fatalf("track: %d, ignored %+v", code, svc.Status().Ignored)
 	}
 }
+
+func TestHTTPStatusStream(t *testing.T) {
+	statusEvery = 10 * time.Millisecond
+	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x"})
+	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
+	srv := httptest.NewServer(newHandler(svc))
+	t.Cleanup(srv.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/status/stream", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	next := func() string {
+		t.Helper()
+		var line string
+		for line == "" { // skip the blank line between events
+			b := make([]byte, 1)
+			for {
+				if _, err := resp.Body.Read(b); err != nil {
+					t.Fatal(err)
+				}
+				if b[0] == '\n' {
+					break
+				}
+				line += string(b)
+			}
+		}
+		return strings.TrimPrefix(line, "data: ")
+	}
+	if first := next(); !strings.Contains(first, `"prs":[{`) || strings.Contains(first, `"running":true`) {
+		t.Fatalf("first event = %s", first)
+	}
+	svc.RunOnce(ctx) // changes LastRun: a second event follows
+	if second := next(); !strings.Contains(second, `"last_run":"2`) {
+		t.Fatalf("second event = %s", second)
+	}
+}
+
+func TestHTTPOpen(t *testing.T) {
+	var opened []string
+	orig := openInBrowser
+	openInBrowser = func(u string) error { opened = append(opened, u); return nil }
+	t.Cleanup(func() { openInBrowser = orig })
+	srv, _, run := newReviewServer(t)
+	post := func(path, body string) int {
+		t.Helper()
+		resp, err := http.Post(srv.URL+path, "application/x-www-form-urlencoded", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post("/api/open", "url=https://github.com/ethyca/a/pull/1"); code != http.StatusNoContent {
+		t.Fatalf("github link: %d", code)
+	}
+	if code := post("/api/open", "url=https://evil.example/x"); code != http.StatusForbidden {
+		t.Fatalf("other link: %d", code)
+	}
+	if code := post("/api/open", "url=file:///etc/hosts"); code != http.StatusForbidden {
+		t.Fatalf("file link: %d", code)
+	}
+	if code := post("/api/prs/ethyca/a/1/runs/"+run.ID+"/open", ""); code != http.StatusNoContent {
+		t.Fatalf("run dir: %d", code)
+	}
+	if code := post("/api/prs/ethyca/a/1/runs/nope/open", ""); code != http.StatusNotFound {
+		t.Fatalf("unknown run: %d", code)
+	}
+	if want := []string{"https://github.com/ethyca/a/pull/1", run.Dir}; !slices.Equal(opened, want) {
+		t.Fatalf("opened %v, want %v", opened, want)
+	}
+}

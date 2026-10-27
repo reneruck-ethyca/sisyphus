@@ -164,6 +164,7 @@ type Service struct {
 	tracked []tracker.Tracked // last tracker snapshot
 	status  Status
 	subs    []func(Status)
+	wakers  map[chan struct{}]struct{} // SubscribeStatus: poked on every change
 }
 
 // NewService wires the tracker, the reviewer (nil = reviews disabled) and the log buffer.
@@ -332,6 +333,23 @@ func (s *Service) OnChange(fn func(Status)) {
 	s.subs = append(s.subs, fn)
 }
 
+// SubscribeStatus returns a channel that gets a (coalesced) signal after every
+// change; read Status for the snapshot. cancel stops it.
+func (s *Service) SubscribeStatus() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	s.mu.Lock()
+	if s.wakers == nil {
+		s.wakers = map[chan struct{}]struct{}{}
+	}
+	s.wakers[ch] = struct{}{}
+	s.mu.Unlock()
+	return ch, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.wakers, ch)
+	}
+}
+
 // RunNow queues a tick; a no-op if one is already queued.
 func (s *Service) RunNow() {
 	slog.Info("run requested")
@@ -458,6 +476,12 @@ func (s *Service) update(fn func(*Status)) {
 	s.mu.Lock()
 	fn(&s.status)
 	st, subs := s.status, slices.Clone(s.subs)
+	for ch := range s.wakers {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 	s.mu.Unlock()
 	for _, sub := range subs {
 		sub(st)
