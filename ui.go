@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -23,6 +24,14 @@ type UI struct{ svc *app.Service }
 
 func (u *UI) Status() app.Status { return u.svc.Status() }
 func (u *UI) RunNow()            { u.svc.RunNow() }
+
+// Stack is what's on Docker for a PR's local stack (null = its repo has none).
+func (u *UI) Stack(id string) (*review.StackStatus, error) {
+	return u.svc.Stack(context.Background(), id)
+}
+
+// Wipe removes a PR's review data (stack with volumes, review containers, history).
+func (u *UI) Wipe(id string) error { return u.svc.Wipe(context.Background(), id) }
 
 // ReviewNow queues a full review of a tracked PR.
 func (u *UI) ReviewNow(id string) error { return u.svc.ReviewNow(id) }

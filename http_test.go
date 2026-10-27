@@ -396,3 +396,17 @@ func TestHTTPReviewNow(t *testing.T) {
 		t.Fatalf("untracked PR: status %d", resp.StatusCode)
 	}
 }
+
+func TestHTTPWipe(t *testing.T) {
+	srv, svc, _ := newReviewServer(t)
+	resp, err := http.Post(srv.URL+"/api/prs/ethyca/a/1/wipe", "", nil)
+	if err != nil || resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("wipe: %v %v", resp.StatusCode, err)
+	}
+	if pr, _ := svc.PR(testkit.RefA.Key()); len(pr.Review.Runs) != 0 || pr.ID == "" {
+		t.Fatalf("after wipe: %+v (want tracked, no runs)", pr.Review)
+	}
+	if resp, _ := http.Post(srv.URL+"/api/prs/ethyca/a/99/wipe", "", nil); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("untracked: %d", resp.StatusCode)
+	}
+}

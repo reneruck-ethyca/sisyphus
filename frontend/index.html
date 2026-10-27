@@ -214,6 +214,16 @@
     let p;
     try { p = await call("PR", id); } catch (e) { return `<p class="err">${esc(e.message ?? e)}</p>`; }
     const field = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+    let stack = null, stackErr = "";
+    try { stack = await call("Stack", id); } catch (e) { stackErr = e.message ?? String(e); }
+    const list = xs => xs?.length ? xs.map(x => `<code>${esc(x)}</code>`).join(", ") : "none";
+    const stackHTML = !stack && !stackErr ? "" : `
+      <h3>Stack ${stack ? `<span class="${esc(stack.state)}">${esc(stack.state)}</span> <code>${esc(stack.project)}</code>` : ""}</h3>
+      ${stackErr ? `<p class="err">${esc(stackErr)}</p>` : ""}
+      ${stack ? (stack.containers?.length ? `<table><thead><tr><th>Service</th><th>Container</th><th>State</th><th>Image</th></tr></thead><tbody>
+        ${stack.containers.map(c => `<tr><td>${esc(c.service)}</td><td><code>${esc(c.name)}</code></td><td class="${esc(c.state)}">${esc(c.status)}</td><td><code>${esc(c.image)}</code></td></tr>`).join("")}
+        </tbody></table>` : `<p class="muted">No containers: the next review starts the stack.</p>`)
+        + `<p class="muted">Volumes: ${list(stack.volumes)} · Network: ${list(stack.networks)}</p>` : ""}`;
     return `<h2>${esc(p.title)} <span class="health ${p.health}">${p.health}</span></h2>
       ${p.last_error ? `<p class="err">${esc(p.last_error)}</p>` : ""}
       <dl>${[
@@ -226,9 +236,11 @@
         field("Tracked since", time(p.tracked_at)),
         field("Last seen", time(p.last_seen_at)),
       ].join("")}</dl>
+      ${stackHTML}
       <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}
         <button data-review="${esc(p.id)}">Review now</button> <span id="review-msg" class="muted"></span></h3>
       <p class="muted">${esc(p.review_note ?? "")}</p>
+      <p><button data-wipe="${esc(p.id)}">Wipe review data…</button> <span id="wipe-msg" class="muted"></span></p>
       ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Started</th><th>Claude</th></tr></thead><tbody>
         ${p.review.runs.map(r => `<tr>
           <td><a href="${runHash(p.id, r.id)}">${esc(r.id)}</a>${r.overdue ? ` <span class="overdue" title="running longer than review.timeout">⚠</span>` : ""}</td>
@@ -241,6 +253,16 @@
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
+    if (e.target.dataset.wipe) {
+      const id = e.target.dataset.wipe;
+      if (!confirm(`Wipe ${id}?\n\nStops a running review and removes its stack (containers, network, DB volume), review containers, review history and run folders. Tracking and the worktree stay; the next review starts fresh.`)) return;
+      e.target.disabled = true;
+      Object.assign(document.getElementById("wipe-msg"), {textContent: "wiping…", className: "muted"});
+      return call("Wipe", id).then(render, err => {
+        Object.assign(document.getElementById("wipe-msg"), {textContent: err.message ?? err, className: "err"});
+        e.target.disabled = false;
+      });
+    }
     if (e.target.dataset.review) {
       e.target.disabled = true;
       return call("ReviewNow", e.target.dataset.review).catch(err => {

@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/waterboy/internal/github"
 )
 
 // fakeShell records host-side stack commands; fn decides each one's outcome.
@@ -257,5 +259,55 @@ nox > Session dev_datastores failed.
 	}
 	if got := errorLines("a\nb\n"); got != "a\nb" {
 		t.Fatalf("no error lines: got %q", got)
+	}
+}
+
+func TestStackStatus(t *testing.T) {
+	f, sh := stackFixture(t, withStack("", config.StackFromWorktree))
+	sh.fn = func(c shellCall, out io.Writer) error {
+		io.WriteString(out, "c\tfidesplus-db-pr-1\tfidesplus-db\trunning\tUp 5 minutes (healthy)\tpostgres:17\n"+
+			"c\tfidesplus-redis-pr-1\tfidesplus-redis\texited\tExited (0) 3 days ago\tredis:8.0-alpine\n"+
+			"v\tproj-pr-1_postgres\nn\tproj-pr-1_default\n")
+		return nil
+	}
+	s, err := f.r.StackStatus(context.Background(), f.tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := StackStatus{Project: "proj-pr-1", State: "running",
+		Containers: []StackContainer{
+			{Name: "fidesplus-db-pr-1", Service: "fidesplus-db", State: "running", Status: "Up 5 minutes (healthy)", Image: "postgres:17"},
+			{Name: "fidesplus-redis-pr-1", Service: "fidesplus-redis", State: "exited", Status: "Exited (0) 3 days ago", Image: "redis:8.0-alpine"}},
+		Volumes: []string{"proj-pr-1_postgres"}, Networks: []string{"proj-pr-1_default"}}
+	if !reflect.DeepEqual(*s, want) || sh.get()[0].Env[0] != "WATERBOY_STACK=proj-pr-1" {
+		t.Fatalf("got %+v", *s)
+	}
+
+	sh.fn = func(shellCall, io.Writer) error { return nil }
+	if s, _ := f.r.StackStatus(context.Background(), f.tr); s.State != "none" {
+		t.Fatalf("nothing on docker: state %q", s.State)
+	}
+	f.tr.PRRef = github.PRRef{Repo: "ethyca/b", Number: 1} // no stack configured
+	if s, err := f.r.StackStatus(context.Background(), f.tr); s != nil || err != nil {
+		t.Fatalf("repo without a stack: %+v, %v", s, err)
+	}
+}
+
+// Wipe stops a running review first, so the stack's network is free to go, then forgets it all.
+func TestWipeStopsRunningReviewThenRemovesEverything(t *testing.T) {
+	f, sh := stackFixture(t, withStack("", config.StackFromWorktree))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	if err := f.r.Wipe(context.Background(), refA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.containers()) != 0 || len(f.runs()) != 0 || len(sh.composed("down")) == 0 {
+		t.Fatalf("left: containers %d, runs %d, down %v", len(f.containers()), len(f.runs()), sh.composed("down"))
+	}
+	f.r.mu.Lock()
+	defer f.r.mu.Unlock()
+	if len(f.r.st.Stacks) != 0 || len(f.r.st.Queue) != 0 || len(f.r.active) != 0 {
+		t.Fatalf("stacks %v, queue %v, active %v", f.r.st.Stacks, f.r.st.Queue, f.r.active)
 	}
 }

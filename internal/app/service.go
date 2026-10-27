@@ -189,22 +189,44 @@ func (s *Service) PR(id string) (PRView, bool) {
 	return st.PRs[i], true
 }
 
-// ReviewNow queues a full review of a tracked PR, behind a run in progress.
-func (s *Service) ReviewNow(id string) error {
+// trackedPR is the last tracker snapshot of a PR, for the reviewer's per-PR calls.
+func (s *Service) trackedPR(id string) (tracker.Tracked, error) {
 	if s.rev == nil {
-		return errors.New("reviews are disabled")
+		return tracker.Tracked{}, errors.New("reviews are disabled")
 	}
 	s.mu.Lock()
-	i := slices.IndexFunc(s.tracked, func(tr tracker.Tracked) bool { return tr.Key() == id })
-	var tr tracker.Tracked
-	if i >= 0 {
-		tr = s.tracked[i]
+	defer s.mu.Unlock()
+	if i := slices.IndexFunc(s.tracked, func(tr tracker.Tracked) bool { return tr.Key() == id }); i >= 0 {
+		return s.tracked[i], nil
 	}
-	s.mu.Unlock()
-	if i < 0 {
-		return fmt.Errorf("%s is not tracked", id)
+	return tracker.Tracked{}, fmt.Errorf("%s is not tracked", id)
+}
+
+// ReviewNow queues a full review of a tracked PR, behind a run in progress.
+func (s *Service) ReviewNow(id string) error {
+	tr, err := s.trackedPR(id)
+	if err != nil {
+		return err
 	}
 	return s.rev.Trigger(tr)
+}
+
+// Stack is what's on Docker for a PR's local stack (nil = its repo has none).
+func (s *Service) Stack(ctx context.Context, id string) (*review.StackStatus, error) {
+	tr, err := s.trackedPR(id)
+	if err != nil {
+		return nil, err
+	}
+	return s.rev.StackStatus(ctx, tr)
+}
+
+// Wipe removes a PR's review data: a running review, its stack with volumes,
+// review containers, history and run dirs. Tracking and the worktree stay.
+func (s *Service) Wipe(ctx context.Context, id string) error {
+	if _, err := s.trackedPR(id); err != nil {
+		return err
+	}
+	return s.rev.Wipe(ctx, id)
 }
 
 // Logs returns the most recent ops log entries, oldest first.

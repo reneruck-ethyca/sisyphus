@@ -42,9 +42,21 @@
   <dt>Last error</dt><dd class="err">{{or .LastError "—"}}</dd>
 </dl>
 {{if $.Run}}{{template "run" $}}{{else}}
+{{if or $.Stack $.StackErr}}
+<h3>Stack {{with $.Stack}}<span class="health {{.State}}">{{.State}}</span> <code>{{.Project}}</code>{{end}}</h3>
+{{with $.StackErr}}<p class="err">{{.}}</p>{{end}}
+{{with $.Stack}}
+{{if .Containers}}<table>
+  <thead><tr><th>Service</th><th>Container</th><th>State</th><th>Image</th></tr></thead>
+  <tbody>{{range .Containers}}<tr><td>{{.Service}}</td><td><code>{{.Name}}</code></td><td class="{{.State}}">{{.Status}}</td><td><code>{{.Image}}</code></td></tr>{{end}}</tbody>
+</table>{{else}}<p class="muted">No containers: the next review starts the stack.</p>{{end}}
+<p class="muted">Volumes: {{range $i, $v := .Volumes}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}none{{end}}
+  · Network: {{range $i, $v := .Networks}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}none{{end}}</p>
+{{end}}{{end}}
 <h3>Reviews {{with .Review.State}}<span class="health {{.}}">{{.}}</span>{{end}}
   <button id="review-now" data-src="/api/prs/{{.Repo}}/{{.Number}}/review">Review now</button> <span id="review-msg" class="muted"></span></h3>
 <p class="muted">{{.ReviewNote}}</p>
+<p><button id="wipe" data-src="/api/prs/{{.Repo}}/{{.Number}}/wipe" data-pr="{{.ID}}">Wipe review data…</button> <span id="wipe-msg" class="muted"></span></p>
 <table>
   <thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th>Finished</th><th>Error</th></tr></thead>
   <tbody>
@@ -111,6 +123,20 @@
     src.addEventListener("done", () => { src.close(); location.reload(); });
   }
   if (events) scrollTo(0, document.body.scrollHeight);
+
+  const wipe = document.getElementById("wipe");
+  if (wipe) wipe.onclick = async (e) => {
+    if (!confirm(`Wipe ${e.target.dataset.pr}?\n\nStops a running review and removes its stack (containers, network, DB volume), review containers, review history and run folders. Tracking and the worktree stay; the next review starts fresh.`)) return;
+    e.target.disabled = true;
+    Object.assign(document.getElementById("wipe-msg"), {textContent: "wiping…", className: "muted"});
+    const r = await fetch(e.target.dataset.src, {method: "POST"});
+    if (!r.ok) {
+      Object.assign(document.getElementById("wipe-msg"), {textContent: await r.text(), className: "err"});
+      e.target.disabled = false;
+      return;
+    }
+    location.reload();
+  };
 
   const reviewNow = document.getElementById("review-now");
   if (reviewNow) reviewNow.onclick = async (e) => {

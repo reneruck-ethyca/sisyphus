@@ -199,3 +199,80 @@ func (r *Reviewer) dropStack(prID string) {
 	defer unlock()
 	r.removeStacks(func(id string) bool { return id == prID })
 }
+
+// StackStatus is what's on Docker for a PR's stack right now.
+type StackStatus struct {
+	Project    string           `json:"project"`
+	State      string           `json:"state"` // "running" | "stopped" | "none"
+	Containers []StackContainer `json:"containers"`
+	Volumes    []string         `json:"volumes"`
+	Networks   []string         `json:"networks"`
+}
+
+type StackContainer struct {
+	Name    string `json:"name"`
+	Service string `json:"service"`
+	State   string `json:"state"`  // running | exited | …
+	Status  string `json:"status"` // "Up 5 minutes (healthy)", "Exited (0) 3 days ago"
+	Image   string `json:"image"`
+}
+
+// StackStatus asks Docker about the PR's stack. nil = its repo has no stack.
+func (r *Reviewer) StackStatus(ctx context.Context, tr tracker.Tracked) (*StackStatus, error) {
+	st := r.cfg.Repos[tr.Repo].Stack
+	if st == nil {
+		return nil, nil
+	}
+	project := strings.ReplaceAll(st.Project, "{id}", stackID(tr))
+	r.mu.Lock()
+	if sr := r.st.Stacks[tr.Key()]; sr != nil {
+		project = sr.Project
+	}
+	r.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	err := r.sh(ctx, "", []string{"WATERBOY_STACK=" + project}, `f="label=com.docker.compose.project=$WATERBOY_STACK"
+docker ps -a --filter "$f" --format 'c	{{.Names}}	{{.Label "com.docker.compose.service"}}	{{.State}}	{{.Status}}	{{.Image}}' &&
+docker volume ls -q --filter "$f" | sed 's/^/v	/' &&
+docker network ls --filter "$f" --format 'n	{{.Name}}'`, &out)
+	if err != nil {
+		return nil, fmt.Errorf("stack %s: %w: %s", project, err, lastLines(out.String(), 3))
+	}
+	s := &StackStatus{Project: project, State: "none"}
+	for _, line := range strings.Split(out.String(), "\n") {
+		f := strings.Split(line, "\t")
+		switch {
+		case f[0] == "c" && len(f) == 6:
+			s.Containers = append(s.Containers, StackContainer{Name: f[1], Service: f[2], State: f[3], Status: f[4], Image: f[5]})
+			if f[3] == "running" {
+				s.State = "running"
+			} else if s.State == "none" {
+				s.State = "stopped"
+			}
+		case f[0] == "v" && len(f) == 2:
+			s.Volumes = append(s.Volumes, f[1])
+		case f[0] == "n" && len(f) == 2:
+			s.Networks = append(s.Networks, f[1])
+		}
+	}
+	if s.State == "none" && len(s.Volumes)+len(s.Networks) > 0 {
+		s.State = "stopped"
+	}
+	return s, nil
+}
+
+// Wipe removes everything waterboy keeps for a PR's reviews, with the app
+// running: it stops a running review, waits for it to let go of the worktree,
+// then forgets it (stack with volumes, review containers, history, run dirs,
+// queued jobs). Tracking and the worktree stay; images and per-repo caches too.
+func (r *Reviewer) Wipe(ctx context.Context, prID string) error {
+	r.cancel(prID, errReset)
+	unlock, err := r.locks.Lock(ctx, prID) // the stack's network can't go while the review container is on it
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	slog.Info("wiping review data", "pr", prID)
+	return r.Forget(ctx, prID)
+}

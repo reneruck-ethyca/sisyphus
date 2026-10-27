@@ -146,7 +146,18 @@ func newHandler(svc *app.Service) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		render(w, "index.html", dashboard{Status: svc.Status(), PR: &pr})
+		d := dashboard{Status: svc.Status(), PR: &pr}
+		if d.Stack, d.StackErr = svc.Stack(r.Context(), pr.ID); d.StackErr != nil {
+			slog.Warn("stack status", "pr", pr.ID, "err", d.StackErr)
+		}
+		render(w, "index.html", d)
+	})
+	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/wipe", func(w http.ResponseWriter, r *http.Request) {
+		if err := svc.Wipe(r.Context(), prID(r)); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	return localOnly(http.NewCrossOriginProtection().Handler(mux))
 }
@@ -159,6 +170,9 @@ type dashboard struct {
 	Run    *review.Run
 	Events []review.Event
 	Next   int // first log line the live stream should send
+
+	Stack    *review.StackStatus // the PR page's local stack; nil = none configured
+	StackErr error
 }
 
 func (d dashboard) Title() string {
