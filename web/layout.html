@@ -16,7 +16,10 @@
   {{else if .LastRun.IsZero}}<span class="checked running">Starting…</span>
   {{else if .LastError}}<span class="checked failed">Last check failed {{ago .LastRun}}</span>
   {{else}}<span class="checked">Checked {{ago .LastRun}} · next {{ago .NextRun}}</span>{{end}}
-  <button id="run" class="btn quiet small" {{if .Running}}disabled{{end}}>Check now</button>{{end}}
+  <button id="run" class="btn quiet small" {{if .Running}}disabled{{end}}>Check now</button>
+  {{with .BudgetNote}}{{$b := $.Status.Budget}}<span class="budget" title="{{.}}">5-hour window
+    <meter min="0" max="{{$b.Share}}" low="{{$b.Share | warnAt}}" high="{{$b.Share | warnAt}}" optimum="0" value="{{$b.Used}}"></meter>
+    {{pct $b.Used}} of {{pct $b.Share}}</span>{{end}}{{end}}
   <nav><a href="/logs"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a><a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings</a></nav>
 </header>{{end}}
 

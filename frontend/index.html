@@ -87,6 +87,7 @@
   let rendered = null;
   const scrollMain = () => { const m = document.getElementById("scroll"); m.scrollTop = m.scrollHeight; };
 
+  const pct = f => `${Math.round(f * 100)}%`;
   function header(view) {
     const s = status;
     const checked = s.running ? `<span class="checked running">Checking now…</span>`
@@ -96,6 +97,9 @@
     const cur = v => view === v ? ` aria-current="page"` : "";
     return `<header class="top"><a class="brand" href="#">waterboy</a>${checked}
       <button id="run" class="btn quiet small" ${s.running ? "disabled" : ""}>Check now</button>
+      ${s.budget_note ? `<span class="budget" title="${esc(s.budget_note)}">5-hour window
+        <meter min="0" max="${s.budget.share}" low="${s.budget.share * 0.75}" high="${s.budget.share * 0.75}" optimum="0" value="${s.budget.used}"></meter>
+        ${pct(s.budget.used)} of ${pct(s.budget.share)}</span>` : ""}
       <nav><a href="#logs"${cur("logs")}>Logs</a><a href="#settings"${cur("settings")}>Settings</a></nav></header>`;
   }
 

@@ -55,6 +55,8 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"reason":  reasonLabel,
 	"dur":     runDuration,
 	"short":   func(sha string) string { return sha[:min(len(sha), 8)] },
+	"pct":     func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
+	"warnAt":  func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
 	"base":    path.Base,
 	"top":     func(page string) topbar { return topbar{Page: page} },
 	"md":      inlineMarkdown,

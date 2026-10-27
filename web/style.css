@@ -24,6 +24,8 @@ h3 { font-size: 14px; margin: 4px 0 0; }
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 10px 20px; background: var(--side); border-bottom: 1px solid var(--line); }
 .brand { font-size: 17px; font-weight: 700; color: var(--accent); text-decoration: none; }
 .checked { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.budget { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.budget meter { width: 72px; height: 8px; }
 .checked::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .checked.running::before { background: var(--live); animation: pulse 1.4s ease-in-out infinite; }
 .checked.failed::before { background: var(--bad); }

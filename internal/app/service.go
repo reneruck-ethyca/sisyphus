@@ -30,6 +30,7 @@ type Status struct {
 	Reviews   bool      `json:"reviews"`              // false when review.disabled
 	// Why reviews are waiting on the container runtime ("" = they aren't).
 	RuntimeError string            `json:"runtime_error,omitempty"`
+	Budget       review.Budget     `json:"budget"`
 	BudgetNote   string            `json:"budget_note,omitempty"` // the 5-hour budget's use, in a line ("" = no budget)
 	BudgetWait   string            `json:"budget_wait,omitempty"` // why the budget holds reviews back ("" = it doesn't)
 	Reviewing    []ActiveReview    `json:"reviewing"`             // review runs in progress, oldest first
@@ -473,7 +474,7 @@ func (s *Service) publish() {
 	slices.SortFunc(active, func(a, b ActiveReview) int { return a.Started.Compare(b.Started) })
 	s.update(func(st *Status) {
 		st.PRs, st.RuntimeError, st.Reviewing, st.Activity = prs, runtimeErr, active, activity(prs)
-		st.BudgetNote, st.BudgetWait = note, wait
+		st.Budget, st.BudgetNote, st.BudgetWait = budget, note, wait
 	})
 }
 
