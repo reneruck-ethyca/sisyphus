@@ -1,62 +1,56 @@
 # waterboy
 
-macOS menu-bar service that keeps a worktree for every PR waiting on your review and runs a
-review container in it. On each tick it:
+Automated PR reviews for the PRs waiting on you. waterboy finds open PRs that request your review,
+checks each out into its own worktree, and has Claude Code review it in a container built like the
+repo's devcontainer, with the PR's own local services (Postgres, Redis) next to it. The agent reads the
+code and the discussion, runs tests, and writes a review; waterboy posts it to GitHub as you. New
+commits and replies get follow-up reviews until the PR merges or closes.
 
-1. **discovers** open PRs in `org` that request a review from `user`, directly or through one of
-   `user`'s teams,
-   and checks each out into a worktree (reusing an existing worktree on that branch, else `wtp add`),
-2. **updates** tracked PRs: notices new commits / new replies, syncs the worktree,
-3. **cleans up** PRs that are done: removes worktrees it created, forgets reused ones.
+It runs on your Mac as a menu-bar app with a local dashboard, every `interval` (default 10m):
 
-Scheduling and reviewing meet in `tracker.Events`: the tracker announces a PR (`Tracked`, `Updated`)
-only once its worktree is synced to the head it announces, asks for a worktree back (`Reclaim`) when
-it needs to sync or remove one a review is using, and reports `Dropped`. `review.Reviewer` implements
-it: a queue, review containers running Claude Code, and run records.
+1. **track**: pick up PRs in `org` that request a review from you or one of your teams, with a
+   worktree each (an existing one on that branch, else `wtp add`); sync them on new commits; notice new
+   replies; drop PRs that are done (see [Which PRs](#which-prs));
+2. **review**: queue a review for a new PR, new commits or new replies, and run it in a container:
+   repo setup, then `claude -p` headless (see [Reviews](#reviews));
+3. **post**: publish the agent's verdict, summary and inline comments from the host with your `gh`
+   login.
 
-| Package | |
-|---|---|
-| `internal/tracker` | discover / update / drop, state file, drop rules, `on_conflict`, events, per-PR worktree locks |
-| `internal/review` | job queue (one per PR), container runs, run records, re-attach after restart |
-| `internal/container` | `Runtime` interface; `Docker` (docker CLI) and `Fake` |
-| `internal/worktree` | git/wtp operations |
-| `internal/github` | `Client` interface; `CLI` (gh) and `Fake` |
-| `internal/app` | `Service`: the boundary UIs talk to (status snapshots, run now, run dirs, logs) |
-| `main` | wiring, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`, `frontend/`) |
+## Getting started
 
-UIs talk to `app.Service`: `Status()`, `PR(id)`, `RunNow()`, `RunDir(pr, run)`, `OnChange(fn)`,
-`Logs()`, `SubscribeLogs()`, `Settings()`, `SaveSettings(values)`. It hands out copies of state, so a UI or API never races a tick or a run.
+Requires `gh` (authenticated), `git` and `wtp` on PATH, Docker, and for fidesplus' local stack `uv`
+on the host. `make install-agent` bakes your current shell's PATH into the LaunchAgent.
 
-The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process.
-The window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI`
-struct via `/wails/runtime.js` and re-renders on the `status` event pushed from `OnChange`.
-No Wails CLI or npm needed; `go build` is enough.
+1. Put the reviewer's secrets in `~/.config/waterboy/review.env` (`chmod 600`):
+   `CLAUDE_CODE_OAUTH_TOKEN` and a read-only fine-grained `GH_TOKEN` (the agent uses it for
+   `gh pr diff`; posting uses your host `gh` login). Until the file exists, reviews wait and say so.
+2. Build the review image: `make reviewer-image` builds `waterboy-reviewer:fidesplus` from the
+   fidesplus devcontainer in `$(FIDESPLUS)` (default `~/Dev/fidesplus`), with Claude Code pinned.
+3. Start it: `make install-agent` (at login, via LaunchAgent) or `make start`. The dashboard is at
+   <http://127.0.0.1:7465/>.
 
 ## Usage
 
 ```bash
 make build                     # bin/waterboy (needs cgo / Xcode CLT)
+make test
 bin/waterboy -once             # single tick, no tray or window; good for testing
 bin/waterboy                   # menu-bar app ("WB"): status, Open window, Open dashboard, Run now, Open state file, Quit
+bin/waterboy -config <file>    # another config file
 make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/waterboy.log
 make start | stop | restart    # through the LaunchAgent if installed, else in the background
 make reset                     # stop, wipe all state (see below), start again
 make reset PR='ethyca/fidesplus#123'   # …just that PR
 make shell PR='ethyca/fidesplus#123'   # a shell in that PR's review container (see below)
+make reviewer-image            # rebuild the fidesplus review image
 make uninstall-agent
 ```
 
-The menu-bar app also serves a dashboard (overview + per-PR details, auto-refreshing) and a JSON
-API on `http_addr`: `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}`, `POST /api/run`,
-`GET /api/logs` (last 1000 ops log lines), `GET /api/logs/stream` (server-sent events: backlog,
-then live), `GET`/`PUT /api/settings` and `POST /api/restart`. If the port is taken it logs and runs without it. Both the dashboard (`/logs`) and the
-window ("Logs") have a live log viewer. PR pages list review runs; a run's files are served at
-`/prs/{owner}/{repo}/{number}/runs/{run}/` (`log`, `run.json`, `out/`). Run files are served sandboxed (CSP `sandbox`,
-`nosniff`), so HTML a reviewer writes can't script the dashboard.
-
-Requires `gh` (authenticated), `git`, and `wtp` on PATH, and Docker for reviews (if it's down,
-reviews wait in the queue and are retried every minute; at login, re-attaching waits for it too). `install-agent` bakes your current
-shell's PATH into the LaunchAgent.
+The dashboard (`http_addr`) and the window show the same things: every tracked PR with its sync and
+review state, a PR page with its review runs, its stack and the [PR actions](#pr-actions), each run
+streamed live, a live log viewer and the settings. If the port is taken, waterboy logs it and runs
+without the dashboard. If Docker is down, reviews wait in the queue and are retried every minute; at
+login, re-attaching to running reviews waits for it too.
 
 ## Config
 
@@ -96,7 +90,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.stack_from` | `worktree` | where local stacks start: `worktree` (the PR's own stack files, run on the host) or `safe` (each repo's `stack.safe_dir`); see [Local stack](#local-stack) |
 | `review.repos` | `ethyca/fidesplus` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`, `stack`; only these repos are reviewed |
 
-## Rules
+## Which PRs
 
 A PR is picked up only when it requests a review from you or one of your teams. Until you've
 reviewed it, it's dropped (and its worktree removed, if waterboy created it) when it's merged or
@@ -163,7 +157,8 @@ then `review.env_file`), and `WATERBOY_RUN_ID`, `WATERBOY_REASON`, `WATERBOY_PR_
 
 Both UIs stream each run live and readably (Claude's text, tool calls, collapsible tool output, the
 final result with turns and cost); the raw output is the run's `log`. Runs live in
-`<state dir>/runs/<owner>/<repo>/<n>/<run>/` (`run.json`, `prompt.md`, `log`, `claude/`, `out/`); the
+`<state dir>/runs/<owner>/<repo>/<n>/<run>/` (`run.json`, `prompt.md`, `log`, `stack.log`, `context/`,
+`claude/`, `out/`); the
 queue and the last 10 runs per PR are in `<state dir>/reviews.json`. Containers keep running when
 waterboy quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
 
@@ -216,7 +211,7 @@ The PR page also shows its stack as Docker has it: containers with state and ima
 `make reset` (or `bin/waterboy -reset all|owner/repo#n` with the app stopped) removes waterboy's review
 containers, local stacks, review history and run directories, the worktrees it created (a worktree it can't remove
 keeps its PR tracked, and the error says why), and the tracked entries. On start, waterboy rediscovers
-whatever still awaits your review as new: fresh worktree, fresh review.
+whatever still awaits your review as new: fresh worktree, fresh review. PRs you untracked stay ignored.
 
 ## Debug shell
 
@@ -235,3 +230,48 @@ each run). If it's still conflicting the PR gets `last_error`; the hook runs aga
 new push. Environment:
 `WATERBOY_HOOK`, `WATERBOY_PR_URL`, `WATERBOY_REPO`, `WATERBOY_PR_NUMBER`, `WATERBOY_BRANCH`,
 `WATERBOY_WORKTREE`, `WATERBOY_CONFLICT_REASON` (`dirty` | `ahead` | `diverged` | `untracked-collision`).
+
+## Architecture
+
+Tracking and reviewing meet in `tracker.Events`: the tracker announces a PR (`Tracked`, `Updated`)
+only once its worktree is synced to the head it announces, asks for a worktree back (`Reclaim`) when
+it needs to sync or remove one a review is using, and reports `Dropped`. `review.Reviewer` implements
+it: a queue, review containers running Claude Code, local stacks, run records and posting.
+
+| Package | |
+|---|---|
+| `internal/tracker` | discover / update / drop, state file, drop rules, untrack, `on_conflict`, events, per-PR worktree locks |
+| `internal/review` | job queue (one per PR), container runs, local stacks, posting, run records, re-attach after restart, debug shell |
+| `internal/container` | `Runtime` interface; `Docker` (docker CLI) and `Fake` |
+| `internal/worktree` | git/wtp operations |
+| `internal/github` | `Client` interface; `CLI` (gh) and `Fake` |
+| `internal/config` | config file, defaults, the settings the UIs edit |
+| `internal/app` | `Service`: the boundary UIs talk to |
+| `internal/proc`, `internal/jsonfile` | external commands with timeouts; atomic JSON state files |
+| `internal/gittest`, `internal/testkit` | test helpers |
+| `main` | wiring, CLI flags, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`, `frontend/`) |
+
+UIs talk to `app.Service` (`Status`, `PR`, `RunNow`, `ReviewNow`, `ResetReviews`, `Wipe`, `Untrack`,
+`Retrack`, `Stack`, `RunDir`, `RunEvents`, `SubscribeRunEvents`, `OnChange`, `Logs`, `SubscribeLogs`,
+`Settings`, `SaveSettings`). It hands out copies of state, so a UI or API never races a tick or a run,
+and runs PR actions between ticks.
+
+The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process. The
+window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI` struct via
+`/wails/runtime.js` and re-renders on the `status` event pushed from `OnChange`. No Wails CLI or npm
+needed; `go build` is enough.
+
+The dashboard (`web/`, server-rendered) serves `/`, `/prs/{owner}/{repo}/{number}`, a run at
+`…/runs/{run}` with its files under `…/runs/{run}/` (`log`, `run.json`, `out/`, …; served sandboxed with
+CSP `sandbox` and `nosniff`, so HTML a reviewer writes can't script the dashboard), `/logs` and
+`/settings`. Only loopback `Host`s and same-origin POSTs are accepted. The JSON API:
+
+| | |
+|---|---|
+| `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}` | status snapshots |
+| `POST /api/run` | tick now |
+| `POST /api/prs/{owner}/{repo}/{number}/review` | Review now |
+| `POST /api/prs/{owner}/{repo}/{number}/reset` \| `wipe` \| `untrack` \| `track` | [PR actions](#pr-actions); `track` undoes untrack |
+| `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events` | a run's parsed events (server-sent events: backlog, then live) |
+| `GET /api/logs`, `GET /api/logs/stream` | last 1000 ops log lines; live (server-sent events) |
+| `GET`/`PUT /api/settings`, `POST /api/restart` | settings; re-exec to apply them |
