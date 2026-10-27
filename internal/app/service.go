@@ -9,7 +9,6 @@ import (
 	"maps"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/config"
@@ -152,15 +151,14 @@ func health(tr tracker.Tracked) string {
 }
 
 // Service is the boundary every UI (tray, web, Wails, a future API) talks to. It
-// owns the run loop and hands out copies, so callers never race a running tick.
+// owns the run loop and hands out copies; the tracker locks, so PR actions and
+// a running tick serialise there.
 type Service struct {
 	cfg     config.Config
 	tracker *tracker.Tracker
 	rev     *review.Reviewer // nil when reviews are disabled
 	logs    *LogBuffer
 	runNow  chan struct{}
-	ops     chan func(context.Context) // run by the loop between ticks: they touch tracker state
-	looping atomic.Bool                // Run's loop is up to take ops
 
 	mu      sync.Mutex
 	tracked []tracker.Tracked // last tracker snapshot
@@ -170,19 +168,16 @@ type Service struct {
 
 // NewService wires the tracker, the reviewer (nil = reviews disabled) and the log buffer.
 func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *LogBuffer) *Service {
-	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1), ops: make(chan func(context.Context))}
+	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1)}
 	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String(), Reviews: rev != nil}
-	tr.OnSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
+	tr.OnSave = s.refreshPRs
 	if rev != nil {
 		tr.Events = rev
 		rev.Kick = s.RunNow
-		rev.Refresh = func(ctx context.Context, id string) (tr tracker.Tracked, err error) {
-			err = s.do(ctx, func(ctx context.Context) error { tr, err = s.tracker.Refresh(ctx, id); return err })
-			return tr, err
-		}
+		rev.Refresh = s.tracker.Refresh
 		rev.OnChange = s.publish
 	}
-	s.refreshPRs()
+	s.refreshPRs(tr.Snapshot(), tr.IgnoredPRs())
 	return s
 }
 
@@ -359,40 +354,21 @@ func (s *Service) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(s.cfg.Interval.Duration)
 	defer ticker.Stop()
-	s.looping.Store(true)
-	defer s.looping.Store(false)
 	for {
 		s.RunOnce(ctx)
-	wait:
 		select {
 		case <-ticker.C:
 		case <-s.runNow:
-		case op := <-s.ops:
-			op(ctx)
-			goto wait
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// do runs fn on the loop, between ticks (waiting for a running one), and returns its error.
+// do runs a PR action to completion: the caller's ctx (a request's, say) going
+// away mid-way must not leave a half-removed worktree or stack behind.
 func (s *Service) do(ctx context.Context, fn func(context.Context) error) error {
-	if !s.looping.Load() { // -once, tests: nothing ticks meanwhile
-		return fn(ctx)
-	}
-	done := make(chan error, 1)
-	select {
-	case s.ops <- func(loopCtx context.Context) { done <- fn(loopCtx) }:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err() // it still finishes on the loop
-	}
+	return fn(context.WithoutCancel(ctx))
 }
 
 // RunOnce runs a single tick (for -once).
@@ -424,9 +400,9 @@ func (s *Service) RunOnce(ctx context.Context) {
 	}
 }
 
-// refreshPRs copies tracker state. It must run on the goroutine that ticks.
-func (s *Service) refreshPRs() {
-	snap, ignored := s.tracker.Snapshot(), s.tracker.IgnoredPRs()
+// refreshPRs takes a tracker snapshot (the tracker's OnSave). It must not call
+// back into the tracker: it runs under its lock.
+func (s *Service) refreshPRs(snap []tracker.Tracked, ignored []tracker.Ignored) {
 	s.mu.Lock()
 	s.tracked = snap
 	s.mu.Unlock()

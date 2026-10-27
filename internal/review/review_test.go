@@ -67,7 +67,7 @@ func (f *fixture) newReviewer(t *testing.T, cfg config.Review) *Reviewer {
 
 func (f *fixture) start(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	t.Cleanup(func() { cancel(); f.r.Wait() }) // before the temp dirs go
 	go f.r.Run(ctx)
 }
 

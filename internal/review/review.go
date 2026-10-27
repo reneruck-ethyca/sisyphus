@@ -130,6 +130,7 @@ type Reviewer struct {
 	Refresh  func(ctx context.Context, id string) (tracker.Tracked, error)
 	OnChange func() // called after every change, on any goroutine
 
+	wg          sync.WaitGroup // goroutines Run and Reattach start; Wait for them after ctx ends
 	mu          sync.Mutex
 	st          store
 	active      map[string]context.CancelCauseFunc // running, by PR ID
@@ -192,7 +193,7 @@ func (r *Reviewer) Dropped(tr tracker.Tracked, _ string) {
 	r.saveLocked()
 	r.mu.Unlock()
 	r.cancel(id, errDropped)
-	go r.dropStack(id) // after the cancelled run lets go of the worktree
+	r.spawn(func() { r.dropStack(id) }) // after the cancelled run lets go of the worktree
 	r.changed()
 }
 
@@ -410,9 +411,9 @@ func (r *Reviewer) Reattach(ctx context.Context) {
 		r.mu.Lock()
 		r.active[id] = cancel
 		r.mu.Unlock()
-		go r.reattach(ctx, runCtx, run, unlock)
+		r.spawn(func() { r.reattach(ctx, runCtx, run, unlock) })
 	}
-	go r.sweepOrphans(ctx)
+	r.spawn(func() { r.sweepOrphans(ctx) })
 }
 
 func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func()) {
@@ -637,7 +638,7 @@ func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 	r.mu.Unlock()
 	for _, s := range starts {
 		r.changed()
-		go r.execute(ctx, s.runCtx, s.run)
+		r.spawn(func() { r.execute(ctx, s.runCtx, s.run) })
 	}
 	return recheck
 }
@@ -1168,14 +1169,14 @@ func (r *Reviewer) Events(prID, runID string) (evs []Event, next int, err error)
 	return evs, next, nil
 }
 
-// finish records the outcome, releases the worktree and the run slot.
+// finish stops the stack, releases the worktree, then records the outcome and
+// frees the run slot: a run is over only once it has let go of everything.
 func (r *Reviewer) finish(run Run, status string, code int, err error, unlock func()) {
 	id := run.Job.PR.Key()
 	msg := ""
 	if err != nil {
 		msg = err.Error()
 	}
-	r.record(id, run.ID, func(x *Run) { x.Status, x.ExitCode, x.Error, x.Finished = status, code, msg, time.Now() })
 	if run.Stack != nil { // still holding the worktree, so the next run's up comes after
 		switch status {
 		case Succeeded, Cancelled: // kept, stopped: the PR's next review starts on the same DB
@@ -1187,6 +1188,7 @@ func (r *Reviewer) finish(run Run, status string, code int, err error, unlock fu
 	if unlock != nil {
 		unlock()
 	}
+	r.record(id, run.ID, func(x *Run) { x.Status, x.ExitCode, x.Error, x.Finished = status, code, msg, time.Now() })
 	if errors.As(err, new(retryable)) {
 		r.retry(run) // queued while this run still counts as active, so it can't start early
 	}
@@ -1197,6 +1199,18 @@ func (r *Reviewer) finish(run Run, status string, code int, err error, unlock fu
 	r.changed()
 	r.poke()
 }
+
+func (r *Reviewer) spawn(fn func()) {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		fn()
+	}()
+}
+
+// Wait blocks until every run goroutine has returned; call it once Run's ctx
+// has ended, so nothing writes run records or files after shutdown.
+func (r *Reviewer) Wait() { r.wg.Wait() }
 
 func (r *Reviewer) poke() {
 	select {

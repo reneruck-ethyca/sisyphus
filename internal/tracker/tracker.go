@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/config"
@@ -19,24 +20,35 @@ import (
 	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
+// Tracker keeps the tracked PRs. Its exported methods lock, so any goroutine
+// may call them; a Tick holds the lock for its whole pass.
 type Tracker struct {
 	cfg     config.Config
 	gh      github.Client
-	state   *State
 	skipped map[string]bool // log-once for forks / missing clones
 	teams   []string        // my teams in the org, refreshed every tick
-	OnSave  func()          // called after every state save, on the ticking goroutine
-	Events  Events          // defaults to a no-op
-	Locks   *Locks          // shared with whatever runs in worktrees
+	// OnSave gets a copy of the state after every save (mid-tick too, so UIs see
+	// progress). It runs under the lock: don't call back into the tracker.
+	OnSave func(prs []Tracked, ignored []Ignored)
+	Events Events // defaults to a no-op; called under the lock, never blocks
+	Locks  *Locks // shared with whatever runs in worktrees
+
+	mu    sync.Mutex
+	state *State
 }
 
 func New(cfg config.Config, gh github.Client, st *State) *Tracker {
 	return &Tracker{cfg: cfg, gh: gh, state: st, skipped: map[string]bool{}, Events: nopEvents{}, Locks: &Locks{}}
 }
 
-// Snapshot copies the tracked PRs, sorted by ID. Call it on the ticking goroutine
-// (e.g. from OnSave): Tick mutates state without locking.
+// Snapshot copies the tracked PRs, sorted by ID.
 func (t *Tracker) Snapshot() []Tracked {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.snapshot()
+}
+
+func (t *Tracker) snapshot() []Tracked {
 	out := make([]Tracked, 0, len(t.state.PRs))
 	for _, id := range slices.Sorted(maps.Keys(t.state.PRs)) {
 		out = append(out, *t.state.PRs[id])
@@ -49,7 +61,7 @@ func (t *Tracker) save() {
 		slog.Error("saving state", "err", err)
 	}
 	if t.OnSave != nil {
-		t.OnSave()
+		t.OnSave(t.snapshot(), t.ignored())
 	}
 }
 
@@ -65,6 +77,8 @@ func (t *Tracker) skipOnce(key, why string) {
 // Tick runs one discover → update → cleanup pass. It only returns an error when
 // the candidate search fails, in which case nothing is touched.
 func (t *Tracker) Tick(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.cfg.User == "" { // the search would match every open PR in the org
 		return errors.New("no GitHub user configured")
 	}
@@ -207,8 +221,10 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 }
 
 // Refresh re-reads one PR from GitHub and syncs its worktree to a new head, as a
-// tick would, and returns what it's tracked as now. Call it on the ticking goroutine.
+// tick would, and returns what it's tracked as now.
 func (t *Tracker) Refresh(ctx context.Context, id string) (Tracked, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	tr := t.state.PRs[id]
 	if tr == nil {
 		return Tracked{}, fmt.Errorf("%s is not tracked", id)
@@ -247,8 +263,14 @@ func (t *Tracker) announce(tr *Tracked) {
 
 // Forget stops tracking id, removing its worktree if sisyphus created it, so the
 // next tick discovers it from scratch. It waits (until ctx ends) for whatever
-// holds the worktree. Call it on the ticking goroutine.
+// holds the worktree.
 func (t *Tracker) Forget(ctx context.Context, id string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.forget(ctx, id)
+}
+
+func (t *Tracker) forget(ctx context.Context, id string) error {
 	tr := t.state.PRs[id]
 	if tr == nil {
 		return nil
@@ -274,19 +296,17 @@ func (t *Tracker) Forget(ctx context.Context, id string) error {
 	return nil
 }
 
-// forgetMissing handles a worktree deleted outside sisyphus: drop the entry (the
-// next tick re-tracks the PR if it's still eligible) and delete our branch, but
-// only if it holds nothing unpushed (`git branch -d` refuses otherwise).
 // Untrack forgets a PR (removing the worktree and branch it created) and ignores
 // it from then on, so it isn't picked up again while it still requests a review.
-// Call it on the ticking goroutine.
 func (t *Tracker) Untrack(ctx context.Context, id string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	tr := t.state.PRs[id]
 	if tr == nil {
 		return fmt.Errorf("%s is not tracked", id)
 	}
 	ig := Ignored{PRRef: tr.PRRef, Title: tr.Title, At: time.Now()}
-	if err := t.Forget(ctx, id); err != nil {
+	if err := t.forget(ctx, id); err != nil {
 		return err
 	}
 	if t.state.Ignored == nil {
@@ -300,6 +320,8 @@ func (t *Tracker) Untrack(ctx context.Context, id string) error {
 
 // Retrack stops ignoring a PR; the next tick picks it up if it still requests a review.
 func (t *Tracker) Retrack(id string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if _, ok := t.state.Ignored[id]; !ok {
 		return fmt.Errorf("%s isn't untracked", id)
 	}
@@ -309,8 +331,14 @@ func (t *Tracker) Retrack(id string) error {
 	return nil
 }
 
-// IgnoredPRs copies the untracked PRs, sorted by ID. Call it on the ticking goroutine.
+// IgnoredPRs copies the untracked PRs, sorted by ID.
 func (t *Tracker) IgnoredPRs() []Ignored {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ignored()
+}
+
+func (t *Tracker) ignored() []Ignored {
 	out := make([]Ignored, 0, len(t.state.Ignored))
 	for _, id := range slices.Sorted(maps.Keys(t.state.Ignored)) {
 		out = append(out, t.state.Ignored[id])
@@ -318,6 +346,9 @@ func (t *Tracker) IgnoredPRs() []Ignored {
 	return out
 }
 
+// forgetMissing handles a worktree deleted outside sisyphus: drop the entry (the
+// next tick re-tracks the PR if it's still eligible) and delete our branch, but
+// only if it holds nothing unpushed (`git branch -d` refuses otherwise).
 func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 	repoDir := t.repoDir(tr.Repo)
 	if _, err := proc.Run(ctx, repoDir, "git", "worktree", "prune"); err != nil {

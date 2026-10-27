@@ -241,7 +241,7 @@ func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, re
 	}
 	svc := app.NewService(cfg, tr, rev, app.NewLogBuffer(10))
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	t.Cleanup(func() { cancel(); rev.Wait() }) // before the temp dirs go
 	go rev.Run(ctx)
 	svc.RunOnce(ctx)
 	var run review.Run
@@ -401,13 +401,15 @@ func TestHTTPReviewNow(t *testing.T) {
 }
 
 func TestHTTPWipe(t *testing.T) {
-	srv, svc, _ := newReviewServer(t)
+	srv, svc, run := newReviewServer(t)
 	resp, err := http.Post(srv.URL+"/api/prs/ethyca/a/1/wipe", "", nil)
 	if err != nil || resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("wipe: %v %v", resp.StatusCode, err)
 	}
-	if pr, _ := svc.PR(testkit.RefA.Key()); len(pr.Review.Runs) != 0 || pr.ID == "" {
-		t.Fatalf("after wipe: %+v (want tracked, no runs)", pr.Review)
+	// The history is gone; a fresh review may already be queued or starting (Ensure).
+	pr, _ := svc.PR(testkit.RefA.Key())
+	if pr.ID == "" || slices.ContainsFunc(pr.Review.Runs, func(r review.Run) bool { return r.ID == run.ID }) {
+		t.Fatalf("after wipe: %+v (want tracked, old run gone)", pr.Review)
 	}
 	if resp, _ := http.Post(srv.URL+"/api/prs/ethyca/a/99/wipe", "", nil); resp.StatusCode != http.StatusConflict {
 		t.Fatalf("untracked: %d", resp.StatusCode)

@@ -153,8 +153,8 @@ func TestReviewNote(t *testing.T) {
 	}
 }
 
-// Actions run on the loop between ticks; with the loop running they still finish.
-func TestUntrackAndRetrackOnTheLoop(t *testing.T) {
+// Actions finish while the loop is running.
+func TestUntrackAndRetrackWhileRunning(t *testing.T) {
 	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA}, PRs: map[string]github.PR{
 		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}}}}
 	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"})
@@ -162,9 +162,6 @@ func TestUntrackAndRetrackOnTheLoop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	go s.Run(ctx)
-	for !s.looping.Load() {
-		time.Sleep(time.Millisecond)
-	}
 	if err := s.Untrack(ctx, testkit.RefA.Key()); err != nil {
 		t.Fatal(err)
 	}

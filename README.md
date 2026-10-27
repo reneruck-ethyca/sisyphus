@@ -295,8 +295,8 @@ it: a queue, review containers running Claude Code, local stacks, run records an
 
 UIs talk to `app.Service` (`Status`, `PR`, `RunNow`, `ReviewNow`, `ResetReviews`, `Wipe`, `Untrack`,
 `Retrack`, `Stack`, `RunDir`, `RunEvents`, `SubscribeRunEvents`, `OnChange`, `Logs`, `SubscribeLogs`,
-`Settings`, `SaveSettings`). It hands out copies of state, so a UI or API never races a tick or a run,
-and runs PR actions between ticks.
+`Settings`, `SaveSettings`). It hands out copies of state, so a UI or API never races a tick or a run;
+the tracker locks, so PR actions wait for a tick in progress.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process. The
 window (`frontend/index.html`, plain HTML/JS, embedded in the binary) calls the bound `UI` struct via
