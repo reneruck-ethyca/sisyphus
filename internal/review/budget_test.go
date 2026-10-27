@@ -3,6 +3,9 @@ package review
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +80,7 @@ func TestBudgetHoldsReviewsUntilReset(t *testing.T) {
 	f.start(t)
 	f.r.Tracked(f.tr)
 	waitFor(t, "container start", f.started(1))
-	resets := time.Now().Add(2 * time.Second).Unix()
+	resets := time.Now().Add(4 * time.Second).Unix()
 	reading := func(used float64) string {
 		return fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":%g,"resetsAt":%d}}}}`+"\n", used, resets)
 	}
@@ -85,6 +88,10 @@ func TestBudgetHoldsReviewsUntilReset(t *testing.T) {
 	waitFor(t, "run to finish", f.lastStatus(Succeeded))
 	if b := f.r.Budget(); math.Abs(b.Used-0.06) > 1e-9 || !b.Exhausted() {
 		t.Fatalf("budget = %+v", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(f.dir, "usage.jsonl")); strings.Count(string(b), "\n") != 3 ||
+		strings.Count(string(b), `"type":"rate_limit_event"`) != 2 || !strings.Contains(string(b), `"total_cost_usd":0.25`) {
+		t.Fatalf("usage.jsonl = %s", b)
 	}
 
 	if err := f.r.Trigger(f.tr); err != nil {

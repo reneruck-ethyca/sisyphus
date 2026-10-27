@@ -977,6 +977,9 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 			if w != nil && w.plausible(time.Now()) {
 				r.record(id, run.ID, func(x *Run) { x.Usage = observe(x.Usage, *w) })
 			}
+			if res != nil || w != nil && w.plausible(time.Now()) {
+				r.logUsage(id, run.ID, line)
+			}
 			r.publish(id, run.ID, evs)
 		}}
 		go func() {

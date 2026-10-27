@@ -2,6 +2,10 @@ package review
 
 import (
 	"cmp"
+	"encoding/json"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 )
@@ -92,4 +96,28 @@ func budget(runs map[string][]Run, share float64, now time.Time) Budget {
 	}
 	b.Used += cur.Last - cur.First
 	return b
+}
+
+// logUsage appends one of Claude's rate-limit or result lines, verbatim, to
+// usage.jsonl: raw data for working out better accounting later. It outlives
+// run records, which are trimmed and wiped by resets.
+// ponytail: a log replayed after a restart appends its lines again, timed at the
+// replay; dedupe on the line's uuid, keeping the first.
+func (r *Reviewer) logUsage(prID, runID, line string) {
+	b, err := json.Marshal(struct {
+		At   time.Time       `json:"at"`
+		PR   string          `json:"pr"`
+		Run  string          `json:"run"`
+		Line json.RawMessage `json:"line"`
+	}{time.Now().UTC(), prID, runID, json.RawMessage(line)})
+	if err == nil {
+		var f *os.File
+		if f, err = os.OpenFile(filepath.Join(r.dir, "usage.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			_, err = f.Write(append(b, '\n')) // one write per line: concurrent runs don't interleave
+			f.Close()
+		}
+	}
+	if err != nil {
+		slog.Warn("logging usage", "run", runID, "err", err)
+	}
 }
