@@ -175,6 +175,10 @@ func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, lo
 	if rev != nil {
 		tr.Events = rev
 		rev.Kick = s.RunNow
+		rev.Refresh = func(ctx context.Context, id string) (tr tracker.Tracked, err error) {
+			err = s.do(ctx, func(ctx context.Context) error { tr, err = s.tracker.Refresh(ctx, id); return err })
+			return tr, err
+		}
 		rev.OnChange = s.publish
 	}
 	s.refreshPRs()
@@ -246,13 +250,19 @@ func (s *Service) trackedPR(id string) (tracker.Tracked, error) {
 	return tracker.Tracked{}, fmt.Errorf("%s is not tracked", id)
 }
 
-// ReviewNow queues a full review of a tracked PR, behind a run in progress.
+// ReviewNow queues a full review of a tracked PR, behind a run in progress, at
+// its head on GitHub now rather than as of the last tick.
 func (s *Service) ReviewNow(id string) error {
-	tr, err := s.trackedPR(id)
-	if err != nil {
+	if _, err := s.trackedPR(id); err != nil {
 		return err
 	}
-	return s.rev.Trigger(tr)
+	return s.do(context.Background(), func(ctx context.Context) error {
+		tr, err := s.tracker.Refresh(ctx, id)
+		if err != nil {
+			return err
+		}
+		return s.rev.Trigger(tr)
+	})
 }
 
 // Stack is what's on Docker for a PR's local stack (nil = its repo has none).

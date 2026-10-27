@@ -123,8 +123,10 @@ type Reviewer struct {
 	locks *tracker.Locks
 	dir   string // reviews.json and runs/ live here
 
-	GitHub   GitHub // host-side GitHub access: discussion files, posting; nil = neither
-	Kick     func() // asks for a tick soon; called once a reclaimed worktree is free
+	GitHub GitHub // host-side GitHub access: discussion files, posting; nil = neither
+	Kick   func() // asks for a tick soon; called once a reclaimed worktree is free
+	// Refresh fetches a PR's head and syncs its worktree before a run starts; nil = trust the job's.
+	Refresh  func(ctx context.Context, id string) (tracker.Tracked, error)
 	OnChange func() // called after every change, on any goroutine
 
 	mu          sync.Mutex
@@ -642,6 +644,18 @@ func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 	tr := run.Job.PR
 	id := tr.Key()
+	if r.Refresh != nil {
+		fresh, err := r.Refresh(runCtx, id)
+		if err != nil {
+			r.endEarly(appCtx, runCtx, run, err, nil)
+			return
+		}
+		if fresh.HeadSHA != tr.HeadSHA { // the tracker queues the new head once it's synced
+			r.cancel(id, errSuperseded)
+			r.endEarly(appCtx, runCtx, run, errSuperseded, nil)
+			return
+		}
+	}
 	unlock, err := r.locks.Lock(runCtx, id)
 	if err != nil {
 		r.endEarly(appCtx, runCtx, run, err, nil)

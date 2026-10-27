@@ -1045,3 +1045,26 @@ func TestShellIsTheReviewContainerWithBash(t *testing.T) {
 		t.Fatalf("err = %v, want refusal while a review runs", err)
 	}
 }
+
+// A job waits in the queue while the PR moves on: the run re-reads the head
+// first and stands down instead of reviewing the old code.
+func TestRunRefreshesHeadFirst(t *testing.T) {
+	f := newFixture(t)
+	var refreshed atomic.Int32
+	f.r.Refresh = func(context.Context, string) (tracker.Tracked, error) {
+		refreshed.Add(1)
+		tr := f.tr
+		tr.HeadSHA = "newer"
+		return tr, nil
+	}
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "cancelled", f.lastStatus(Cancelled))
+	if refreshed.Load() != 1 || len(f.rt.Started()) != 0 {
+		t.Fatalf("refreshed %d, started %d", refreshed.Load(), len(f.rt.Started()))
+	}
+
+	f.r.Refresh = func(context.Context, string) (tracker.Tracked, error) { return f.tr, nil }
+	f.r.Tracked(f.tr)
+	waitFor(t, "start at an unchanged head", f.started(1))
+}

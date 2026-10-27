@@ -206,6 +206,20 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 	t.announce(tr)
 }
 
+// Refresh re-reads one PR from GitHub and syncs its worktree to a new head, as a
+// tick would, and returns what it's tracked as now. Call it on the ticking goroutine.
+func (t *Tracker) Refresh(ctx context.Context, id string) (Tracked, error) {
+	tr := t.state.PRs[id]
+	if tr == nil {
+		return Tracked{}, fmt.Errorf("%s is not tracked", id)
+	}
+	t.update(ctx, tr)
+	if tr = t.state.PRs[id]; tr == nil {
+		return Tracked{}, fmt.Errorf("%s is no longer tracked", id)
+	}
+	return *tr, nil
+}
+
 // lock takes tr's worktree lock, or asks its holder to let go (we retry next tick).
 func (t *Tracker) lock(tr *Tracked) (unlock func(), ok bool) {
 	if unlock, ok = t.Locks.TryLock(tr.Key()); !ok {
