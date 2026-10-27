@@ -77,12 +77,12 @@ func (r *Reviewer) writeDiscussion(ctx context.Context, ref github.PRRef, dir st
 	return nil
 }
 
-// post publishes the agent's out/review.json, if it wrote one. nil, nil means
-// there was nothing to post.
-func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
+// ReadReviewFile reads the out/review.json a run's agent wrote. nil, nil means
+// it wrote none.
+func ReadReviewFile(runDir string) (*ReviewFile, error) {
 	// The container wrote out/: os.Root refuses a review.json that is (or
-	// passes through) a symlink leading outside it, so no host file gets posted.
-	root, err := os.OpenRoot(filepath.Join(run.Dir, "out"))
+	// passes through) a symlink leading outside it, so no host file gets read.
+	root, err := os.OpenRoot(filepath.Join(runDir, "out"))
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +101,17 @@ func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
 	if f.Event != "" && !slices.Contains(events, f.Event) {
 		return nil, fmt.Errorf("review.json: event %q isn't one of %s", f.Event, strings.Join(events, ", "))
 	}
+	return &f, nil
+}
+
+// post publishes the agent's out/review.json, if it wrote one. nil, nil means
+// there was nothing to post.
+func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
+	pf, err := ReadReviewFile(run.Dir)
+	if pf == nil || err != nil {
+		return nil, err
+	}
+	f := *pf
 	ref := run.Job.PR.PRRef
 	p := &Posted{Event: f.Event, Comments: len(f.Comments), Replies: len(f.Replies)}
 	var errs []error

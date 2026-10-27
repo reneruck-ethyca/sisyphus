@@ -1,12 +1,9 @@
 {{template "head" "Logs"}}
-<header>
-  <h1>waterboy logs</h1>
-  <span class="muted" id="state">connecting…</span>
-  <nav><a href="/">Status</a><a href="/settings">Settings</a></nav>
-</header>
-<div id="log">
-{{range .}}<div class="{{.Level}}" data-seq="{{.Seq}}"><span class="muted">{{.Time.Local.Format "15:04:05"}}</span> {{.Level}} {{.Msg}} <span class="muted">{{.Attrs}}</span></div>
+{{template "top" .Top}}
+<div class="log" id="log">
+{{range .Entries}}<div class="{{.Level}}" data-seq="{{.Seq}}"><span class="muted">{{.Time.Local.Format "15:04:05"}}</span> {{.Level}} {{.Msg}} <span class="muted">{{.Attrs}}</span></div>
 {{end}}</div>
+<p class="muted" id="state" style="padding: 0 20px">connecting…</p>
 <script>
   const log = document.getElementById("log"), state = document.getElementById("state");
   const el = (tag, cls, text) => Object.assign(document.createElement(tag), {className: cls, textContent: text});

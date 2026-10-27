@@ -3,101 +3,40 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{{if not (live .)}}<meta http-equiv="refresh" content="15">{{end}}
 <title>{{.}} · waterboy</title>
-<style>
-  :root { color-scheme: light dark;
-    --bg: light-dark(#faf9f5, #262624); --side: light-dark(#f0eee6, #1f1e1d); --fg: light-dark(#3d3929, #f0eee6);
-    --muted: light-dark(#83827d, #a6a39a); --line: light-dark(#e3dfd2, #3e3d39); --hover: light-dark(#e8e5da, #30302e);
-    --accent: light-dark(#c15f3c, #d97757); --code: light-dark(#f0eee6, #30302e);
-    --ok: light-dark(#4f7a3a, #8fb573); --info: light-dark(#5b6f8a, #9db3cf); --warn: light-dark(#a8661a, #e0a458); --bad: light-dark(#b3403a, #e5847b); }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
-  a { color: var(--accent); }
-  .muted { color: var(--muted); }
-  .nowrap { white-space: nowrap; }
-  .err { color: var(--bad); }
-  body > header { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; padding: .75rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--side); }
-  h1 { font-size: 1.1rem; margin: 0; color: var(--accent); }
-  h2 { font-size: 1.15rem; margin: 0 0 .25rem; }
-  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
-  nav { margin-left: auto; display: flex; gap: 1rem; }
-  button { font: inherit; padding: .2rem .8rem; border-radius: 6px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  .cols { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; min-height: calc(100vh - 3.2rem); }
-  aside { background: var(--side); border-right: 1px solid var(--line); overflow-y: auto; }
-  aside a { display: block; padding: .6rem 1rem; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; border-left: 3px solid transparent; }
-  aside a:hover { background: var(--hover); }
-  aside a.sel { background: var(--hover); border-left-color: var(--accent); }
-  aside .row { display: flex; gap: .5rem; align-items: center; }
-  aside .title { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  aside .review { margin-left: auto; }
-  main { padding: 1.25rem 1.5rem; min-width: 0; overflow-x: auto; }
-  .notice { margin: 0 0 .5rem; }
-  .dot { width: .55rem; height: .55rem; border-radius: 50%; flex: none; background: var(--muted); }
-  .dot.ok { background: var(--ok); } .dot.error { background: var(--warn); } .dot.conflict { background: var(--bad); }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  td:not(.nowrap) { overflow-wrap: anywhere; } /* long errors and paths wrap instead of widening the page */
-  th { font-weight: 600; color: var(--muted); font-size: 13px; }
-  code { font: 12px ui-monospace, monospace; word-break: break-all; background: var(--code); padding: 0 .25rem; border-radius: 4px; }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.5rem; margin: 1rem 0 0; }
-  dt { color: var(--muted); }
-  dd { margin: 0; }
-  .health { display: inline-block; padding: 0 .5rem; border-radius: 1rem; font-size: 12px; font-weight: 600; background: var(--code); color: var(--muted); }
-  .ok, .succeeded { color: var(--ok); }
-  .pending, .running, .queued { color: var(--info); }
-  .error { color: var(--warn); }
-  .conflict, .failed, .timeout, .lost { color: var(--bad); }
-  #log { font: 12px/1.6 ui-monospace, monospace; padding: 1rem 1.25rem; }
-  #log div { white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid var(--line); }
-  .WARN { color: var(--warn); }
-  .ERROR { color: var(--bad); }
-  .runhead { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; margin: 1.75rem 0 .25rem; }
-  .runhead h3 { margin: 0; }
-  #events { margin-top: 1rem; display: flex; flex-direction: column; gap: .35rem; }
-  .ev { white-space: pre-wrap; word-break: break-word; }
-  .ev.output, .ev.init, .ev.system { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); }
-  .ev.text { padding: .5rem .75rem; background: var(--side); border-radius: 6px; border-left: 3px solid var(--accent); }
-  .ev.tool { font-size: 13px; }
-  .ev.tool b { color: var(--accent); font-weight: 600; margin-right: .25rem; }
-  .ev.tool_result details { font-size: 12px; margin-left: 1rem; }
-  .ev.tool_result summary { color: var(--muted); cursor: pointer; }
-  .ev.tool_result pre { font: 12px/1.45 ui-monospace, monospace; background: var(--code); padding: .5rem; border-radius: 4px; max-height: 24rem; overflow: auto; white-space: pre-wrap; }
-  .ev.bad, .ev.bad summary { color: var(--bad); }
-  .ev.result { font-weight: 600; padding: .5rem .75rem; border: 1px solid var(--line); border-radius: 6px; }
-  .overdue { color: var(--warn); }
-  .reviewing { display: flex; gap: .75rem; flex-wrap: wrap; font-size: 13px; }
-  .reviewing a.active { display: inline-flex; align-items: center; gap: .4rem; padding: .05rem .6rem; border-radius: 1rem;
-    background: var(--code); color: var(--fg); text-decoration: none; font: 12px ui-monospace, monospace; }
-  .pulse { width: .5rem; height: .5rem; border-radius: 50%; background: var(--info); animation: pulse 1.4s ease-in-out infinite; }
-  .active.overdue .pulse { background: var(--warn); }
-  @keyframes pulse { 50% { opacity: .25; } }
-  #settings label { display: grid; grid-template-columns: 13rem 18rem 1fr; gap: .25rem 1rem; align-items: center; padding: .4rem 0; border-bottom: 1px solid var(--line); }
-  #settings input:not([type=checkbox]) { font: inherit; padding: .2rem .4rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
-  #settings input[type=checkbox] { justify-self: start; }
-  .menu { position: relative; display: inline-block; vertical-align: middle; }
-  .menu > summary { list-style: none; cursor: pointer; padding: 0 .5rem; border-radius: 6px; font-weight: 700; color: var(--muted); }
-  .menu > summary::-webkit-details-marker { display: none; }
-  .menu > summary:hover, .menu[open] > summary { background: var(--hover); }
-  .menu > div { position: absolute; right: 0; z-index: 10; margin-top: .25rem; min-width: 16rem; padding: .25rem; border: 1px solid var(--line);
-    border-radius: 8px; background: var(--bg); box-shadow: 0 4px 16px rgb(0 0 0 / .15); }
-  .menu button { display: block; width: 100%; text-align: left; background: none; color: inherit; padding: .4rem .6rem; }
-  .menu button:hover { background: var(--hover); }
-  .menu button small { display: block; color: var(--muted); }
-  .menu button.danger { color: var(--bad); }
-  .ignored { padding: .6rem 1rem; font-size: 13px; color: var(--muted); }
-  .ignored button { background: none; color: var(--accent); padding: 0; }
-  .actions { display: flex; gap: .75rem; align-items: center; } .actions button { flex: none; }
-  @media (max-width: 700px) { #settings label { grid-template-columns: 1fr; } }
-  @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; } }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
 {{end}}
 
-{{define "review"}}{{if .State}}<span class="health {{.State}}">{{.State}}</span>{{else}}{{with .Latest}}<span class="health {{.Status}}">{{.Status}}</span>{{else}}<span class="muted">—</span>{{end}}{{end}}{{end}}
+{{/* top is the header bar; .Status is nil on pages that don't show it. */}}
+{{define "top"}}<header class="top">
+  <a class="brand" href="/">waterboy</a>
+  {{with .Status}}{{if .Running}}<span class="checked running">Checking now…</span>
+  {{else if .LastRun.IsZero}}<span class="checked running">Starting…</span>
+  {{else if .LastError}}<span class="checked failed">Last check failed {{ago .LastRun}}</span>
+  {{else}}<span class="checked">Checked {{ago .LastRun}} · next {{ago .NextRun}}</span>{{end}}
+  <button id="run" class="btn quiet small" {{if .Running}}disabled{{end}}>Check now</button>{{end}}
+  <nav><a href="/logs"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a><a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings</a></nav>
+</header>{{end}}
 
-{{define "foot"}}</body>
+{{define "chip"}}<span class="chip {{tone .}}">{{outcome .}}</span>{{end}}
+
+{{/* The <time data-rel> ages ("2 min ago") are rendered again every 30s so they don't go stale. */}}
+{{define "foot"}}<script>
+  const rel = (t) => {
+    const s = Math.round((Date.now() - new Date(t)) / 1000), a = Math.abs(s);
+    const v = a < 60 ? "" : a < 3600 ? `${Math.round(a / 60)} min` : a < 86400 ? `${Math.round(a / 3600)} h` : `${Math.round(a / 86400)} d`;
+    return !v ? (s < 0 ? "in a moment" : "just now") : s < 0 ? `in ${v}` : `${v} ago`;
+  };
+  setInterval(() => document.querySelectorAll("time[data-rel]").forEach(el => el.textContent = rel(el.dateTime)), 30000);
+  const run = document.getElementById("run");
+  if (run) run.onclick = async () => {
+    run.disabled = true;
+    await fetch("/api/run", {method: "POST"});
+    setTimeout(() => location.reload(), 1000);
+  };
+</script>
+</body>
 </html>
 {{end}}

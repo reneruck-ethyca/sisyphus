@@ -40,7 +40,7 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
 make build                     # bin/waterboy (needs cgo / Xcode CLT)
 make test
 bin/waterboy -once             # single tick, no tray or window; good for testing
-bin/waterboy                   # menu-bar app ("WB"): status, Open window, Open dashboard, Run now, Open state file, Quit
+bin/waterboy                   # menu-bar app ("WB"): status, Open window, Open dashboard, Check now, Open state file, Quit
 bin/waterboy -config <file>    # another config file
 make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/waterboy.log
 make start | stop | restart    # through the LaunchAgent if installed, else in the background

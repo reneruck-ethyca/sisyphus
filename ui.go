@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os/exec"
 
 	"github.com/reneruck/waterboy/internal/app"
@@ -68,6 +69,28 @@ func (u *UI) OpenRun(prID, runID string) error {
 	return exec.Command("open", dir).Run()
 }
 
+// ReviewText is the review a run's agent wrote ("" if it wrote none).
+func (u *UI) ReviewText(prID, runID string) (string, error) {
+	f, err := u.svc.ReviewFile(prID, runID)
+	if f == nil {
+		return "", err
+	}
+	return f.Body, nil
+}
+
+// wailsAssets serves the window's files plus the stylesheet it shares with the web dashboard.
+func wailsAssets(files fs.FS) http.Handler {
+	h := application.AssetFileServerFS(files)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/style.css" {
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+			w.Write(styleCSS)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (u *UI) PR(id string) (app.PRView, error) {
 	pr, ok := u.svc.PR(id)
 	if !ok {
@@ -82,12 +105,12 @@ func runApp(cfg config.Config, svc *app.Service) error {
 	wapp := application.New(application.Options{
 		Name:     "waterboy",
 		Services: []application.Service{application.NewService(&UI{svc})},
-		Assets:   application.AssetOptions{Handler: application.AssetFileServerFS(assets)},
+		Assets:   application.AssetOptions{Handler: wailsAssets(assets)},
 		Mac:      application.MacOptions{ActivationPolicy: application.ActivationPolicyAccessory},
 	})
 
 	win := wapp.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "waterboy", Width: 900, Height: 600, Hidden: true, URL: "/",
+		Title: "waterboy", Width: 1100, Height: 760, Hidden: true, URL: "/",
 	})
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		win.Hide() // keep it around for "Open window"
@@ -110,7 +133,7 @@ func runApp(cfg config.Config, svc *app.Service) error {
 			}
 		})
 	}
-	menu.Add("Run now").OnClick(func(*application.Context) { svc.RunNow() })
+	menu.Add("Check now").OnClick(func(*application.Context) { svc.RunNow() })
 	menu.Add("Open state file").OnClick(func(*application.Context) {
 		if err := exec.Command("open", cfg.StateFile).Run(); err != nil {
 			slog.Warn("opening state file", "err", err)

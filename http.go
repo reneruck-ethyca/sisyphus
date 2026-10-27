@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"embed"
 	"encoding/json"
@@ -11,16 +12,22 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/app"
+	"github.com/reneruck/waterboy/internal/config"
 	"github.com/reneruck/waterboy/internal/review"
 )
 
-//go:embed web/*.html
+//go:embed web/*.html web/style.css
 var webFS embed.FS
+
+// styleCSS is shared with the Wails window (see ui.go).
+var styleCSS, _ = webFS.ReadFile("web/style.css")
 
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"when": func(t time.Time) string {
@@ -29,17 +36,94 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 		return t.Local().Format("2006-01-02 15:04:05")
 	},
-	// runPath links an active review to its live run page.
+	"stamp": func(t time.Time) string { return t.Local().Format("2 Jan, 15:04") },
+	// ago is a <time> the page's script keeps current ("2 min ago"); the exact time is its tooltip.
+	"ago": func(t time.Time) template.HTML {
+		if t.IsZero() {
+			return "never"
+		}
+		return template.HTML(fmt.Sprintf(`<time data-rel datetime="%s" title="%s">%s</time>`,
+			t.UTC().Format(time.RFC3339), t.Local().Format("2 Jan 2006, 15:04:05"), rel(t)))
+	},
+	// runPath links a review run's page.
 	"runPath": func(prID, run string) string {
 		repo, n, _ := strings.Cut(prID, "#")
 		return "/prs/" + repo + "/" + n + "/runs/" + run
 	},
-	"since": func(t time.Time) string { return time.Since(t).Round(time.Second).String() },
-	// live pages update themselves and Settings holds a form; the rest refresh every 15s.
-	"live": func(title string) bool {
-		return title == "Logs" || title == "Settings" || strings.HasPrefix(title, "Run ")
+	"outcome": func(r review.Run) string { l, _ := app.Outcome(r); return l },
+	"tone":    func(r review.Run) string { _, t := app.Outcome(r); return t },
+	"reason":  reasonLabel,
+	"dur":     runDuration,
+	"short":   func(sha string) string { return sha[:min(len(sha), 8)] },
+	"base":    path.Base,
+	"top":     func(page string) topbar { return topbar{Page: page} },
+	"md":      inlineMarkdown,
+	// checked is a bool setting's checkbox state; Invert fields show the other way round.
+	"checked": func(f config.Field) bool { v, _ := f.Value.(bool); return v != f.Invert },
+	"outputs": func(evs []review.Event) (n int) {
+		for _, e := range evs {
+			if e.Kind == "output" {
+				n++
+			}
+		}
+		return n
 	},
 }).ParseFS(webFS, "web/*.html"))
+
+var (
+	mdCode = regexp.MustCompile("`([^`\n]+)`")
+	mdBold = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
+)
+
+// inlineMarkdown escapes a review's text, then renders its `code` and **bold**;
+// the rest of the markdown stays as written (the page keeps its line breaks).
+func inlineMarkdown(s string) template.HTML {
+	h := mdCode.ReplaceAllString(template.HTMLEscapeString(s), "<code>$1</code>")
+	return template.HTML(mdBold.ReplaceAllString(h, "<b>$1</b>"))
+}
+
+// rel says how long ago (or from now) t is, like the pages' rel() script does.
+func rel(t time.Time) string {
+	d := time.Since(t)
+	a, v := d.Abs(), ""
+	switch {
+	case a < time.Minute:
+		if d < 0 {
+			return "in a moment"
+		}
+		return "just now"
+	case a < time.Hour:
+		v = fmt.Sprintf("%d min", int(a.Minutes()+.5))
+	case a < 24*time.Hour:
+		v = fmt.Sprintf("%d h", int(a.Hours()+.5))
+	default:
+		v = fmt.Sprintf("%d d", int(a.Hours()/24+.5))
+	}
+	if d < 0 {
+		return "in " + v
+	}
+	return v + " ago"
+}
+
+var reasons = map[string]string{"new": "PR first seen", "commits": "new commits", "replies": "new replies", "manual": "run by you"}
+
+func reasonLabel(r string) string { return cmp.Or(reasons[r], r) }
+
+// runDuration is how long a run took, or has been running.
+func runDuration(r review.Run) string {
+	end := r.Finished
+	if r.Status == review.Running || end.IsZero() {
+		end = time.Now()
+	}
+	d := end.Sub(r.Started).Round(time.Second)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d s", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d min %d s", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
+}
 
 // startHTTP serves the dashboard and JSON API on addr. Only app.Service is used, so
 // the handlers see the same snapshots as the tray.
@@ -58,6 +142,10 @@ func startHTTP(addr string, svc *app.Service) (string, error) {
 
 func newHandler(svc *app.Service) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /style.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Write(styleCSS)
+	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, svc.Status())
 	})
@@ -93,7 +181,11 @@ func newHandler(svc *app.Service) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		render(w, "index.html", dashboard{Status: svc.Status(), PR: &pr, Run: run, Events: evs, Next: next})
+		d := dashboard{Status: svc.Status(), PR: &pr, Run: run, Events: evs, Next: next}
+		if d.ReviewFile, err = svc.ReviewFile(pr.ID, run.ID); err != nil {
+			slog.Warn("review file", "pr", pr.ID, "run", run.ID, "err", err)
+		}
+		render(w, "index.html", d)
 	})
 	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events", func(w http.ResponseWriter, r *http.Request) {
 		streamRun(w, r, svc)
@@ -108,7 +200,7 @@ func newHandler(svc *app.Service) http.Handler {
 		streamLogs(w, r, svc)
 	})
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "logs.html", svc.Logs())
+		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
 	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
 		st, err := svc.Settings()
@@ -151,6 +243,12 @@ func newHandler(svc *app.Service) http.Handler {
 		if d.Stack, d.StackErr = svc.Stack(r.Context(), pr.ID); d.StackErr != nil {
 			slog.Warn("stack status", "pr", pr.ID, "err", d.StackErr)
 		}
+		if last := pr.Review.Latest(); last != nil {
+			var err error
+			if d.ReviewFile, err = svc.ReviewFile(pr.ID, last.ID); err != nil {
+				slog.Warn("review file", "pr", pr.ID, "run", last.ID, "err", err)
+			}
+		}
 		render(w, "index.html", d)
 	})
 	// The PR page's … menu: reset (reviews), wipe (+ stack), untrack (+ tracking); track undoes untrack.
@@ -182,6 +280,51 @@ type dashboard struct {
 
 	Stack    *review.StackStatus // the PR page's local stack; nil = none configured
 	StackErr error
+
+	ReviewFile *review.ReviewFile // what the shown (or latest) run's agent wrote; nil = nothing
+}
+
+// topbar is the header: the dashboard shows Status in it, other pages don't.
+type topbar struct {
+	Page   string
+	Status *app.Status
+}
+
+func (d dashboard) Top() topbar { return topbar{Status: &d.Status} }
+
+type prGroup struct {
+	Label string
+	PRs   []app.PRView
+}
+
+var groupLabels = []struct{ key, label string }{
+	{app.GroupAttention, "Needs you"}, {app.GroupReviewing, "Reviewing"}, {app.GroupReviewed, "Reviewed"}, {app.GroupWaiting, "Not reviewed yet"},
+}
+
+// Groups is the PR list by what the user has to do, empty groups left out.
+func (d dashboard) Groups() []prGroup {
+	var out []prGroup
+	for _, g := range groupLabels {
+		if prs := d.InGroup(g.key); len(prs) > 0 {
+			out = append(out, prGroup{g.label, prs})
+		}
+	}
+	return out
+}
+
+func (d dashboard) InGroup(group string) []app.PRView {
+	var out []app.PRView
+	for _, pr := range d.PRs {
+		if pr.Group == group {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+type logsPage struct {
+	Top     topbar
+	Entries []app.LogEntry
 }
 
 func (d dashboard) Title() string {
@@ -197,6 +340,28 @@ func (d dashboard) Title() string {
 type settingsPage struct {
 	app.Settings
 	Err error
+}
+
+func (settingsPage) Top() topbar { return topbar{Page: "settings"} }
+
+type fieldGroup struct {
+	Name   string
+	Fields []config.Field
+}
+
+// Groups is the fields by section, in config.Groups order.
+func (s settingsPage) Groups() []fieldGroup {
+	var out []fieldGroup
+	for _, g := range config.Groups {
+		fg := fieldGroup{Name: g}
+		for _, f := range s.Fields {
+			if f.Group == g {
+				fg.Fields = append(fg.Fields, f)
+			}
+		}
+		out = append(out, fg)
+	}
+	return out
 }
 
 func findRun(pr app.PRView, id string) *review.Run {

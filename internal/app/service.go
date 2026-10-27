@@ -24,6 +24,7 @@ type Status struct {
 	Interval  string    `json:"interval"`
 	Running   bool      `json:"running"`
 	LastRun   time.Time `json:"last_run"`
+	NextRun   time.Time `json:"next_run"`             // ponytail: LastRun + interval; off by up to an interval after a "Check now"
 	LastError string    `json:"last_error,omitempty"` // of the last tick as a whole
 	PRs       []PRView  `json:"prs"`                  // sorted by ID
 	Reviews   bool      `json:"reviews"`              // false when review.disabled
@@ -31,6 +32,7 @@ type Status struct {
 	RuntimeError string            `json:"runtime_error,omitempty"`
 	Reviewing    []ActiveReview    `json:"reviewing"` // review runs in progress, oldest first
 	Ignored      []tracker.Ignored `json:"ignored"`   // PRs untracked by hand
+	Activity     []Activity        `json:"activity"`  // latest review runs across PRs, newest first
 }
 
 // ActiveReview is a review run in progress and its container.
@@ -67,6 +69,12 @@ type PRView struct {
 	Health     string          `json:"health"` // "conflict" | "error" | "ok" (tracking, not review)
 	Review     review.PRStatus `json:"review"`
 	ReviewNote string          `json:"review_note"` // why a review is or isn't happening, in a line
+	UpToDate   bool            `json:"up_to_date"`  // the latest review covered the head; nothing pending
+	// Where the PR stands for its reader: see verdict.
+	Verdict   string    `json:"verdict"`
+	Tone      string    `json:"tone"`
+	Group     string    `json:"group"`
+	VerdictAt time.Time `json:"verdict_at"`
 }
 
 // reviewNote says in a line where the PR's review stands and why. blocked and
@@ -177,6 +185,15 @@ func (s *Service) RunDir(prID, runID string) (string, bool) {
 		return "", false
 	}
 	return s.rev.RunDir(prID, runID)
+}
+
+// ReviewFile is what a run's agent wrote to out/review.json; nil if it wrote none.
+func (s *Service) ReviewFile(prID, runID string) (*review.ReviewFile, error) {
+	dir, ok := s.RunDir(prID, runID)
+	if !ok {
+		return nil, fmt.Errorf("no run %s for %s", runID, prID)
+	}
+	return review.ReadReviewFile(dir)
 }
 
 // Status returns the latest snapshot. Its PRs slice is shared; don't mutate it.
@@ -358,6 +375,7 @@ func (s *Service) RunOnce(ctx context.Context) {
 	}
 	s.update(func(st *Status) {
 		st.Running, st.LastRun, st.LastError = false, time.Now(), ""
+		st.NextRun = st.LastRun.Add(s.cfg.Interval.Duration)
 		if err != nil {
 			st.LastError = err.Error()
 		}
@@ -402,8 +420,10 @@ func (s *Service) publish() {
 			blocked[tr.Repo] = s.rev.Blocked(tr.Repo)
 		}
 		rs := reviews[tr.Key()]
-		prs = append(prs, PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs,
-			ReviewNote: reviewNote(tr, rs, s.rev != nil, blocked[tr.Repo], runtimeErr)})
+		v := PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs, UpToDate: upToDate(tr, rs),
+			ReviewNote: reviewNote(tr, rs, s.rev != nil, blocked[tr.Repo], runtimeErr)}
+		v.Verdict, v.Tone, v.Group, v.VerdictAt = verdict(tr, v.Health, rs)
+		prs = append(prs, v)
 	}
 	var active []ActiveReview
 	for id, ps := range reviews {
@@ -415,7 +435,9 @@ func (s *Service) publish() {
 		}
 	}
 	slices.SortFunc(active, func(a, b ActiveReview) int { return a.Started.Compare(b.Started) })
-	s.update(func(st *Status) { st.PRs, st.RuntimeError, st.Reviewing = prs, runtimeErr, active })
+	s.update(func(st *Status) {
+		st.PRs, st.RuntimeError, st.Reviewing, st.Activity = prs, runtimeErr, active, activity(prs)
+	})
 }
 
 func (s *Service) update(fn func(*Status)) {

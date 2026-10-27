@@ -1,118 +1,173 @@
 {{template "head" .Title}}
-<header>
-  <h1>waterboy</h1>
-  <span class="muted">{{.User}} @ {{.Org}} · every {{.Interval}}</span>
-  <span>{{if .Running}}Running…{{else}}Last run {{when .LastRun}}{{end}} · {{.Summary}}</span>
-  <button id="run" {{if .Running}}disabled{{end}}>Run now</button>
-  <span class="reviewing">{{range .Reviewing}}<a class="active{{if .Overdue}} overdue{{end}}" href="{{runPath .PR .Run}}"
-    title="container {{or .Container "starting"}}"><span class="pulse"></span>{{.PR}} · {{or .Name (printf "%.12s" .Container) "starting…"}} · {{since .Started}}{{if .Overdue}} ⚠{{end}}</a>
-    {{else}}<span class="muted">no review running</span>{{end}}</span>
-  <nav><a href="/logs">Logs</a><a href="/settings">Settings</a></nav>
-</header>
+{{template "top" .Top}}
 <div class="cols">
-<aside>
+<aside aria-label="Pull requests">
   {{$sel := ""}}{{with .PR}}{{$sel = .ID}}{{end}}
-  {{range .PRs}}
-    <a href="/prs/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} class="sel"{{end}}>
-      <div class="row"><span class="dot {{.Health}}" title="{{.Health}}"></span><strong>{{.ID}}</strong><span class="review" title="{{.ReviewNote}}">{{template "review" .Review}}</span></div>
-      <div class="title">{{.Title}}</div>
-    </a>
+  {{range .Groups}}
+    <h2><span>{{.Label}}</span><span>{{len .PRs}}</span></h2>
+    {{range .PRs}}<a class="pr" href="/prs/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
+      <span class="row"><span class="chip {{.Tone}}">{{.Verdict}}</span>{{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</span>
+      <span class="title">{{.Title}}</span>
+      <span class="meta">{{base .Repo}} #{{.Number}}{{with .Author}} · {{.}}{{end}}</span>
+    </a>{{end}}
   {{else}}
-    <p class="muted" style="padding: 0 1rem">No PRs tracked.</p>
+    <h2>Pull requests</h2><p class="empty">None tracked yet. PRs you're asked to review show up after the next check.</p>
   {{end}}
-  {{with .Ignored}}<div class="ignored">Untracked:{{range .}}<div>{{.Key}} <button data-action="track" data-pr="{{.Key}}"
-    data-src="/api/prs/{{.Repo}}/{{.Number}}/track" title="{{.Title}}">track again</button></div>{{end}}</div>{{end}}
+  {{with .Ignored}}<h2><span>Untracked</span><span>{{len .}}</span></h2>
+    {{range .}}<div class="untracked"><span title="{{.Title}}">{{.Key}}</span><button class="linkbtn" data-action="track" data-pr="{{.Key}}"
+      data-src="/api/prs/{{.Repo}}/{{.Number}}/track">Track again</button></div>{{end}}{{end}}
 </aside>
 <main>
-{{with .LastError}}<p class="err notice">Last run failed: {{.}}</p>{{end}}
-{{if not .Reviews}}<p class="muted notice">Reviews are disabled (review.disabled).</p>{{end}}
-{{with .RuntimeError}}<p class="err notice">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
-{{with .PR}}
-<h2>{{.Title}}
-  <details class="menu"><summary title="PR actions">…</summary><div>{{$api := printf "/api/prs/%s/%d" .Repo .Number}}
-    <button data-action="reset" data-pr="{{.ID}}" data-src="{{$api}}/reset"
-      data-confirm="Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays.">Reset review status<small>forget history, review again</small></button>
-    <button data-action="wipe" data-pr="{{.ID}}" data-src="{{$api}}/wipe"
-      data-confirm="Wipe the review data? Stops a running review, forgets the review history, and removes the stack: containers, network, DB volume, and its images unless something else uses them. The next review starts fresh.">Wipe review data<small>+ stack containers, volumes, images</small></button>
-    <button class="danger" data-action="untrack" data-pr="{{.ID}}" data-src="{{$api}}/untrack" data-then="/"
-      data-confirm="Untrack this PR? Wipes its review data and stack, removes the worktree and branch waterboy created, and stops tracking it. It isn't picked up again until you track it again.">Untrack PR<small>+ worktree; ignored until tracked again</small></button>
-  </div></details></h2>
-<div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span> <span id="action-msg" class="muted"></span></div>
-<dl>
-  <dt>Author</dt><dd><a href="https://github.com/{{.Author}}">{{or .Author "—"}}</a></dd>
-  <dt>Branch</dt><dd><code>{{.HeadRef}}</code></dd>
-  <dt>Head SHA</dt><dd><code>{{.HeadSHA}}</code></dd>
-  <dt>Synced SHA</dt><dd><code>{{or .SyncedSHA "—"}}</code></dd>
-  <dt>Worktree</dt><dd><code>{{.Worktree}}</code></dd>
-  <dt>Created worktree</dt><dd>{{.CreatedWorktree}}</dd>
-  <dt>Created branch</dt><dd>{{.CreatedBranch}}</dd>
-  <dt>Tracked since</dt><dd>{{when .TrackedAt}}</dd>
-  <dt>Last seen activity</dt><dd>{{when .LastSeenAt}}</dd>
-  <dt>Conflict head</dt><dd><code>{{or .ConflictHeadSHA "—"}}</code></dd>
-  <dt>Last error</dt><dd class="err">{{or .LastError "—"}}</dd>
-</dl>
-{{if $.Run}}{{template "run" $}}{{else}}
-{{if or $.Stack $.StackErr}}
-<h3>Stack {{with $.Stack}}<span class="health {{.State}}">{{.State}}</span> <code>{{.Project}}</code>{{end}}</h3>
-{{with $.StackErr}}<p class="err">{{.}}</p>{{end}}
-{{with $.Stack}}
-{{if .Containers}}<table>
-  <thead><tr><th>Service</th><th>Container</th><th>State</th><th>Image</th></tr></thead>
-  <tbody>{{range .Containers}}<tr><td>{{.Service}}</td><td><code>{{.Name}}</code></td><td class="{{.State}}">{{.Status}}</td><td><code>{{.Image}}</code></td></tr>{{end}}</tbody>
-</table>{{else}}<p class="muted">No containers: the next review starts the stack.</p>{{end}}
-<p class="muted">Volumes: {{range $i, $v := .Volumes}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}none{{end}}
-  · Network: {{range $i, $v := .Networks}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}none{{end}}</p>
-{{end}}{{end}}
-<h3>Reviews {{with .Review.State}}<span class="health {{.}}">{{.}}</span>{{end}}
-  <button id="review-now" data-src="/api/prs/{{.Repo}}/{{.Number}}/review">Review now</button> <span id="review-msg" class="muted"></span></h3>
-<p class="muted">{{.ReviewNote}}</p>
-<table>
-  <thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th>Finished</th><th>Error</th></tr></thead>
-  <tbody>
-  {{$pr := .}}
-  {{range .Review.Runs}}
-    <tr>
-      <td class="nowrap"><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}/runs/{{.ID}}"><code>{{.ID}}</code></a>{{if .Overdue}} <span class="overdue" title="running longer than review.timeout">⚠</span>{{end}}{{with .Claude}}<br><span class="muted">{{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}</span>{{end}}{{with .Posted}}{{with .URL}}<br><a href="{{.}}">posted ↗</a>{{end}}{{end}}</td>
-      <td>{{.Job.Reason}}</td>
-      <td class="nowrap"><code>{{printf "%.12s" .Job.PR.HeadSHA}}</code></td>
-      <td><span class="health {{.Status}}">{{.Status}}</span></td>
-      <td>{{if ne .Status "running"}}{{.ExitCode}}{{end}}</td>
-      <td class="nowrap">{{when .Started}}</td>
-      <td class="nowrap">{{when .Finished}}</td>
-      <td class="err">{{.Error}}</td>
-    </tr>
-  {{else}}
-    <tr><td colspan="8" class="muted">No reviews yet.</td></tr>
-  {{end}}
-  </tbody>
-</table>
-{{end}}
-{{else}}
-<p class="muted">{{if .PRs}}Select a PR on the left.{{end}}</p>
-{{end}}
+{{if .Run}}{{template "run" .}}{{else if .PR}}{{template "pr" .}}{{else}}{{template "overview" .}}{{end}}
 </main>
 </div>
-{{define "run"}}{{$pr := .PR}}{{with .Run}}{{$base := printf "/prs/%s/%d/runs/%s" $pr.Repo $pr.Number .ID}}
-<div class="runhead">
-  <h3><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}">Reviews</a> › <code>{{.ID}}</code></h3>
-  <span class="health {{.Status}}">{{.Status}}</span>
-  {{if .Overdue}}<span class="overdue">⚠ running longer than review.timeout</span>{{end}}
+
+{{define "notices"}}{{with .RuntimeError}}<p class="notice">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
+{{if not .Reviews}}<p class="notice quiet">Reviews are off. Turn them on in <a href="/settings">Settings</a>.</p>{{end}}{{end}}
+
+{{define "overview"}}
+<h1>Overview</h1>
+<section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
+  {{with .LastError}}<p class="notice">The last check failed: {{.}}</p>{{end}}
+  {{template "notices" .}}
+  {{with .InGroup "attention"}}<ol class="list card">{{range .}}<li>
+    <span class="chip {{.Tone}}">{{.Verdict}}</span>
+    <span class="grow"><a href="/prs/{{.Repo}}/{{.Number}}">{{.Title}}</a><span class="facts">{{base .Repo}} #{{.Number}} · {{or .LastError .ReviewNote}}</span></span>
+    {{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</li>{{end}}</ol>
+  {{else}}{{if and (not .LastError) (not .RuntimeError) .Reviews}}<div class="card empty"><div><b>Nothing needs you right now</b>
+    <div class="muted">Failed reviews, merge conflicts and container problems show up here.</div></div></div>{{end}}{{end}}
+</section>
+<section aria-labelledby="now"><h2 id="now">Reviewing now</h2>
+  {{with .InGroup "reviewing"}}<ol class="list card">{{range .}}{{$p := .}}<li>
+    <span class="chip {{.Tone}}">{{.Verdict}}</span>
+    <span class="grow"><a href="{{with .Review.Latest}}{{if eq .Status "running"}}{{runPath $p.ID .ID}}{{else}}/prs/{{$p.Repo}}/{{$p.Number}}{{end}}{{else}}/prs/{{.Repo}}/{{.Number}}{{end}}">{{.Title}}</a>
+      <span class="facts">{{base .Repo}} #{{.Number}} · {{.ReviewNote}}{{with .Review.Latest}}{{if .Overdue}} · <span class="err">running longer than the review timeout</span>{{end}}{{end}}</span></span>
+    {{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</li>{{end}}</ol>
+  {{else}}<p class="muted">No review running.</p>{{end}}
+</section>
+<section aria-labelledby="recent"><h2 id="recent">Recent activity</h2>
+  {{with .Activity}}<ol class="list card">{{range .}}<li>
+    <span class="chip {{.Tone}}">{{.Label}}</span>
+    <span class="grow"><a href="{{runPath .PR .Run}}">{{.Title}}</a><span class="facts">{{.PR}}{{with .Detail}} · {{.}}{{end}}</span></span>
+    {{ago .At}}</li>{{end}}</ol>
+  {{else}}<p class="muted">No reviews yet.</p>{{end}}
+</section>
+{{end}}
+
+{{define "pr"}}{{with .PR}}{{$api := printf "/api/prs/%s/%d" .Repo .Number}}
+{{template "notices" $}}
+<div class="pagehead">
+  <h1>{{.Title}}</h1>
+  <div class="meta-line"><span>{{.Repo}} #{{.Number}}</span>{{with .Author}}<span>by <a href="https://github.com/{{.}}">{{.}}</a></span>{{end}}
+    <code>{{.HeadRef}}</code><span>tracked {{ago .TrackedAt}}</span></div>
+  <div class="actions">
+    <button id="review-now" class="btn" data-src="{{$api}}/review">{{if .Review.Runs}}Review again{{else}}Review now{{end}}</button>
+    <a class="btn quiet" href="{{.URL}}">Open on GitHub ↗</a>
+    <details class="menu"><summary class="btn quiet">More ▾</summary><div>
+      <button data-action="reset" data-pr="{{.ID}}" data-src="{{$api}}/reset"
+        data-confirm="Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays.">Reset review status<small>forget history, review again</small></button>
+      <button data-action="wipe" data-pr="{{.ID}}" data-src="{{$api}}/wipe"
+        data-confirm="Wipe the review data? Stops a running review, forgets the review history, and removes the stack: containers, network, DB volume, and its images unless something else uses them. The next review starts fresh.">Wipe review data<small>+ stack containers, volumes, images</small></button>
+      <button class="danger" data-action="untrack" data-pr="{{.ID}}" data-src="{{$api}}/untrack" data-then="/"
+        data-confirm="Untrack this PR? Wipes its review data and stack, removes the worktree and branch waterboy created, and stops tracking it. It isn't picked up again until you track it again.">Untrack PR<small>+ worktree; ignored until tracked again</small></button>
+    </div></details>
+    <span id="action-msg" class="muted" role="status"></span>
+  </div>
 </div>
-<div class="muted">{{.Job.Reason}} · head <code>{{printf "%.12s" .Job.PR.HeadSHA}}</code> · started {{when .Started}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}
-  · <a href="{{$base}}/log">raw log</a> · <a href="{{$base}}/prompt.md">prompt</a> · <a href="{{$base}}/out/">out/</a></div>
-{{with .Error}}<p class="err">{{.}}</p>{{end}}
-{{with .Stack}}<p class="muted">Stack <code>{{.Project}}</code> from <code>{{.Dir}}</code>{{if .Offset}} · PORT_OFFSET {{.Offset}}{{end}} · <a href="{{$base}}/stack.log">stack log</a></p>{{end}}
-{{with .Posted}}<p>Posted {{if .Event}}<b>{{.Event}}</b>{{else}}replies{{end}}{{if .Comments}} · {{.Comments}} inline{{end}}{{if .Replies}} · {{.Replies}} replies{{end}}{{if .Fallback}} · as a plain comment (GitHub refused the review){{end}}{{with .URL}} · <a href="{{.}}">view on GitHub ↗</a>{{end}}</p>{{end}}
-<div id="events" data-src="/api{{$base}}/events?from={{$.Next}}" data-live="{{eq .Status "running"}}">
-{{range $.Events}}{{template "event" .}}{{end}}
+{{if eq .Health "conflict"}}<p class="notice">Merge conflict at head <code>{{short .HeadSHA}}</code>: the on_conflict hook couldn't resolve it. {{.LastError}}</p>
+{{else if eq .Health "error"}}<p class="notice">Syncing the worktree failed: {{.LastError}}</p>{{end}}
+
+<section aria-labelledby="latest"><h2 id="latest">Latest review</h2>
+{{with .Review.Latest}}<div class="card">
+  <div class="card-h">{{template "chip" .}}
+    {{with .Posted}}{{if .Comments}}<span class="muted">{{.Comments}} inline comment{{if ne .Comments 1}}s{{end}}</span>{{end}}{{end}}
+    <span class="muted">{{if eq .Status "running"}}started {{ago .Started}}{{else}}{{ago .Finished}}{{end}}</span>
+    {{with .Posted}}{{with .URL}}<a class="end" href="{{.}}">View on GitHub ↗</a>{{end}}{{end}}</div>
+  {{with .Error}}<div class="card-b err">{{.}}</div>{{end}}
+  {{with $.ReviewFile}}{{if .Body}}<div class="card-b"><div class="review-body clamp">{{md .Body}}</div>
+    <a href="{{runPath $.PR.ID $.PR.Review.Latest.ID}}">Read the full review →</a></div>{{end}}{{end}}
+  <div class="card-f">{{if $.PR.UpToDate}}Up to date with <code>{{short $.PR.HeadSHA}}</code>. The next review starts on new commits or replies.{{else}}{{$.PR.ReviewNote}}{{end}}</div>
 </div>
+{{else}}<div class="card"><div class="card-b muted">{{.ReviewNote}}</div></div>{{end}}
+</section>
+
+{{with .Review.Runs}}<section aria-labelledby="runs"><h2 id="runs">Review runs</h2>
+<ol class="list card">{{range .}}<li>
+  {{template "chip" .}}
+  <span class="grow"><a href="{{runPath $.PR.ID .ID}}">{{stamp .Started}}</a> <span class="muted">· {{reason .Job.Reason}}</span>
+    <span class="facts">{{dur .}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}} · head {{short .Job.PR.HeadSHA}}{{if .Overdue}} · <span class="err">running longer than the review timeout</span>{{end}}</span>
+    {{with .Error}}<span class="err">{{.}}</span>{{end}}</span>
+  {{ago .Started}}</li>{{end}}</ol>
+</section>{{end}}
+
+{{if or $.Stack $.StackErr}}<details class="fold" id="fold-stack"><summary>Local stack
+  {{with $.Stack}}<span class="chip">{{.State}}</span><span class="muted"><code>{{.Project}}</code> · {{len .Containers}} containers</span>{{end}}
+  {{with $.StackErr}}<span class="err">{{.}}</span>{{end}}</summary>
+{{with $.Stack}}<div>
+  {{if .Containers}}<table>
+    <thead><tr><th>Service</th><th>Container</th><th>State</th><th>Image</th></tr></thead>
+    <tbody>{{range .Containers}}<tr><td>{{.Service}}</td><td><code>{{.Name}}</code></td><td>{{.Status}}</td><td><code>{{.Image}}</code></td></tr>{{end}}</tbody>
+  </table>{{else}}<p class="muted">No containers: the next review starts the stack.</p>{{end}}
+  <p class="muted">Volumes: {{range $i, $v := .Volumes}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}none{{end}}
+    · Network: {{range $i, $v := .Networks}}{{if $i}}, {{end}}<code>{{$v}}</code>{{else}}none{{end}}</p>
+</div>{{end}}
+</details>{{end}}
+
+<details class="fold" id="fold-tracking"><summary>Worktree and tracking
+  <span class="muted">head {{short .HeadSHA}}{{if eq .SyncedSHA .HeadSHA}}, synced{{end}}</span></summary>
+<dl>
+  <dt>Worktree</dt><dd><code>{{.Worktree}}</code></dd>
+  <dt>Head</dt><dd><code>{{.HeadSHA}}</code></dd>
+  <dt>Synced</dt><dd><code>{{or .SyncedSHA "—"}}</code></dd>
+  <dt>Created by waterboy</dt><dd>{{if .CreatedWorktree}}worktree{{if .CreatedBranch}} and branch{{end}}; removed when the PR is untracked{{else}}no, reused an existing worktree{{end}}</dd>
+  <dt>Tracked since</dt><dd>{{when .TrackedAt}}</dd>
+  <dt>Last activity on GitHub</dt><dd>{{when .LastSeenAt}}</dd>
+  {{with .ConflictHeadSHA}}<dt>Conflict head</dt><dd><code>{{.}}</code></dd>{{end}}
+</dl>
+</details>
+{{end}}{{end}}
+
+{{define "run"}}{{$pr := .PR}}{{with .Run}}{{$base := runPath $pr.ID .ID}}
+{{template "notices" $}}
+<nav class="meta-line" aria-label="Breadcrumb"><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}">{{base $pr.Repo}} #{{$pr.Number}} {{$pr.Title}}</a></nav>
+<div class="pagehead">
+  <div class="actions"><h1>Review run · {{stamp .Started}}</h1>{{template "chip" .}}</div>
+  <div class="meta-line"><span>{{reason .Job.Reason}} · {{dur .}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}</span>
+    <span>head <code>{{short .Job.PR.HeadSHA}}</code></span>{{if eq .Status "running"}}<span>container <code>{{or .Name .Container "starting…"}}</code></span>{{end}}{{if .Overdue}}<span class="err">running longer than the review timeout</span>{{end}}</div>
+  <div class="meta-line"><a href="{{$base}}/log">Raw log</a><a href="{{$base}}/prompt.md">Prompt</a><a href="{{$base}}/out/">Output files</a>{{if .Stack}}<a href="{{$base}}/stack.log">Stack log</a>{{end}}</div>
+</div>
+{{with .Error}}<p class="notice">{{.}}</p>{{end}}
+{{with .Posted}}{{with .Error}}<p class="notice">Posting to GitHub failed: {{.}}</p>{{end}}{{end}}
+
+{{with $.ReviewFile}}<section class="card" aria-labelledby="written">
+  <div class="card-h"><h2 id="written">{{if $.Run.Posted}}Posted to GitHub{{else}}Written, not posted{{end}}</h2>
+    {{with $.Run.Posted}}<span>{{if .Comments}}{{.Comments}} inline comment{{if ne .Comments 1}}s{{end}}{{end}}{{if .Replies}} · {{.Replies}} replies{{end}}{{if .Fallback}} · as a plain comment (GitHub refused the review){{end}}</span>
+    {{with .URL}}<a class="end" href="{{.}}">View on GitHub ↗</a>{{end}}{{end}}</div>
+  <div class="card-b review-body">{{md .Body}}</div>
+</section>{{end}}
+
+<details class="fold" id="fold-setup"{{if eq .Status "running"}} open{{end}}><summary>Setup
+  <span class="muted">{{outputs $.Events}} lines of output{{with .Stack}} · stack <code>{{.Project}}</code>{{if .Offset}}, PORT_OFFSET {{.Offset}}{{end}}{{end}}</span></summary>
+<pre class="setup" id="setup">{{range $.Events}}{{if eq .Kind "output"}}{{.Text}}
+{{end}}{{end}}</pre>
+</details>
+
+<section class="card" aria-labelledby="transcript">
+  <div class="card-h"><h2 id="transcript">Transcript</h2>
+    <div class="filters" role="group" aria-label="Show">
+      <button aria-pressed="true" data-filter="text">Messages</button><button aria-pressed="true" data-filter="tools">Tools</button><button aria-pressed="false" data-filter="other">System events</button>
+    </div></div>
+  <div class="events no-other" id="events" data-src="/api{{$base}}/events?from={{$.Next}}" data-live="{{eq .Status "running"}}">
+  {{range $.Events}}{{if ne .Kind "output"}}{{template "event" .}}{{end}}{{end}}
+  </div>
+</section>
 {{end}}{{end}}
 
 {{define "event"}}<div class="ev {{.Kind}}{{if .IsError}} bad{{end}}">{{if eq .Kind "tool"}}<b>{{.Tool}}</b><code>{{.Text}}</code>{{else if eq .Kind "tool_result"}}<details><summary>{{if .IsError}}error{{else}}result{{end}}</summary><pre>{{.Text}}</pre></details>{{else}}{{.Text}}{{end}}</div>{{end}}
 
 <script>
   // Run view: follow the run live, rendering events the way the template does.
-  const events = document.getElementById("events");
+  const events = document.getElementById("events"), setup = document.getElementById("setup");
   if (events && events.dataset.live === "true") {
     const el = (tag, cls, text) => Object.assign(document.createElement(tag), {className: cls ?? "", textContent: text ?? ""});
     const render = (e) => {
@@ -125,19 +180,25 @@
     };
     const src = new EventSource(events.dataset.src);
     src.onmessage = (m) => {
-      const follow = innerHeight + scrollY >= document.body.scrollHeight - 40;
-      events.append(render(JSON.parse(m.data)));
+      const e = JSON.parse(m.data), follow = innerHeight + scrollY >= document.body.scrollHeight - 40;
+      if (e.kind === "output") { setup.append(e.text + "\n"); setup.scrollTop = setup.scrollHeight; }
+      else events.append(render(e));
       if (follow) scrollTo(0, document.body.scrollHeight);
     };
     src.addEventListener("done", () => { src.close(); location.reload(); });
   }
-  if (events) scrollTo(0, document.body.scrollHeight);
+  document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => {
+    const on = b.getAttribute("aria-pressed") !== "true";
+    b.setAttribute("aria-pressed", on);
+    events.classList.toggle("no-" + b.dataset.filter, !on);
+  });
 
-  // The PR's … menu and "track again": each action confirms what it removes, then reloads.
+  // The PR's More menu and "Track again": each action confirms what it removes, then reloads.
   document.querySelectorAll("[data-action]").forEach(b => b.onclick = async (e) => {
     const el = e.currentTarget, {action, pr, src, confirm: ask, then} = el.dataset;
     if (ask && !confirm(`${pr}: ${ask}`)) return;
     el.disabled = true;
+    el.closest(".menu")?.removeAttribute("open");
     const msg = document.getElementById("action-msg");
     if (msg) Object.assign(msg, {textContent: `${action}…`, className: "muted"});
     const r = await fetch(src, {method: "POST"});
@@ -151,21 +212,32 @@
   });
 
   const reviewNow = document.getElementById("review-now");
-  if (reviewNow) reviewNow.onclick = async (e) => {
-    e.target.disabled = true;
-    const r = await fetch(e.target.dataset.src, {method: "POST"});
+  if (reviewNow) reviewNow.onclick = async () => {
+    reviewNow.disabled = true;
+    const r = await fetch(reviewNow.dataset.src, {method: "POST"});
     if (!r.ok) {
-      Object.assign(document.getElementById("review-msg"), {textContent: await r.text(), className: "err"});
-      e.target.disabled = false;
+      Object.assign(document.getElementById("action-msg"), {textContent: await r.text(), className: "err"});
+      reviewNow.disabled = false;
       return;
     }
     location.reload();
   };
 
-  document.getElementById("run").onclick = async (e) => {
-    e.target.disabled = true;
-    await fetch("/api/run", {method: "POST"});
-    setTimeout(() => location.reload(), 1000);
+  // Overview and PR pages reload when the status changes, but not while a menu is
+  // open or a field has focus; open sections stay open across the reload.
+  const folds = "waterboy-open-folds:" + location.pathname;
+  try { JSON.parse(sessionStorage.getItem(folds) ?? "[]").forEach(id => document.getElementById(id)?.setAttribute("open", "")); } catch {}
+  {{if not .Run}}let seen;
+  const poll = async () => {
+    try {
+      const now = await (await fetch("/api/status")).text();
+      seen ??= now;
+      if (now === seen || document.hidden || document.querySelector(".menu[open]") || document.activeElement?.matches("input, select, textarea")) return;
+      try { sessionStorage.setItem(folds, JSON.stringify([...document.querySelectorAll("details.fold[open]")].map(d => d.id))); } catch {}
+      location.reload();
+    } catch {} // waterboy restarting: try again next time
   };
+  poll();
+  setInterval(poll, 15000);{{end}}
 </script>
 {{template "foot"}}

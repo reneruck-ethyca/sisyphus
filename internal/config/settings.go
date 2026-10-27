@@ -12,35 +12,43 @@ import (
 // Field is a setting the UIs edit, named by its key in the config file. The rest
 // (repos, hooks, env, state_file, http_addr) stays file-only.
 type Field struct {
-	Key   string `json:"key"`  // "review.model"
-	Type  string `json:"type"` // "text" | "number" | "bool"; durations are text ("10m")
-	Help  string `json:"help"`
-	Value any    `json:"value"` // the file's value, else the default
+	Key     string   `json:"key"`  // "review.model"
+	Type    string   `json:"type"` // "text" | "number" | "bool"; durations are text ("10m")
+	Help    string   `json:"help"`
+	Value   any      `json:"value"`             // the file's value, else the default
+	Group   string   `json:"group"`             // the UI section it is shown in
+	Label   string   `json:"label"`             // what the UI calls it
+	Options []string `json:"options,omitempty"` // a text field's allowed (or suggested, with Suggest) values
+	Suggest bool     `json:"suggest,omitempty"` // Options are suggestions; any value goes
+	Invert  bool     `json:"invert,omitempty"`  // a bool the UI shows the other way round ("disabled" as "Run reviews")
 }
 
+// Field groups, in the order the UIs show them.
+var Groups = []string{"GitHub", "Reviews", "Local stack", "Advanced"}
+
 var fields = []Field{
-	{Key: "user", Type: "text", Help: "GitHub login whose reviews are tracked; empty = gh api user"},
-	{Key: "org", Type: "text", Help: "owner searched for PRs"},
-	{Key: "interval", Type: "text", Help: "time between ticks (Go duration, e.g. 10m)"},
-	{Key: "repos_root", Type: "text", Help: "clones live at <repos_root>/<repo>"},
-	{Key: "include_drafts", Type: "bool", Help: "also track draft PRs"},
-	{Key: "hook_timeout", Type: "text", Help: "per hook run"},
-	{Key: "review.disabled", Type: "bool", Help: "don't run reviews"},
-	{Key: "review.post", Type: "bool", Help: "post the agent's review to GitHub; off = dry run"},
-	{Key: "review.model", Type: "text", Help: "Claude model"},
-	{Key: "review.max_turns", Type: "number", Help: "Claude turn limit; hitting it fails the run"},
-	{Key: "review.max_budget_usd", Type: "number", Help: "spend limit, 0 = none (only enforced with API-key auth)"},
-	{Key: "review.timeout", Type: "text", Help: "runs longer than this are flagged, never stopped"},
-	{Key: "review.max_concurrent", Type: "number", Help: "review containers at a time"},
-	{Key: "review.cleanup", Type: "bool", Help: "reset worktrees waterboy created after each run"},
-	{Key: "review.stack_from", Type: "text", Help: "where local stacks start: worktree (the PR's code, on the host) or safe (repos_root clone)"},
-	{Key: "review.setup_step_timeout", Type: "text", Help: "each setup step (uv sync, npm install, …); past it the step is killed and the run fails"},
-	{Key: "review.retries", Type: "number", Help: "re-runs of a review that failed before Claude started (setup, stack); 0 = none"},
-	{Key: "review.retry_backoff", Type: "text", Help: "wait before the first retry, doubling after each (e.g. 2m)"},
-	{Key: "review.env_file", Type: "text", Help: "CLAUDE_CODE_OAUTH_TOKEN and a read-only GH_TOKEN"},
-	{Key: "review.prompt_file", Type: "text", Help: "Go text/template prompt; empty = built-in"},
-	{Key: "review.claude_settings", Type: "text", Help: "settings.json given to Claude in each run"},
-	{Key: "review.plugins_volume", Type: "text", Help: "Docker volume mounted as Claude's plugins/"},
+	{Key: "user", Type: "text", Group: "GitHub", Label: "GitHub user", Help: "Whose review requests are tracked. Empty uses the gh login."},
+	{Key: "org", Type: "text", Group: "GitHub", Label: "Organisation", Help: "Owner searched for PRs."},
+	{Key: "interval", Type: "text", Group: "GitHub", Label: "Check every", Help: "Time between checks, e.g. 10m."},
+	{Key: "include_drafts", Type: "bool", Group: "GitHub", Label: "Include draft PRs", Help: "Also track PRs still in draft."},
+	{Key: "review.disabled", Type: "bool", Group: "Reviews", Label: "Run reviews", Invert: true, Help: "Off keeps worktrees in sync without reviewing."},
+	{Key: "review.post", Type: "bool", Group: "Reviews", Label: "Post reviews to GitHub", Help: "Off is a dry run: reviews stay local."},
+	{Key: "review.model", Type: "text", Group: "Reviews", Label: "Model", Options: []string{"opus", "sonnet", "haiku"}, Suggest: true, Help: "Claude model used for reviews."},
+	{Key: "review.max_turns", Type: "number", Group: "Reviews", Label: "Turn limit", Help: "Hitting it fails the run."},
+	{Key: "review.max_budget_usd", Type: "number", Group: "Reviews", Label: "Spend limit (USD)", Help: "0 means no limit. Only enforced with API-key auth."},
+	{Key: "review.timeout", Type: "text", Group: "Reviews", Label: "Flag runs after", Help: "Longer runs are flagged, never stopped. E.g. 1h."},
+	{Key: "review.max_concurrent", Type: "number", Group: "Reviews", Label: "Reviews at a time", Help: "Review containers running at once."},
+	{Key: "review.retries", Type: "number", Group: "Reviews", Label: "Retries", Help: "Re-runs of a review that failed before Claude started (setup, stack). 0 means none."},
+	{Key: "review.retry_backoff", Type: "text", Group: "Reviews", Label: "Retry backoff", Help: "Wait before the first retry, doubling after each, e.g. 2m."},
+	{Key: "review.stack_from", Type: "text", Group: "Local stack", Label: "Start stacks from", Options: []string{"worktree", "safe"}, Help: "worktree: the PR's code, on the host. safe: the clone in the repos root."},
+	{Key: "review.setup_step_timeout", Type: "text", Group: "Local stack", Label: "Setup step timeout", Help: "Each setup step (uv sync, npm install…) is killed past this, failing the run. E.g. 20m."},
+	{Key: "review.cleanup", Type: "bool", Group: "Local stack", Label: "Reset worktrees after each run", Help: "Only worktrees waterboy created."},
+	{Key: "repos_root", Type: "text", Group: "Advanced", Label: "Repos root", Help: "Clones live at <repos root>/<repo>."},
+	{Key: "hook_timeout", Type: "text", Group: "Advanced", Label: "Hook timeout", Help: "Per hook run, e.g. 30m."},
+	{Key: "review.env_file", Type: "text", Group: "Advanced", Label: "Env file", Help: "Holds CLAUDE_CODE_OAUTH_TOKEN and a read-only GH_TOKEN."},
+	{Key: "review.prompt_file", Type: "text", Group: "Advanced", Label: "Prompt file", Help: "Go text/template prompt. Empty uses the built-in one."},
+	{Key: "review.claude_settings", Type: "text", Group: "Advanced", Label: "Claude settings", Help: "settings.json given to Claude in each run."},
+	{Key: "review.plugins_volume", Type: "text", Group: "Advanced", Label: "Plugins volume", Help: "Docker volume mounted as Claude's plugins/."},
 }
 
 // Settings returns the editable fields as path (over the defaults) has them now.

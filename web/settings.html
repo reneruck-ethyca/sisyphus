@@ -1,38 +1,73 @@
 {{template "head" "Settings"}}
-<header>
-  <h1>waterboy settings</h1>
-  <code>{{.Path}}</code>
-  <nav><a href="/">Status</a><a href="/logs">Logs</a></nav>
-</header>
-<main>
-{{with .Err}}<p class="err notice">{{.}}</p>{{end}}
-<p class="muted notice">Saved settings apply after a restart. Repos, hooks and env stay in the file.</p>
+{{template "top" .Top}}
+<main class="settings">
+<div class="pagehead">
+  <h1>Settings</h1>
+  <div class="muted">Saved to <code>{{.Path}}</code>. Changes apply after a restart; repos, hooks and env stay in the file.</div>
+</div>
+{{with .Err}}<p class="notice">{{.}}</p>{{end}}
 <form id="settings">
-{{range .Fields}}  <label><code>{{.Key}}</code>
-    {{if eq .Type "bool"}}<input type="checkbox" name="{{.Key}}"{{if .Value}} checked{{end}}>
-    {{else if eq .Type "number"}}<input type="number" step="any" name="{{.Key}}" value="{{.Value}}">
-    {{else}}<input name="{{.Key}}" value="{{.Value}}">{{end}}
-    <span class="muted">{{.Help}}</span></label>
-{{end}}  <p class="actions"><button>Save</button><button type="button" id="restart">Restart waterboy</button><span id="msg"></span></p>
+{{range .Groups}}{{if eq .Name "Advanced"}}<details class="fold" id="fold-advanced"><summary>Advanced
+  <span class="muted">{{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.Label}}{{end}}</span></summary>{{template "fields" .Fields}}</details>
+{{else}}<section class="card" aria-labelledby="g-{{.Name}}">
+  <div class="card-h"><h2 id="g-{{.Name}}">{{.Name}}</h2></div>
+  {{template "fields" .Fields}}
+</section>{{end}}
+{{end}}
 </form>
 </main>
+<div class="savebar" id="savebar" role="region" aria-label="Unsaved changes" hidden>
+  <span id="msg" role="status"></span>
+  <button type="button" class="btn quiet" id="discard">Discard</button>
+  <button type="submit" class="btn" id="save" form="settings">Save</button>
+  <button type="button" class="btn" id="restart" hidden>Restart waterboy</button>
+</div>
+
+{{define "fields"}}{{range .}}<div class="field">
+  <label for="f-{{.Key}}"><b>{{.Label}}</b><span class="muted">{{.Help}}</span><small>{{.Key}}</small></label>
+  <span class="control">
+  {{if eq .Type "bool"}}<input type="checkbox" id="f-{{.Key}}" name="{{.Key}}"{{if .Invert}} data-invert{{end}}{{if checked .}} checked{{end}}>
+  {{else if and .Options (not .Suggest)}}{{$v := .Value}}<select id="f-{{.Key}}" name="{{.Key}}">{{range .Options}}<option{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}</select>
+  {{else if eq .Type "number"}}<input type="number" step="any" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}">
+  {{else}}{{$k := .Key}}<input id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}"{{if .Options}} list="o-{{.Key}}"{{end}}>{{with .Options}}<datalist id="o-{{$k}}">{{range .}}<option value="{{.}}">{{end}}</datalist>{{end}}{{end}}
+  </span>
+</div>{{end}}{{end}}
+
 <script>
-  const form = document.getElementById("settings"), msg = document.getElementById("msg");
-  const say = (text, cls) => Object.assign(msg, {textContent: text, className: cls});
+  const form = document.getElementById("settings"), bar = document.getElementById("savebar"), msg = document.getElementById("msg");
+  const [save, discard, restart] = ["save", "discard", "restart"].map(id => document.getElementById(id));
+  const changed = () => [...form.elements].filter(el => el.name && (el.type === "checkbox" ? el.checked !== el.defaultChecked
+    : el.tagName === "SELECT" ? !el.selectedOptions[0]?.defaultSelected : el.value !== el.defaultValue));
+  const show = (text, saved) => {
+    msg.textContent = text;
+    bar.hidden = !text;
+    save.hidden = discard.hidden = saved;
+    restart.hidden = !saved;
+  };
+  // Mark what changed and say how much; only changed fields are saved, so defaults aren't pinned into the file.
+  const refresh = () => {
+    const c = changed();
+    form.querySelectorAll(".field").forEach(f => f.classList.toggle("dirty", c.some(el => f.contains(el))));
+    show(c.length ? `${c.length} unsaved change${c.length > 1 ? "s" : ""}` : "", false);
+  };
+  form.oninput = form.onchange = refresh;
+  discard.onclick = () => { form.reset(); refresh(); };
   form.onsubmit = async (e) => {
     e.preventDefault();
-    // Only changed fields, so defaults aren't pinned into the file.
-    const changed = [...form.elements].filter(el => el.name && (el.type === "checkbox" ? el.checked !== el.defaultChecked : el.value !== el.defaultValue));
-    if (!changed.length) return say("Nothing changed.", "muted");
-    const values = Object.fromEntries(changed.map(el => [el.name, el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value]));
+    const c = changed();
+    const values = Object.fromEntries(c.map(el => [el.name,
+      el.type === "checkbox" ? el.checked !== el.hasAttribute("data-invert") : el.type === "number" ? Number(el.value) : el.value]));
     const r = await fetch("/api/settings", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values)});
-    if (!r.ok) return say(await r.text(), "err");
-    changed.forEach(el => el.type === "checkbox" ? el.defaultChecked = el.checked : el.defaultValue = el.value);
-    say("Saved. Restart to apply.", "ok");
+    if (!r.ok) return (msg.textContent = await r.text());
+    c.forEach(el => el.type === "checkbox" ? el.defaultChecked = el.checked
+      : el.tagName === "SELECT" ? [...el.options].forEach(o => o.defaultSelected = o.selected) : el.defaultValue = el.value);
+    form.querySelectorAll(".dirty").forEach(f => f.classList.remove("dirty"));
+    show("Saved. Restart waterboy to apply.", true);
   };
-  document.getElementById("restart").onclick = async () => {
+  restart.onclick = async () => {
+    restart.disabled = true;
     await fetch("/api/restart", {method: "POST"});
-    say("Restarting…", "muted");
+    msg.textContent = "Restarting…";
     const back = async () => {
       try { if ((await fetch("/api/status")).ok) return location.reload(); } catch {}
       setTimeout(back, 1000);

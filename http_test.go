@@ -132,8 +132,8 @@ func TestHTTPSettings(t *testing.T) {
 func TestHTTPPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{
-		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "1 tracked", "Last run never"},
-		"/prs/ethyca/a/1": {"ethyca/a#1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `class="health ok"`, `href="https://github.com/octocat"`},
+		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "Starting…", "<h1>Overview</h1>", `class="chip neutral">Not reviewed`},
+		"/prs/ethyca/a/1": {"ethyca/a #1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `aria-current="page"`, `href="https://github.com/octocat"`},
 	} {
 		code, body := get(t, srv.URL+path)
 		if code != 200 {
@@ -276,7 +276,7 @@ func TestHTTPReviewRuns(t *testing.T) {
 	for path, want := range map[string]string{
 		"/prs/ethyca/a/1":                `href="/prs/ethyca/a/1/runs/` + run.ID + `"`,
 		"/prs/ethyca/a/1/runs/" + run.ID: `Found &lt;b&gt;one&lt;/b&gt; bug.`,
-		"/":                              `class="health succeeded"`,
+		"/":                              `class="chip neutral">Not posted`,
 		"/prs/ethyca/a/1/runs/" + run.ID + "/log":           "review <log>\n",
 		"/prs/ethyca/a/1/runs/" + run.ID + "/out/review.md": "# hi",
 	} {
@@ -303,7 +303,7 @@ func TestHTTPReviewRuns(t *testing.T) {
 func TestHTTPRunPageRendersEvents(t *testing.T) {
 	srv, _, run := newReviewServer(t)
 	_, body := get(t, srv.URL+"/prs/ethyca/a/1/runs/"+run.ID)
-	for _, want := range []string{`<div class="ev output">review &lt;log&gt;</div>`, `class="ev text"`, `class="ev result"`,
+	for _, want := range []string{`id="setup">review &lt;log&gt;`, `class="ev text"`, `class="ev result"`,
 		"success · 3 turns · 1m1s · $0.50", `data-live="false"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("run page missing %q", want)
@@ -353,10 +353,13 @@ func TestHTTPShowsRunningContainer(t *testing.T) {
 		t.Fatalf("active review = %+v", a)
 	}
 	_, body := get(t, srv.URL+"/")
-	for _, want := range []string{`class="active"`, `href="/prs/ethyca/a/1/runs/` + run.ID + `"`, a.Name} {
+	for _, want := range []string{`class="chip live">Reviewing`, `href="/prs/ethyca/a/1/runs/` + run.ID + `"`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("header missing %q", want)
+			t.Errorf("overview missing %q", want)
 		}
+	}
+	if _, body := get(t, srv.URL+"/prs/ethyca/a/1/runs/"+run.ID); !strings.Contains(body, a.Name) {
+		t.Errorf("run page missing container %q", a.Name)
 	}
 }
 
@@ -365,8 +368,8 @@ func TestHTTPShowsNoContainerWhenIdle(t *testing.T) {
 	if r := svc.Status().Reviewing; len(r) != 0 {
 		t.Fatalf("reviewing = %+v", r)
 	}
-	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "no review running") {
-		t.Error("idle header should say no review is running")
+	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "No review running.") {
+		t.Error("idle overview should say no review is running")
 	}
 }
 
