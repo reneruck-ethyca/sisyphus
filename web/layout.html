@@ -38,6 +38,7 @@
   .dot.ok { background: var(--ok); } .dot.error { background: var(--warn); } .dot.conflict { background: var(--bad); }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:not(.nowrap) { overflow-wrap: anywhere; } /* long errors and paths wrap instead of widening the page */
   th { font-weight: 600; color: var(--muted); font-size: 13px; }
   code { font: 12px ui-monospace, monospace; word-break: break-all; background: var(--code); padding: 0 .25rem; border-radius: 4px; }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.5rem; margin: 1rem 0 0; }
