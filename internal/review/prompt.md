@@ -21,7 +21,7 @@ This is your first review of this PR.
 1. Read the PR and its whole discussion in /waterboy/context/: `pr.json` (description, base branch),
    `reviews.json`, `review_comments.json` (inline comments, with their `id`s) and `issue_comments.json`.
    Your own earlier reviews are in there too.
-2. Perform an in-depth adversarial review of the change (`gh pr diff {{.PR.Number}} --repo {{.PR.Repo}}`).
+2. Perform an in-depth adversarial review of the change (`{{.Diff}}`).
    Go beyond reading the code: run it, and verify issues and behaviours empirically. Weigh each issue
    by how likely it is to actually occur and the impact it would have; ignore issues that are both
    unlikely and low impact. This is not your PR to fix: you are the reviewer.

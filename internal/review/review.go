@@ -32,6 +32,7 @@ type Job struct {
 	Reason    string          `json:"reason"`              // "new" | "commits" | "replies" | "manual"
 	Attempt   int             `json:"attempt,omitempty"`   // retries so far; 0 = first try
 	NotBefore time.Time       `json:"not_before,omitzero"` // a retry waits until then
+	Base      string          `json:"base,omitempty"`      // diff against this commit, not GitHub's diff (evals)
 }
 
 // Run statuses.
@@ -735,7 +736,7 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 		}
 	}
 	prompt, err := renderPrompt(cmp.Or(repo.PromptFile, r.cfg.PromptFile),
-		PromptData{PR: tr, Reason: run.Job.Reason, PreviousHead: r.previousHead(tr.Key()), Workdir: workdir})
+		PromptData{PR: tr, Reason: run.Job.Reason, PreviousHead: r.previousHead(tr.Key()), Workdir: workdir, Diff: diffCommand(run.Job)})
 	if err != nil {
 		return container.Spec{}, fmt.Errorf("prompt: %w", err)
 	}

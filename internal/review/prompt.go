@@ -2,6 +2,7 @@ package review
 
 import (
 	_ "embed"
+	"fmt"
 	"os"
 	"strings"
 	"text/template"
@@ -18,6 +19,14 @@ type PromptData struct {
 	Reason       string // new | commits | replies
 	PreviousHead string // head of this PR's last successful review ("" if none)
 	Workdir      string // where the worktree is inside the container
+	Diff         string // the command that shows the change
+}
+
+func diffCommand(j Job) string {
+	if j.Base != "" {
+		return fmt.Sprintf("git diff %s...HEAD", j.Base)
+	}
+	return fmt.Sprintf("gh pr diff %d --repo %s", j.PR.Number, j.PR.Repo)
 }
 
 // renderPrompt fills the template in file ("" = the built-in prompt).

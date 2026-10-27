@@ -10,12 +10,12 @@ import (
 )
 
 func TestRenderPrompt(t *testing.T) {
-	d := PromptData{PR: tracker.Tracked{PRRef: refA, Title: "Fix it", HeadSHA: "abc123", URL: "https://x/1"}, Reason: "new", Workdir: "/fidesplus"}
+	d := PromptData{PR: tracker.Tracked{PRRef: refA, Title: "Fix it", HeadSHA: "abc123", URL: "https://x/1"}, Reason: "new", Workdir: "/fidesplus", Diff: "git diff base1...HEAD"}
 	got, err := renderPrompt("", d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"#1 in ethyca/a", `"Fix it"`, "/fidesplus", "at abc123", "/out/review.json", "/waterboy/context/", "first review"} {
+	for _, want := range []string{"git diff base1...HEAD", "#1 in ethyca/a", `"Fix it"`, "/fidesplus", "at abc123", "/out/review.json", "/waterboy/context/", "first review"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("default prompt missing %q:\n%s", want, got)
 		}

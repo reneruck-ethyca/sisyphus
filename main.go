@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	"github.com/reneruck/waterboy/internal/app"
 	"github.com/reneruck/waterboy/internal/config"
 	"github.com/reneruck/waterboy/internal/container"
+	"github.com/reneruck/waterboy/internal/eval"
 	"github.com/reneruck/waterboy/internal/github"
 	"github.com/reneruck/waterboy/internal/review"
 	"github.com/reneruck/waterboy/internal/tracker"
@@ -37,6 +39,10 @@ func main() {
 	once := flag.Bool("once", false, "run a single tick and exit (no tray)")
 	reset := flag.String("reset", "", `wipe state for one PR ("owner/repo#n") or "all", then exit; stop the app first (make reset does)`)
 	shell := flag.String("shell", "", `open a shell in the container a review of PR "owner/repo#n" would run in`)
+	evalCases := flag.String("eval", "", "replay the gold review cases in this file or dir (README: Evals), then judge them")
+	evalOut := flag.String("eval-out", "", "where -eval puts its runs (default ~/.config/waterboy/eval/runs/<time>); with -judge, the runs to re-judge")
+	evalReps := flag.Int("eval-reps", 3, "runs per case")
+	judge := flag.Bool("judge", false, "re-judge the runs in -eval-out (after editing the cases) and rewrite its report")
 	flag.Parse()
 
 	// ponytail: 1000 lines covers several ticks; older lines are in the log file.
@@ -53,7 +59,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	gh := github.CLI{}
-	if cfg.User == "" && *reset == "" && *shell == "" { // before tracker.New: it keeps its own copy of cfg
+	if *judge {
+		if *evalOut == "" {
+			fatal(errors.New("-judge needs -eval-out"))
+		}
+		if err := eval.Judge(ctx, *evalOut, true); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if cfg.User == "" && *reset == "" && *shell == "" && *evalCases == "" { // before tracker.New: it keeps its own copy of cfg
 		if cfg.User, err = gh.CurrentUser(ctx); err != nil {
 			fatal(fmt.Errorf("resolving GitHub user: %w", err))
 		}
@@ -65,6 +80,12 @@ func main() {
 	tr := tracker.New(cfg, gh, st)
 	if *shell != "" {
 		if err := openShell(ctx, cfg, tr, gh, *shell); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if *evalCases != "" {
+		if err := runEval(ctx, cfg, tr, gh, *evalCases, *evalOut, *evalReps); err != nil {
 			fatal(err)
 		}
 		return
@@ -164,6 +185,21 @@ func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh g
 		return fmt.Errorf("docker run: %w", err) // 125: docker's own failure, not the shell's exit status
 	}
 	return nil
+}
+
+// runEval replays cases with this config; the runs and report go to out.
+func runEval(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh github.CLI, cases, out string, reps int) error {
+	cs, err := eval.LoadCases(cases)
+	if err != nil {
+		return err
+	}
+	if out == "" {
+		out = filepath.Join(filepath.Dir(config.DefaultPath()), "eval", "runs", time.Now().Format("20060102-150405"))
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	slog.Info("eval", "cases", len(cs), "reps", reps, "out", out)
+	return eval.Runner{Cfg: cfg, RT: container.Docker{}, GH: gh, Locks: tr.Locks, Out: out, Reps: reps}.Run(ctx, cs)
 }
 
 // restart re-execs waterboy with the same arguments, so saved settings apply.

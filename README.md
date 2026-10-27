@@ -229,6 +229,42 @@ the setup as a review does; `/waterboy/review.sh` runs setup and then Claude (it
 runs next to the app without touching its state, and refuses while a review of that PR is running.
 The app keeps syncing the worktree meanwhile, so new commits can move it under the shell.
 
+## Evals
+
+`bin/waterboy -eval <case file or dir>` replays past reviews to measure the reviewer: each case is a PR
+whose review (by people, or a run you trust) is the gold standard, written down as the findings it
+raised. A run reviews the PR in a fresh worktree at the head the gold review saw, diffs against the
+merge-base, and sees only the discussion from before the gold review; Claude gets no GitHub token, so
+it can't read the rest. Nothing is posted. Each case runs `-eval-reps` times (3), one run at a time,
+then a judge (`claude -p`, no tools) scores every run against its case and the report lands in
+`report.md` next to the runs (`-eval-out`, default `~/.config/waterboy/eval/runs/<time>`):
+
+- recall: gold findings found (1) or partly found (½), weighted must 3, should 2, nice 1; and the
+  same over must findings alone
+- false positives (including any `non_issues` the run reported), and plausible new findings the gold
+  review didn't raise: label those in the case, as findings or non-issues, then
+  `bin/waterboy -judge -eval-out <dir>` re-scores the runs against the edited cases
+- whether the verdict matches, how many findings the review says it reproduced, cost, turns, minutes
+- leaked: the PR's later commits or its merge commit showing up in the run's log. They're still in the
+  clone, so a run that went looking for them is marked, not prevented
+
+A variant is a waterboy config (`-config`): image, prompt, model and turn limit come from it, so to
+compare two, run the same cases with each and compare the reports. Run evals while the app is idle; they
+don't wait on `review.five_hour_percent`. Keep cases out of this repo (it's public); the default spot
+is `~/.config/waterboy/eval/cases/`. A case:
+
+```json
+{"pr": "ethyca/fidesplus#6529", "sha": "d963d1a7edb5", "cutoff": "2026-10-26T17:17:00Z",
+ "verdict": "REQUEST_CHANGES",
+ "findings": [{"id": "rbac-403", "weight": "must", "where": "src/fidesplus/api/v1/endpoints/x.py:40-52",
+               "what": "respondents get a 403 once RBAC is on", "source": "https://github.com/…#discussion_r1"}],
+ "non_issues": [{"id": "dup-query", "what": "the second query is intentional: it bypasses the cache"}],
+ "notes": "context the judge needs that the PR doesn't say"}
+```
+
+`sha` is the head the gold review saw and `cutoff` when it was written; `base` overrides the diff base
+(needed when the PR was merged with a merge commit).
+
 ## `on_conflict` hook
 
 Runs via `sh -c` with the worktree as cwd, at most 3 times per PR head (sync is retried after
