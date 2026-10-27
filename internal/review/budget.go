@@ -13,6 +13,13 @@ type Window struct {
 	Used     float64
 }
 
+// plausible rejects readings no real window has. The container's output also
+// carries setup steps running the PR's code, which could print fake readings;
+// this keeps one from holding reviews back past the current window.
+func (w Window) plausible(now time.Time) bool {
+	return w.Used >= 0 && w.Used <= 1 && w.ResetsAt.After(now) && w.ResetsAt.Before(now.Add(5*time.Hour+time.Minute))
+}
+
 // Span is how far a run saw one window's utilization rise, from its first
 // reading to its last. Replaying a run's log (after a restart) yields the same span.
 // ponytail: the first reading already includes the run's first call, so a run's

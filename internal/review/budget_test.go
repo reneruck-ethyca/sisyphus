@@ -20,6 +20,25 @@ func TestParseRateLimit(t *testing.T) {
 	}
 }
 
+func TestWindowPlausible(t *testing.T) {
+	now := time.Now()
+	for _, c := range []struct {
+		w    Window
+		want bool
+	}{
+		{Window{now.Add(time.Hour), 0.22}, true},
+		{Window{now.Add(5 * time.Hour), 1}, true},
+		{Window{now.Add(-time.Second), 0.2}, false},     // already reset
+		{Window{now.Add(1000 * time.Hour), 0.2}, false}, // would hold reviews back for weeks
+		{Window{now.Add(time.Hour), 1.5}, false},
+		{Window{now.Add(time.Hour), -0.1}, false},
+	} {
+		if got := c.w.plausible(now); got != c.want {
+			t.Errorf("%+v: plausible = %v", c.w, got)
+		}
+	}
+}
+
 func TestBudget(t *testing.T) {
 	now := time.Now()
 	cur, old := now.Add(time.Hour), now.Add(-time.Hour)

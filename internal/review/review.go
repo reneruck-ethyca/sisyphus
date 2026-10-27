@@ -960,7 +960,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 				result = res
 				r.record(id, run.ID, func(x *Run) { x.Claude = res })
 			}
-			if w != nil {
+			if w != nil && w.plausible(time.Now()) {
 				r.record(id, run.ID, func(x *Run) { x.Usage = observe(x.Usage, *w) })
 			}
 			r.publish(id, run.ID, evs)
