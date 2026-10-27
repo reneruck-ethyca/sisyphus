@@ -24,7 +24,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
 	r := cfg.Review
-	if r.Disabled || !r.Post || r.Model != "opus" || r.MaxTurns != 100 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
+	if r.Disabled || !r.Post || r.Model != "opus" || r.MaxTurns != 200 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
 		r.EnvFile != home+"/.config/waterboy/review.env" {
 		t.Errorf("bad review defaults: %+v", r)
 	}

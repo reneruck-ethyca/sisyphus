@@ -191,7 +191,7 @@ func defaults() Config {
 		Review: Review{
 			Post:          true,
 			Model:         "opus",
-			MaxTurns:      100,
+			MaxTurns:      200,
 			EnvFile:       "~/.config/waterboy/review.env",
 			PluginsVolume: "waterboy-claude-plugins",
 			Timeout:       Duration{60 * time.Minute},

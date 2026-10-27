@@ -79,7 +79,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.disabled` | `false` | don't run reviews |
 | `review.post` | `true` | post the agent's review to GitHub; `false` = dry run (review stays in `out/review.json`) |
 | `review.model` | `opus` | Claude model |
-| `review.max_turns` | `100` | Claude turn limit; hitting it fails the run |
+| `review.max_turns` | `200` | Claude turn limit; hitting it fails the run |
 | `review.max_budget_usd` | `0` (none) | spend limit (only enforced with API-key auth) |
 | `review.prompt_file` | built-in | Go `text/template` prompt (see `internal/review/prompt.md`) |
 | `review.env_file` | `~/.config/waterboy/review.env` | `CLAUDE_CODE_OAUTH_TOKEN`, and a read-only `GH_TOKEN` for `gh pr diff` (waterboy posts with your host `gh` login) |
