@@ -1033,8 +1033,13 @@ func (r *Reviewer) finish(run Run, status string, code int, err error, unlock fu
 		msg = err.Error()
 	}
 	r.record(id, run.ID, func(x *Run) { x.Status, x.ExitCode, x.Error, x.Finished = status, code, msg, time.Now() })
-	if run.Stack != nil {
-		r.stopStack(run.Stack.Project) // still holding the worktree, so the next run's up comes after
+	if run.Stack != nil { // still holding the worktree, so the next run's up comes after
+		switch status {
+		case Succeeded, Cancelled: // kept, stopped: the PR's next review starts on the same DB
+			r.stopStack(run.Stack.Project)
+		default: // failed or errored: its DB may be half set up, and nothing should be left behind
+			r.removeStacks(func(prID string) bool { return prID == id })
+		}
 	}
 	if unlock != nil {
 		unlock()

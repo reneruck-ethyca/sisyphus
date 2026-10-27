@@ -183,8 +183,26 @@ func TestStackFailureFailsRunWithoutContainer(t *testing.T) {
 	if run := f.runs()[0]; !strings.Contains(run.Error, "dev_datastores failed") {
 		t.Fatalf("error = %q", run.Error)
 	}
-	if got := sh.composed("stop"); !slices.Equal(got, []string{"proj-pr-1"}) {
-		t.Fatalf("half-started stack not stopped: %v", got)
+	if got := sh.composed("down"); !slices.Equal(got, []string{"proj-pr-1"}) || len(sh.composed("stop")) != 0 {
+		t.Fatalf("half-started stack not removed: down %v, stop %v", got, sh.composed("stop"))
+	}
+}
+
+// A failed review leaves no stack behind: containers, network and volumes go.
+func TestFailedReviewRemovesStack(t *testing.T) {
+	f, sh := stackFixture(t, withStack("", config.StackFromWorktree))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	f.rt.Finish(f.containers()[0].ID, 1, "npm error code ECONNRESET\n")
+	waitFor(t, "run to fail", f.lastStatus(Failed))
+	if got := sh.composed("down"); !slices.Equal(got, []string{"proj-pr-1"}) || len(sh.composed("stop")) != 0 {
+		t.Fatalf("down %v, stop %v", got, sh.composed("stop"))
+	}
+	f.r.mu.Lock()
+	defer f.r.mu.Unlock()
+	if len(f.r.st.Stacks) != 0 {
+		t.Fatalf("stack still recorded: %v", f.r.st.Stacks)
 	}
 }
 

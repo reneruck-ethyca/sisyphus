@@ -171,7 +171,8 @@ its compose project, `fidesplus-pr-<n>`, and volumes whichever mode started it),
 port that's taken ("port is already allocated"), waterboy retries with the next `PORT_OFFSET` slot and
 remembers the one that worked for that PR. Any other failure fails the run.
 
-After the run the stack is stopped, not removed, so the PR's next review starts on the same DB. It's
+After a succeeded (or cancelled) run the stack is stopped, not removed, so the PR's next review starts
+on the same DB. After a failed or errored one it's removed, volumes included: its DB may be half set up. It's
 removed with its volumes (`docker compose -p <project> down`, volumes by label) when the PR is
 dropped or reset.
 
