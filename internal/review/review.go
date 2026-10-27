@@ -787,6 +787,10 @@ const claudeDir = "/waterboy/claude"
 // script is the container's command: own the volumes, run the repo's setup,
 // then Claude headless on the rendered prompt.
 func (r *Reviewer) script(repo config.RepoReview, owned []string) string {
+	return r.setupScript(repo, owned) + r.claudeScript()
+}
+
+func (r *Reviewer) setupScript(repo config.RepoReview, owned []string) string {
 	var sb strings.Builder
 	sb.WriteString("set -eo pipefail\n")
 	for _, d := range owned {
@@ -806,6 +810,11 @@ echo "── waterboy: took $((SECONDS-t))s"
 `, shellQuote("── waterboy: setup: "+label+" ──"), limit, shellQuote(step),
 			shellQuote("── waterboy: timed out after "+r.cfg.StepTimeout.String()+" (setup_step_timeout)"))
 	}
+	return sb.String()
+}
+
+func (r *Reviewer) claudeScript() string {
+	var sb strings.Builder
 	sb.WriteString("echo '── waterboy: claude ──'\n")
 	args := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
 		"--model", r.cfg.Model, "--max-turns", strconv.Itoa(r.cfg.MaxTurns)}

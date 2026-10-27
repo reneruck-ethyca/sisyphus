@@ -42,6 +42,7 @@ make install-agent             # run at login via LaunchAgent; logs to ~/Library
 make start | stop | restart    # through the LaunchAgent if installed, else in the background
 make reset                     # stop, wipe all state (see below), start again
 make reset PR='ethyca/fidesplus#123'   # …just that PR
+make shell PR='ethyca/fidesplus#123'   # a shell in that PR's review container (see below)
 make uninstall-agent
 ```
 
@@ -201,6 +202,16 @@ Where `up` runs (`stack.from`, else `review.stack_from`):
 containers, local stacks, review history and run directories, the worktrees it created (a worktree it can't remove
 keeps its PR tracked, and the error says why), and the tracked entries. On start, waterboy rediscovers
 whatever still awaits your review as new: fresh worktree, fresh review.
+
+## Debug shell
+
+`make shell PR='owner/repo#n'` (`bin/waterboy -shell owner/repo#n`) opens bash in the container a review
+of that tracked PR would run in: same image, worktree and cache mounts, env files and variables,
+prompt and discussion, with its stack up and the container on its network. `/waterboy/setup.sh` runs
+the setup as a review does; `/waterboy/review.sh` runs setup and then Claude (its review lands in
+`/out`, nothing is posted). Exiting removes the container and stops the stack, keeping its volumes. It
+runs next to the app without touching its state, and refuses while a review of that PR is running.
+The app keeps syncing the worktree meanwhile, so new commits can move it under the shell.
 
 ## `on_conflict` hook
 

@@ -1008,3 +1008,40 @@ func TestTriggerQueuesManualReview(t *testing.T) {
 		t.Fatalf("reason = %q", f.rt.Started()[1].Env["WATERBOY_REASON"])
 	}
 }
+
+func TestShellIsTheReviewContainerWithBash(t *testing.T) {
+	f := newFixture(t, func(c *config.Review) {
+		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", Setup: "uv sync", Cache: []string{".venv"}}
+	})
+	spec, stop, err := f.r.Shell(context.Background(), f.tr)
+	defer stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Image != "reviewer:a" || spec.Workdir != "/a" || spec.Env["WATERBOY_HEAD_SHA"] != f.tr.HeadSHA ||
+		spec.Command[0] != "bash" || !strings.HasSuffix(spec.Command[2], "exec bash") {
+		t.Fatalf("spec = %+v", spec)
+	}
+	if spec.Labels["waterboy"] != "" || spec.Labels["waterboy.pr"] != "" {
+		t.Fatalf("labels = %v: the app would sweep it, or take it for a running review", spec.Labels)
+	}
+	scripts := map[string]string{}
+	for _, m := range spec.Mounts {
+		if name, ok := strings.CutPrefix(m.Target, "/waterboy/"); ok && strings.HasSuffix(name, ".sh") {
+			b, _ := os.ReadFile(m.Source)
+			scripts[name] = string(b)
+		}
+	}
+	if !strings.Contains(scripts["setup.sh"], "uv sync") || strings.Contains(scripts["setup.sh"], "claude") ||
+		!strings.HasPrefix(scripts["review.sh"], scripts["setup.sh"]) || !strings.Contains(scripts["review.sh"], "exec 'claude'") {
+		t.Fatalf("scripts = %q", scripts)
+	}
+
+	// Not next to a running review: its stack would be re-upped and stopped under it.
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	if _, _, err := f.r.Shell(context.Background(), f.tr); err == nil || !strings.Contains(err.Error(), "is running") {
+		t.Fatalf("err = %v, want refusal while a review runs", err)
+	}
+}

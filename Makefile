@@ -1,4 +1,4 @@
-.PHONY: build test plist install-agent uninstall-agent reviewer-image start stop restart reset
+.PHONY: build test plist install-agent uninstall-agent reviewer-image start stop restart reset shell
 
 LABEL := com.reneruck.waterboy
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -50,6 +50,12 @@ restart: stop start
 reset: build stop
 	bin/waterboy -reset '$(or $(PR),all)'
 	@$(MAKE) --no-print-directory start
+
+# A shell in the container a review of PR='owner/repo#n' would run in, with its
+# stack up; next to the running app.
+shell: build
+	@test -n '$(PR)' || { echo "usage: make shell PR='owner/repo#n'" >&2; exit 1; }
+	bin/waterboy -shell '$(PR)'
 
 install-agent: build plist
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -35,6 +36,7 @@ func main() {
 	configPath := flag.String("config", config.DefaultPath(), "config file (optional)")
 	once := flag.Bool("once", false, "run a single tick and exit (no tray)")
 	reset := flag.String("reset", "", `wipe state for one PR ("owner/repo#n") or "all", then exit; stop the app first (make reset does)`)
+	shell := flag.String("shell", "", `open a shell in the container a review of PR "owner/repo#n" would run in`)
 	flag.Parse()
 
 	// ponytail: 1000 lines covers several ticks; older lines are in the log file.
@@ -51,7 +53,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	gh := github.CLI{}
-	if cfg.User == "" && *reset == "" { // before tracker.New: it keeps its own copy of cfg
+	if cfg.User == "" && *reset == "" && *shell == "" { // before tracker.New: it keeps its own copy of cfg
 		if cfg.User, err = gh.CurrentUser(ctx); err != nil {
 			fatal(fmt.Errorf("resolving GitHub user: %w", err))
 		}
@@ -61,6 +63,12 @@ func main() {
 		fatal(err)
 	}
 	tr := tracker.New(cfg, gh, st)
+	if *shell != "" {
+		if err := openShell(ctx, cfg, tr, gh, *shell); err != nil {
+			fatal(err)
+		}
+		return
+	}
 	var rev *review.Reviewer // reviews state lives next to the tracker's
 	if !cfg.Review.Disabled {
 		if rev, err = review.New(cfg.Review, container.Docker{}, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
@@ -121,6 +129,40 @@ func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, 
 		return fmt.Errorf("reset %s: %w", which, err)
 	}
 	slog.Info("reset done", "which", which, "forgot", len(ids))
+	return nil
+}
+
+// openShell runs an interactive shell in the container a review of PR id would
+// run in, with its stack up, next to a running app. Its records go to a scratch
+// dir, so the app's state is left alone.
+// ponytail: the stack starts at the default PORT_OFFSET, not the one the app
+// remembered for it; a clash still retries with the next.
+func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh github.CLI, id string) error {
+	i := slices.IndexFunc(tr.Snapshot(), func(t tracker.Tracked) bool { return t.Key() == id })
+	if i < 0 {
+		return fmt.Errorf("%s isn't tracked: no worktree to open a shell on", id)
+	}
+	pr := tr.Snapshot()[i]
+	dir, err := os.MkdirTemp("", "waterboy-shell-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	rt := container.Docker{}
+	rev, err := review.New(cfg.Review, rt, tr.Locks, dir)
+	if err != nil {
+		return err
+	}
+	rev.GitHub = gh
+	spec, stop, err := rev.Shell(ctx, pr)
+	defer stop()
+	if err != nil {
+		return err
+	}
+	var exit *exec.ExitError
+	if err := rt.Interactive(ctx, spec); err != nil && !(errors.As(err, &exit) && exit.ExitCode() != 125) {
+		return fmt.Errorf("docker run: %w", err) // 125: docker's own failure, not the shell's exit status
+	}
 	return nil
 }
 

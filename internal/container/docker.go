@@ -49,6 +49,20 @@ func (d Docker) Start(ctx context.Context, s Spec) (string, error) {
 	return d.docker(ctx, pullTimeout, env, args...)
 }
 
+// Interactive runs s on this terminal (docker run -it --rm) until its command
+// exits, returning its exit status as docker reports it.
+func (Docker) Interactive(ctx context.Context, s Spec) error {
+	args, env, err := runArgs(s)
+	if err != nil {
+		return err
+	}
+	args = slices.Replace(args, 1, 2, "--interactive", "--tty", "--rm") // in place of --detach
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 // runArgs builds `docker run`. Env values travel in the CLI's own environment
 // (`-e NAME` copies it), so they never show up in argv.
 func runArgs(s Spec) (args, env []string, err error) {
