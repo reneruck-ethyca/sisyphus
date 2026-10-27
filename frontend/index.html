@@ -51,6 +51,18 @@
   .runhead h3 { margin: 24px 0 4px; }
   .overdue { color: var(--error); }
   .reviewing { display: flex; gap: 10px; flex-wrap: wrap; }
+  .menu { position: relative; display: inline-block; vertical-align: middle; font-size: 14px; font-weight: normal; }
+  .menu > summary { list-style: none; cursor: pointer; padding: 0 6px; border-radius: 6px; font-weight: 700; color: var(--muted); }
+  .menu > summary::-webkit-details-marker { display: none; }
+  .menu > summary:hover, .menu[open] > summary { background: var(--hover); }
+  .menu > div { position: absolute; right: 0; z-index: 10; margin-top: 4px; min-width: 240px; padding: 4px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--bg); box-shadow: 0 4px 16px rgb(0 0 0 / .15); }
+  .menu button { display: block; width: 100%; text-align: left; background: none; color: inherit; padding: 6px 8px; }
+  .menu button:hover { background: var(--hover); }
+  .menu button small { display: block; color: var(--muted); }
+  .menu button.danger { color: var(--bad); }
+  .ignored { padding: 8px 12px; font-size: 12px; color: var(--muted); }
+  .ignored button { background: none; color: var(--accent); padding: 0; }
   .reviewing a.active { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: 10px; background: var(--hover);
     color: var(--fg); text-decoration: none; font: 12px ui-monospace, monospace; }
   .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--pending); animation: pulse 1.4s ease-in-out infinite; }
@@ -156,7 +168,22 @@
   const sidebar = sel => `<aside>${status.prs.map(p => `<div class="pr${p.id === sel ? " sel" : ""}" data-id="${esc(p.id)}">
       <div class="row"><span class="dot ${esc(p.health)}" title="${esc(p.health)}"></span><strong>${esc(p.id)}</strong><span title="${esc(p.review_note ?? "")}">${reviewCell(p.review)}</span></div>
       <div class="title" title="${esc(p.title)}">${esc(p.title)}</div></div>`).join("")
-    || `<p class="muted" style="padding: 0 12px">No PRs tracked.</p>`}</aside>`;
+    || `<p class="muted" style="padding: 0 12px">No PRs tracked.</p>`}
+    ${status.ignored?.length ? `<div class="ignored">Untracked:${status.ignored.map(i => `<div>${esc(i.repo)}#${i.number}
+      <button data-action="track" data-pr="${esc(i.repo)}#${i.number}" title="${esc(i.title)}">track again</button></div>`).join("")}</div>` : ""}</aside>`;
+
+  // The PR's … menu and "track again": [UI method, what it removes (asked first)].
+  const ACTIONS = {
+    reset: ["ResetReviews", "Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays."],
+    wipe: ["Wipe", "Wipe the review data? Stops a running review, forgets the review history, and removes the stack: containers, network, DB volume, and its images unless something else uses them. The next review starts fresh."],
+    untrack: ["Untrack", "Untrack this PR? Wipes its review data and stack, removes the worktree and branch waterboy created, and stops tracking it. It isn't picked up again until you track it again."],
+    track: ["Retrack", ""],
+  };
+  const prMenu = id => `<details class="menu"><summary title="PR actions">…</summary><div>
+      <button data-action="reset" data-pr="${esc(id)}">Reset review status<small>forget history, review again</small></button>
+      <button data-action="wipe" data-pr="${esc(id)}">Wipe review data<small>+ stack containers, volumes, images</small></button>
+      <button class="danger" data-action="untrack" data-pr="${esc(id)}">Untrack PR<small>+ worktree; ignored until tracked again</small></button>
+    </div></details>`;
 
   const notices = () => {
     const s = status;
@@ -224,7 +251,8 @@
         ${stack.containers.map(c => `<tr><td>${esc(c.service)}</td><td><code>${esc(c.name)}</code></td><td class="${esc(c.state)}">${esc(c.status)}</td><td><code>${esc(c.image)}</code></td></tr>`).join("")}
         </tbody></table>` : `<p class="muted">No containers: the next review starts the stack.</p>`)
         + `<p class="muted">Volumes: ${list(stack.volumes)} · Network: ${list(stack.networks)}</p>` : ""}`;
-    return `<h2>${esc(p.title)} <span class="health ${p.health}">${p.health}</span></h2>
+    return `<h2>${esc(p.title)} <span class="health ${p.health}">${p.health}</span> ${prMenu(p.id)}</h2>
+      <p id="action-msg" class="muted"></p>
       ${p.last_error ? `<p class="err">${esc(p.last_error)}</p>` : ""}
       <dl>${[
         field("PR", `<a href="${esc(p.url)}" data-external>${esc(p.id)}</a>`),
@@ -240,7 +268,6 @@
       <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}
         <button data-review="${esc(p.id)}">Review now</button> <span id="review-msg" class="muted"></span></h3>
       <p class="muted">${esc(p.review_note ?? "")}</p>
-      <p><button data-wipe="${esc(p.id)}">Wipe review data…</button> <span id="wipe-msg" class="muted"></span></p>
       ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Started</th><th>Claude</th></tr></thead><tbody>
         ${p.review.runs.map(r => `<tr>
           <td><a href="${runHash(p.id, r.id)}">${esc(r.id)}</a>${r.overdue ? ` <span class="overdue" title="running longer than review.timeout">⚠</span>` : ""}</td>
@@ -253,14 +280,16 @@
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
-    if (e.target.dataset.wipe) {
-      const id = e.target.dataset.wipe;
-      if (!confirm(`Wipe ${id}?\n\nStops a running review and removes its stack (containers, network, DB volume), review containers, review history and run folders. Tracking and the worktree stay; the next review starts fresh.`)) return;
-      e.target.disabled = true;
-      Object.assign(document.getElementById("wipe-msg"), {textContent: "wiping…", className: "muted"});
-      return call("Wipe", id).then(render, err => {
-        Object.assign(document.getElementById("wipe-msg"), {textContent: err.message ?? err, className: "err"});
-        e.target.disabled = false;
+    const act = e.target.closest("[data-action]");
+    if (act) {
+      const {action, pr} = act.dataset, [method, ask] = ACTIONS[action];
+      if (ask && !confirm(`${pr}: ${ask}`)) return;
+      act.disabled = true;
+      const msg = document.getElementById("action-msg");
+      if (msg) Object.assign(msg, {textContent: `${action}…`, className: "muted"});
+      return call(method, pr).then(() => { if (action === "untrack") location.hash = ""; render(); }, err => {
+        if (msg) Object.assign(msg, {textContent: err.message ?? err, className: "err"}); else alert(err.message ?? err);
+        act.disabled = false;
       });
     }
     if (e.target.dataset.review) {

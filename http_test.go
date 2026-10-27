@@ -410,3 +410,35 @@ func TestHTTPWipe(t *testing.T) {
 		t.Fatalf("untracked: %d", resp.StatusCode)
 	}
 }
+
+func TestHTTPPRActions(t *testing.T) {
+	srv, svc, _ := newReviewServer(t)
+	post := func(action string) int {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/api/prs/ethyca/a/1/"+action, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post("reset"); code != http.StatusNoContent {
+		t.Fatalf("reset: %d", code)
+	}
+	if code := post("nope"); code != http.StatusNotFound {
+		t.Fatalf("unknown action: %d", code)
+	}
+	if code := post("untrack"); code != http.StatusNoContent {
+		t.Fatalf("untrack: %d", code)
+	}
+	if st := svc.Status(); len(st.PRs) != 0 || len(st.Ignored) != 1 {
+		t.Fatalf("after untrack: PRs %d, ignored %+v", len(st.PRs), st.Ignored)
+	}
+	_, body := get(t, srv.URL+"/")
+	if !strings.Contains(body, `data-action="track"`) {
+		t.Fatal("dashboard doesn't offer to track the PR again")
+	}
+	if code := post("track"); code != http.StatusNoContent || len(svc.Status().Ignored) != 0 {
+		t.Fatalf("track: %d, ignored %+v", code, svc.Status().Ignored)
+	}
+}

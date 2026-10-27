@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -152,8 +153,16 @@ func newHandler(svc *app.Service) http.Handler {
 		}
 		render(w, "index.html", d)
 	})
-	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/wipe", func(w http.ResponseWriter, r *http.Request) {
-		if err := svc.Wipe(r.Context(), prID(r)); err != nil {
+	// The PR page's … menu: reset (reviews), wipe (+ stack), untrack (+ tracking); track undoes untrack.
+	actions := map[string]func(context.Context, string) error{
+		"reset": svc.ResetReviews, "wipe": svc.Wipe, "untrack": svc.Untrack, "track": svc.Retrack}
+	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		act, ok := actions[r.PathValue("action")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if err := act(r.Context(), prID(r)); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

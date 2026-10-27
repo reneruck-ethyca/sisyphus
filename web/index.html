@@ -20,14 +20,24 @@
   {{else}}
     <p class="muted" style="padding: 0 1rem">No PRs tracked.</p>
   {{end}}
+  {{with .Ignored}}<div class="ignored">Untracked:{{range .}}<div>{{.Key}} <button data-action="track" data-pr="{{.Key}}"
+    data-src="/api/prs/{{.Repo}}/{{.Number}}/track" title="{{.Title}}">track again</button></div>{{end}}</div>{{end}}
 </aside>
 <main>
 {{with .LastError}}<p class="err notice">Last run failed: {{.}}</p>{{end}}
 {{if not .Reviews}}<p class="muted notice">Reviews are disabled (review.disabled).</p>{{end}}
 {{with .RuntimeError}}<p class="err notice">Reviews are waiting for the container runtime: {{.}}</p>{{end}}
 {{with .PR}}
-<h2>{{.Title}}</h2>
-<div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span></div>
+<h2>{{.Title}}
+  <details class="menu"><summary title="PR actions">…</summary><div>{{$api := printf "/api/prs/%s/%d" .Repo .Number}}
+    <button data-action="reset" data-pr="{{.ID}}" data-src="{{$api}}/reset"
+      data-confirm="Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays.">Reset review status<small>forget history, review again</small></button>
+    <button data-action="wipe" data-pr="{{.ID}}" data-src="{{$api}}/wipe"
+      data-confirm="Wipe the review data? Stops a running review, forgets the review history, and removes the stack: containers, network, DB volume, and its images unless something else uses them. The next review starts fresh.">Wipe review data<small>+ stack containers, volumes, images</small></button>
+    <button class="danger" data-action="untrack" data-pr="{{.ID}}" data-src="{{$api}}/untrack" data-then="/"
+      data-confirm="Untrack this PR? Wipes its review data and stack, removes the worktree and branch waterboy created, and stops tracking it. It isn't picked up again until you track it again.">Untrack PR<small>+ worktree; ignored until tracked again</small></button>
+  </div></details></h2>
+<div><a href="{{.URL}}">{{.ID}} ↗</a> <span class="health {{.Health}}">{{.Health}}</span> <span id="action-msg" class="muted"></span></div>
 <dl>
   <dt>Author</dt><dd><a href="https://github.com/{{.Author}}">{{or .Author "—"}}</a></dd>
   <dt>Branch</dt><dd><code>{{.HeadRef}}</code></dd>
@@ -56,7 +66,6 @@
 <h3>Reviews {{with .Review.State}}<span class="health {{.}}">{{.}}</span>{{end}}
   <button id="review-now" data-src="/api/prs/{{.Repo}}/{{.Number}}/review">Review now</button> <span id="review-msg" class="muted"></span></h3>
 <p class="muted">{{.ReviewNote}}</p>
-<p><button id="wipe" data-src="/api/prs/{{.Repo}}/{{.Number}}/wipe" data-pr="{{.ID}}">Wipe review data…</button> <span id="wipe-msg" class="muted"></span></p>
 <table>
   <thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Exit</th><th>Started</th><th>Finished</th><th>Error</th></tr></thead>
   <tbody>
@@ -124,19 +133,22 @@
   }
   if (events) scrollTo(0, document.body.scrollHeight);
 
-  const wipe = document.getElementById("wipe");
-  if (wipe) wipe.onclick = async (e) => {
-    if (!confirm(`Wipe ${e.target.dataset.pr}?\n\nStops a running review and removes its stack (containers, network, DB volume), review containers, review history and run folders. Tracking and the worktree stay; the next review starts fresh.`)) return;
-    e.target.disabled = true;
-    Object.assign(document.getElementById("wipe-msg"), {textContent: "wiping…", className: "muted"});
-    const r = await fetch(e.target.dataset.src, {method: "POST"});
+  // The PR's … menu and "track again": each action confirms what it removes, then reloads.
+  document.querySelectorAll("[data-action]").forEach(b => b.onclick = async (e) => {
+    const el = e.currentTarget, {action, pr, src, confirm: ask, then} = el.dataset;
+    if (ask && !confirm(`${pr}: ${ask}`)) return;
+    el.disabled = true;
+    const msg = document.getElementById("action-msg");
+    if (msg) Object.assign(msg, {textContent: `${action}…`, className: "muted"});
+    const r = await fetch(src, {method: "POST"});
     if (!r.ok) {
-      Object.assign(document.getElementById("wipe-msg"), {textContent: await r.text(), className: "err"});
-      e.target.disabled = false;
+      const text = await r.text();
+      if (msg) Object.assign(msg, {textContent: text, className: "err"}); else alert(text);
+      el.disabled = false;
       return;
     }
-    location.reload();
-  };
+    location.href = then || location.href;
+  });
 
   const reviewNow = document.getElementById("review-now");
   if (reviewNow) reviewNow.onclick = async (e) => {

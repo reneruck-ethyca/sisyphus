@@ -196,6 +196,21 @@ Where `up` runs (`stack.from`, else `review.stack_from`):
   branch it's on.
 
 
+## PR actions
+
+The `…` menu on a PR's page (dashboard and window), each confirmed first and run between ticks:
+
+- **Reset review status**: stops a running review, forgets the PR's review history, run dirs and
+  queued jobs; a fresh review is queued. The stack stays.
+- **Wipe review data**: the same, plus the PR's stack (containers, network, DB volume) and the images
+  its containers ran, unless other containers use them. Tracking and the worktree stay; the reviewer
+  image and per-repo caches are shared, so they stay too.
+- **Untrack PR**: wipe, then forget the PR and remove the worktree and branch waterboy created. It's
+  ignored from then on, even while it requests your review; the PR list's "Untracked" footer tracks it
+  again.
+
+The PR page also shows its stack as Docker has it: containers with state and image, volumes, network.
+
 ## Reset
 
 `make reset` (or `bin/waterboy -reset all|owner/repo#n` with the app stopped) removes waterboy's review

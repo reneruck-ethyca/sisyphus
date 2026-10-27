@@ -30,8 +30,11 @@ func (u *UI) Stack(id string) (*review.StackStatus, error) {
 	return u.svc.Stack(context.Background(), id)
 }
 
-// Wipe removes a PR's review data (stack with volumes, review containers, history).
-func (u *UI) Wipe(id string) error { return u.svc.Wipe(context.Background(), id) }
+// The PR page's … menu (see app.Service for what each removes).
+func (u *UI) ResetReviews(id string) error { return u.svc.ResetReviews(context.Background(), id) }
+func (u *UI) Wipe(id string) error         { return u.svc.Wipe(context.Background(), id) }
+func (u *UI) Untrack(id string) error      { return u.svc.Untrack(context.Background(), id) }
+func (u *UI) Retrack(id string) error      { return u.svc.Retrack(context.Background(), id) }
 
 // ReviewNow queues a full review of a tracked PR.
 func (u *UI) ReviewNow(id string) error { return u.svc.ReviewNow(id) }

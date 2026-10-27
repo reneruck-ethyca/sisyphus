@@ -262,17 +262,58 @@ docker network ls --filter "$f" --format 'n	{{.Name}}'`, &out)
 	return s, nil
 }
 
-// Wipe removes everything waterboy keeps for a PR's reviews, with the app
-// running: it stops a running review, waits for it to let go of the worktree,
-// then forgets it (stack with volumes, review containers, history, run dirs,
-// queued jobs). Tracking and the worktree stay; images and per-repo caches too.
-func (r *Reviewer) Wipe(ctx context.Context, prID string) error {
-	r.cancel(prID, errReset)
-	unlock, err := r.locks.Lock(ctx, prID) // the stack's network can't go while the review container is on it
+// ResetReviews forgets a PR's reviews with the app running: it stops a running
+// review, waits for it to let go of the worktree, then drops its queued jobs,
+// review containers, history and run dirs. The stack stays. With no history
+// left, the PR gets a fresh review after the next tick (Ensure).
+func (r *Reviewer) ResetReviews(ctx context.Context, prID string) error {
+	unlock, err := r.stopAndLock(ctx, prID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	slog.Info("wiping review data", "pr", prID)
-	return r.Forget(ctx, prID)
+	slog.Info("resetting reviews", "pr", prID)
+	return r.forget(ctx, prID, false)
+}
+
+// Wipe is ResetReviews plus the PR's stack (containers, network, volumes, found
+// on Docker whether or not waterboy recorded it) and the images its containers
+// ran, unless other containers still use them. Tracking and the worktree stay;
+// the reviewer image and per-repo caches are shared, so they stay too.
+func (r *Reviewer) Wipe(ctx context.Context, tr tracker.Tracked) error {
+	id := tr.Key()
+	unlock, err := r.stopAndLock(ctx, id) // the stack's network can't go while the review container is on it
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	slog.Info("wiping review data", "pr", id)
+	err = r.forget(ctx, id, true)
+	stack, serr := r.StackStatus(ctx, tr)
+	if serr != nil || stack == nil {
+		return errors.Join(err, serr)
+	}
+	if len(stack.Containers)+len(stack.Volumes)+len(stack.Networks) > 0 {
+		err = errors.Join(err, r.downStack(stack.Project))
+	}
+	images := map[string]bool{}
+	for _, c := range stack.Containers {
+		images[c.Image] = true
+	}
+	for img := range images {
+		var out bytes.Buffer
+		if r.sh(ctx, "", []string{"WATERBOY_IMAGE=" + img}, `docker image rm "$WATERBOY_IMAGE"`, &out) != nil {
+			slog.Info("keeping image", "image", img, "why", lastLines(out.String(), 1)) // in use elsewhere
+		} else {
+			slog.Info("removed image", "image", img)
+		}
+	}
+	return err
+}
+
+// stopAndLock stops a PR's running review and takes its worktree lock once the
+// run has let go of it.
+func (r *Reviewer) stopAndLock(ctx context.Context, prID string) (func(), error) {
+	r.cancel(prID, errReset)
+	return r.locks.Lock(ctx, prID)
 }

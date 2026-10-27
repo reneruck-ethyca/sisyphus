@@ -32,7 +32,15 @@ type Tracked struct {
 }
 
 type State struct {
-	PRs map[string]*Tracked `json:"prs"` // key = PRRef.Key()
+	PRs     map[string]*Tracked `json:"prs"`               // key = PRRef.Key()
+	Ignored map[string]Ignored  `json:"ignored,omitempty"` // untracked by hand: never picked up again until re-tracked
+}
+
+// Ignored is a PR the user untracked.
+type Ignored struct {
+	github.PRRef
+	Title string    `json:"title"`
+	At    time.Time `json:"at"`
 }
 
 // LoadState reads the state file. Missing = empty; corrupt = error, never a

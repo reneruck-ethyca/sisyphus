@@ -381,3 +381,32 @@ func TestTickRefusesEmptyUser(t *testing.T) {
 		t.Fatalf("err %v, PR calls %d", err, gh.PRCalls)
 	}
 }
+
+// An untracked PR is forgotten and never looked at again, though it still requests
+// a review, until it's re-tracked.
+func TestUntrackIgnoresUntilRetracked(t *testing.T) {
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{
+		refA.Key(): {PRRef: refA, State: "open", HeadRepo: refA.Repo, RequestedReviewers: []string{"me"}}}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, Title: "T", Worktree: filepath.Join(t.TempDir(), "gone")})
+	ctx := context.Background()
+	if err := tr.Untrack(ctx, refA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Tick(ctx); err != nil || len(tr.state.PRs) != 0 || gh.PRCalls != 0 {
+		t.Fatalf("err %v, tracked %+v, PR fetched %d times", err, tr.state.PRs, gh.PRCalls)
+	}
+	reloaded, _ := LoadState(tr.cfg.StateFile)
+	if ig := tr.IgnoredPRs(); len(ig) != 1 || ig[0].Title != "T" || len(reloaded.Ignored) != 1 {
+		t.Fatalf("ignored = %+v (saved %+v)", ig, reloaded.Ignored)
+	}
+	if err := tr.Untrack(ctx, refA.Key()); err == nil {
+		t.Fatal("untracked an untracked PR")
+	}
+	if err := tr.Retrack(refA.Key()); err != nil || len(tr.IgnoredPRs()) != 0 {
+		t.Fatalf("retrack: %v, %+v", err, tr.IgnoredPRs())
+	}
+	tr.Tick(ctx)
+	if gh.PRCalls == 0 {
+		t.Fatal("re-tracked PR not looked at again")
+	}
+}

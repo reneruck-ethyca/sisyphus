@@ -136,6 +136,7 @@ func TestReviewNote(t *testing.T) {
 	}{
 		{"disabled", review.PRStatus{}, false, "", "", "reviews are disabled"},
 		{"running", running, true, "", "", "reviewing (new)"},
+		{"running, history just reset", review.PRStatus{State: "running"}, true, "", "", "stopping a review"},
 		{"queued", queued, true, "", "", "queued"},
 		{"retry waiting", retrying, true, "", "", "queued: retry 2 at " + at + " after: exited 1 before Claude finished"},
 		{"queued, blocked", queued, true, "env file missing: /x", "", "queued, waiting: env file missing: /x"},
@@ -149,5 +150,38 @@ func TestReviewNote(t *testing.T) {
 		if got := reviewNote(tr, c.rs, c.reviews, c.blocked, c.runtime); got != c.want {
 			t.Errorf("%s: got %q\nwant %q", c.name, got, c.want)
 		}
+	}
+}
+
+// Actions run on the loop between ticks; with the loop running they still finish.
+func TestUntrackAndRetrackOnTheLoop(t *testing.T) {
+	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA}, PRs: map[string]github.PR{
+		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}}}}
+	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"})
+	s := NewService(cfg, tr, nil, NewLogBuffer(10)) // reviews disabled: untracking still works
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go s.Run(ctx)
+	for !s.looping.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	if err := s.Untrack(ctx, testkit.RefA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status()
+	if len(st.PRs) != 0 || len(st.Ignored) != 1 || st.Ignored[0].Key() != testkit.RefA.Key() {
+		t.Fatalf("PRs %+v, ignored %+v", st.PRs, st.Ignored)
+	}
+	if err := s.Untrack(ctx, testkit.RefA.Key()); err == nil {
+		t.Fatal("untracked twice")
+	}
+	if err := s.Retrack(ctx, testkit.RefA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Status().Ignored) != 0 {
+		t.Fatalf("still ignored: %+v", s.Status().Ignored)
+	}
+	if err := s.ResetReviews(ctx, testkit.RefA.Key()); err == nil {
+		t.Fatal("reset with reviews disabled")
 	}
 }

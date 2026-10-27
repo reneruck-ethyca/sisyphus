@@ -262,7 +262,10 @@ func (r *Reviewer) once(key string) bool {
 // Forget wipes a PR's review state ("" = every PR's): its queued job, run records
 // and run directories, and its review containers; a review this process is
 // running is stopped. Meant for `waterboy -reset`, with the app stopped.
-func (r *Reviewer) Forget(ctx context.Context, prID string) error {
+func (r *Reviewer) Forget(ctx context.Context, prID string) error { return r.forget(ctx, prID, true) }
+
+// forget is Forget, leaving stacks alone unless withStacks.
+func (r *Reviewer) forget(ctx context.Context, prID string, withStacks bool) error {
 	match := func(id string) bool { return prID == "" || id == prID }
 	r.mu.Lock()
 	r.st.Queue = slices.DeleteFunc(r.st.Queue, func(j Job) bool { return match(j.PR.Key()) })
@@ -290,7 +293,9 @@ func (r *Reviewer) Forget(ctx context.Context, prID string) error {
 	for _, c := range cs {
 		err = errors.Join(err, r.rt.Remove(ctx, c.ID))
 	}
-	err = errors.Join(err, r.removeStacks(match))
+	if withStacks {
+		err = errors.Join(err, r.removeStacks(match))
+	}
 	err = errors.Join(err, os.RemoveAll(filepath.Join(r.dir, "runs", prPath(prID))))
 	slog.Info("forgot reviews", "pr", cmp.Or(prID, "all"), "containers_removed", len(cs))
 	r.changed()

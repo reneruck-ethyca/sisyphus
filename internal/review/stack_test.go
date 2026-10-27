@@ -14,6 +14,7 @@ import (
 
 	"github.com/reneruck/waterboy/internal/config"
 	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/waterboy/internal/tracker"
 )
 
 // fakeShell records host-side stack commands; fn decides each one's outcome.
@@ -299,15 +300,44 @@ func TestWipeStopsRunningReviewThenRemovesEverything(t *testing.T) {
 	f.start(t)
 	f.r.Tracked(f.tr)
 	waitFor(t, "container start", f.started(1))
-	if err := f.r.Wipe(context.Background(), refA.Key()); err != nil {
+	sh.fn = func(c shellCall, out io.Writer) error {
+		if strings.Contains(c.Script, "docker ps -a") { // the stack as Docker has it
+			io.WriteString(out, "c\tdb-pr-1\tdb\texited\tExited (0)\tpostgres:17\nv\tproj-pr-1_postgres\n")
+		}
+		return nil
+	}
+	if err := f.r.Wipe(context.Background(), f.tr); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.containers()) != 0 || len(f.runs()) != 0 || len(sh.composed("down")) == 0 {
 		t.Fatalf("left: containers %d, runs %d, down %v", len(f.containers()), len(f.runs()), sh.composed("down"))
+	}
+	if !slices.ContainsFunc(sh.get(), func(c shellCall) bool {
+		return strings.Contains(c.Script, "docker image rm") && c.Env[0] == "WATERBOY_IMAGE=postgres:17"
+	}) {
+		t.Fatal("the stack's image wasn't removed")
 	}
 	f.r.mu.Lock()
 	defer f.r.mu.Unlock()
 	if len(f.r.st.Stacks) != 0 || len(f.r.st.Queue) != 0 || len(f.r.active) != 0 {
 		t.Fatalf("stacks %v, queue %v, active %v", f.r.st.Stacks, f.r.st.Queue, f.r.active)
 	}
+}
+
+// Reset forgets the reviews but keeps the stack, and the PR gets a fresh review.
+func TestResetReviewsKeepsStack(t *testing.T) {
+	f, sh := stackFixture(t, withStack("", config.StackFromWorktree))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	if err := f.r.ResetReviews(context.Background(), refA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.containers()) != 0 || len(f.runs()) != 0 || len(sh.composed("down")) != 0 {
+		t.Fatalf("containers %d, runs %d, down %v", len(f.containers()), len(f.runs()), sh.composed("down"))
+	}
+	tr := f.tr
+	tr.AnnouncedSHA = tr.HeadSHA
+	f.r.Ensure([]tracker.Tracked{tr})
+	waitFor(t, "a fresh review", func() bool { return len(f.rt.Started()) == 2 })
 }

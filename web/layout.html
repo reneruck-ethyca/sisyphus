@@ -75,6 +75,18 @@
   #settings label { display: grid; grid-template-columns: 13rem 18rem 1fr; gap: .25rem 1rem; align-items: center; padding: .4rem 0; border-bottom: 1px solid var(--line); }
   #settings input:not([type=checkbox]) { font: inherit; padding: .2rem .4rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
   #settings input[type=checkbox] { justify-self: start; }
+  .menu { position: relative; display: inline-block; vertical-align: middle; }
+  .menu > summary { list-style: none; cursor: pointer; padding: 0 .5rem; border-radius: 6px; font-weight: 700; color: var(--muted); }
+  .menu > summary::-webkit-details-marker { display: none; }
+  .menu > summary:hover, .menu[open] > summary { background: var(--hover); }
+  .menu > div { position: absolute; right: 0; z-index: 10; margin-top: .25rem; min-width: 16rem; padding: .25rem; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--bg); box-shadow: 0 4px 16px rgb(0 0 0 / .15); }
+  .menu button { display: block; width: 100%; text-align: left; background: none; color: inherit; padding: .4rem .6rem; }
+  .menu button:hover { background: var(--hover); }
+  .menu button small { display: block; color: var(--muted); }
+  .menu button.danger { color: var(--bad); }
+  .ignored { padding: .6rem 1rem; font-size: 13px; color: var(--muted); }
+  .ignored button { background: none; color: var(--accent); padding: 0; }
   .actions { display: flex; gap: .75rem; align-items: center; } .actions button { flex: none; }
   @media (max-width: 700px) { #settings label { grid-template-columns: 1fr; } }
   @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; } }

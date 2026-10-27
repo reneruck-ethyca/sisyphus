@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/reneruck/waterboy/internal/config"
@@ -27,8 +28,9 @@ type Status struct {
 	PRs       []PRView  `json:"prs"`                  // sorted by ID
 	Reviews   bool      `json:"reviews"`              // false when review.disabled
 	// Why reviews are waiting on the container runtime ("" = they aren't).
-	RuntimeError string         `json:"runtime_error,omitempty"`
-	Reviewing    []ActiveReview `json:"reviewing"` // review runs in progress, oldest first
+	RuntimeError string            `json:"runtime_error,omitempty"`
+	Reviewing    []ActiveReview    `json:"reviewing"` // review runs in progress, oldest first
+	Ignored      []tracker.Ignored `json:"ignored"`   // PRs untracked by hand
 }
 
 // ActiveReview is a review run in progress and its container.
@@ -76,6 +78,9 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 	short := func(sha string) string { return sha[:min(len(sha), 8)] }
 	switch rs.State {
 	case "running":
+		if len(rs.Runs) == 0 { // a stopped run whose history was just reset, still letting go
+			return "stopping a review"
+		}
 		return "reviewing (" + rs.Runs[0].Job.Reason + ")"
 	case "queued":
 		switch {
@@ -125,6 +130,8 @@ type Service struct {
 	rev     *review.Reviewer // nil when reviews are disabled
 	logs    *LogBuffer
 	runNow  chan struct{}
+	ops     chan func(context.Context) // run by the loop between ticks: they touch tracker state
+	looping atomic.Bool                // Run's loop is up to take ops
 
 	mu      sync.Mutex
 	tracked []tracker.Tracked // last tracker snapshot
@@ -134,7 +141,7 @@ type Service struct {
 
 // NewService wires the tracker, the reviewer (nil = reviews disabled) and the log buffer.
 func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *LogBuffer) *Service {
-	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1)}
+	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1), ops: make(chan func(context.Context))}
 	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String(), Reviews: rev != nil}
 	tr.OnSave = s.refreshPRs // tracker saves mid-tick, so UIs see progress
 	if rev != nil {
@@ -220,13 +227,53 @@ func (s *Service) Stack(ctx context.Context, id string) (*review.StackStatus, er
 	return s.rev.StackStatus(ctx, tr)
 }
 
-// Wipe removes a PR's review data: a running review, its stack with volumes,
-// review containers, history and run dirs. Tracking and the worktree stay.
-func (s *Service) Wipe(ctx context.Context, id string) error {
-	if _, err := s.trackedPR(id); err != nil {
+// ResetReviews forgets a PR's reviews (history, queued jobs, a running review)
+// and queues a fresh one; its stack stays.
+func (s *Service) ResetReviews(ctx context.Context, id string) error {
+	return s.do(ctx, func(ctx context.Context) error {
+		if _, err := s.trackedPR(id); err != nil {
+			return err
+		}
+		err := s.rev.ResetReviews(ctx, id)
+		s.rev.Ensure(s.tracker.Snapshot())
 		return err
+	})
+}
+
+// Wipe is ResetReviews plus the PR's stack with its volumes and images; the
+// next review starts on a fresh stack. Tracking and the worktree stay.
+func (s *Service) Wipe(ctx context.Context, id string) error {
+	return s.do(ctx, func(ctx context.Context) error {
+		tr, err := s.trackedPR(id)
+		if err != nil {
+			return err
+		}
+		err = s.rev.Wipe(ctx, tr)
+		s.rev.Ensure(s.tracker.Snapshot())
+		return err
+	})
+}
+
+// Untrack is Wipe plus forgetting the PR (its worktree and branch, if waterboy
+// created them); it isn't picked up again until Retrack.
+func (s *Service) Untrack(ctx context.Context, id string) error {
+	return s.do(ctx, func(ctx context.Context) error {
+		if tr, err := s.trackedPR(id); err == nil {
+			if err := s.rev.Wipe(ctx, tr); err != nil {
+				return fmt.Errorf("%s stays tracked: %w", id, err)
+			}
+		}
+		return s.tracker.Untrack(ctx, id) // also without reviews; errors for an untracked id
+	})
+}
+
+// Retrack stops ignoring an untracked PR and syncs, picking it up if it still requests a review.
+func (s *Service) Retrack(ctx context.Context, id string) error {
+	err := s.do(ctx, func(context.Context) error { return s.tracker.Retrack(id) })
+	if err == nil {
+		s.RunNow()
 	}
-	return s.rev.Wipe(ctx, id)
+	return err
 }
 
 // Logs returns the most recent ops log entries, oldest first.
@@ -264,14 +311,39 @@ func (s *Service) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(s.cfg.Interval.Duration)
 	defer ticker.Stop()
+	s.looping.Store(true)
+	defer s.looping.Store(false)
 	for {
 		s.RunOnce(ctx)
+	wait:
 		select {
 		case <-ticker.C:
 		case <-s.runNow:
+		case op := <-s.ops:
+			op(ctx)
+			goto wait
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// do runs fn on the loop, between ticks (waiting for a running one), and returns its error.
+func (s *Service) do(ctx context.Context, fn func(context.Context) error) error {
+	if !s.looping.Load() { // -once, tests: nothing ticks meanwhile
+		return fn(ctx)
+	}
+	done := make(chan error, 1)
+	select {
+	case s.ops <- func(loopCtx context.Context) { done <- fn(loopCtx) }:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err() // it still finishes on the loop
 	}
 }
 
@@ -305,10 +377,11 @@ func (s *Service) RunOnce(ctx context.Context) {
 
 // refreshPRs copies tracker state. It must run on the goroutine that ticks.
 func (s *Service) refreshPRs() {
-	snap := s.tracker.Snapshot()
+	snap, ignored := s.tracker.Snapshot(), s.tracker.IgnoredPRs()
 	s.mu.Lock()
 	s.tracked = snap
 	s.mu.Unlock()
+	s.update(func(st *Status) { st.Ignored = ignored })
 	s.publish()
 }
 

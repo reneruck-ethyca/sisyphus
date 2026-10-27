@@ -78,6 +78,9 @@ func (t *Tracker) Tick(ctx context.Context) error {
 	}
 	added := map[string]bool{}
 	for _, ref := range refs {
+		if _, ignored := t.state.Ignored[ref.Key()]; ignored {
+			continue
+		}
 		if t.state.PRs[ref.Key()] == nil && t.discover(ctx, ref) {
 			added[ref.Key()] = true
 		}
@@ -260,6 +263,47 @@ func (t *Tracker) Forget(ctx context.Context, id string) error {
 // forgetMissing handles a worktree deleted outside waterboy: drop the entry (the
 // next tick re-tracks the PR if it's still eligible) and delete our branch, but
 // only if it holds nothing unpushed (`git branch -d` refuses otherwise).
+// Untrack forgets a PR (removing the worktree and branch it created) and ignores
+// it from then on, so it isn't picked up again while it still requests a review.
+// Call it on the ticking goroutine.
+func (t *Tracker) Untrack(ctx context.Context, id string) error {
+	tr := t.state.PRs[id]
+	if tr == nil {
+		return fmt.Errorf("%s is not tracked", id)
+	}
+	ig := Ignored{PRRef: tr.PRRef, Title: tr.Title, At: time.Now()}
+	if err := t.Forget(ctx, id); err != nil {
+		return err
+	}
+	if t.state.Ignored == nil {
+		t.state.Ignored = map[string]Ignored{}
+	}
+	t.state.Ignored[id] = ig
+	t.save()
+	slog.Info("untracked PR", "pr", id)
+	return nil
+}
+
+// Retrack stops ignoring a PR; the next tick picks it up if it still requests a review.
+func (t *Tracker) Retrack(id string) error {
+	if _, ok := t.state.Ignored[id]; !ok {
+		return fmt.Errorf("%s isn't untracked", id)
+	}
+	delete(t.state.Ignored, id)
+	t.save()
+	slog.Info("tracking PR again", "pr", id)
+	return nil
+}
+
+// IgnoredPRs copies the untracked PRs, sorted by ID. Call it on the ticking goroutine.
+func (t *Tracker) IgnoredPRs() []Ignored {
+	out := make([]Ignored, 0, len(t.state.Ignored))
+	for _, id := range slices.Sorted(maps.Keys(t.state.Ignored)) {
+		out = append(out, t.state.Ignored[id])
+	}
+	return out
+}
+
 func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 	repoDir := t.repoDir(tr.Repo)
 	if _, err := proc.Run(ctx, repoDir, "git", "worktree", "prune"); err != nil {
