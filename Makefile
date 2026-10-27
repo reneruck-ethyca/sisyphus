@@ -1,4 +1,4 @@
-.PHONY: build test plist install-agent uninstall-agent reviewer-image start stop restart reset shell
+.PHONY: build test plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
 
 LABEL := com.reneruck.waterboy
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -71,7 +71,26 @@ uninstall-agent:
 CLAUDE_CODE_VERSION := 2.1.306
 FIDESPLUS ?= $(HOME)/Dev/fidesplus
 
-reviewer-image:
+reviewer-image: reviewer-plugins
 	docker build --target devcontainer --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
 		-t waterboy-base:fidesplus $(FIDESPLUS)
 	docker build -t waterboy-reviewer:fidesplus reviewer
+
+# Plugins for the reviewer image, copied from this machine's Claude Code install
+# (talos is private: no clone needed) into reviewer/staged/. Hooks are left out:
+# talos's would self-update and steer to tools the container doesn't have, and
+# superpowers' session-start prompt is for interactive sessions. USER_SKILLS from
+# ~/.claude/skills become the user-skills plugin.
+STAGE := reviewer/staged
+PLUGINS := ethyca-talos@ethyca-private superpowers@claude-plugins-official
+USER_SKILLS := adversarial-review
+
+reviewer-plugins:
+	rm -rf $(STAGE) && mkdir -p $(STAGE)/user-skills/.claude-plugin $(STAGE)/user-skills/skills
+	@for p in $(PLUGINS); do \
+		src=$$(jq -er --arg p $$p '.plugins[$$p][0].installPath' $(HOME)/.claude/plugins/installed_plugins.json) || \
+			{ echo "$$p isn't installed" >&2; exit 1; }; \
+		rsync -a --exclude hooks --exclude tests --exclude .git --exclude .in_use "$$src/" $(STAGE)/$${p%@*}/ && echo "staged $$p from $$src"; \
+	done
+	echo '{"name": "user-skills", "description": "skills from ~/.claude/skills"}' > $(STAGE)/user-skills/.claude-plugin/plugin.json
+	for s in $(USER_SKILLS); do cp -R $(HOME)/.claude/skills/$$s $(STAGE)/user-skills/skills/; done

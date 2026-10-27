@@ -642,7 +642,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	}
 	script := s.Command[2]
 	for _, want := range []string{"sudo -n chown", "'/a/.venv'", "'/home/u/.cache/uv'", "'/waterboy/claude/plugins'", "uv sync",
-		"exec 'claude' '-p' '--output-format' 'stream-json' '--verbose' '--dangerously-skip-permissions' '--model' 'opus' '--max-turns' '10' '--max-budget-usd' '2.5' < /waterboy/prompt.md"} {
+		"exec 'claude' '-p' '--output-format' 'stream-json' '--verbose' '--dangerously-skip-permissions' '--model' 'opus' '--max-turns' '10' '--max-budget-usd' '2.5' \"${extra[@]}\" < /waterboy/prompt.md"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q:\n%s", want, script)
 		}

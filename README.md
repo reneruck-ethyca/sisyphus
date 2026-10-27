@@ -24,8 +24,13 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
 1. Put the reviewer's secrets in `~/.config/waterboy/review.env` (`chmod 600`):
    `CLAUDE_CODE_OAUTH_TOKEN` and a read-only fine-grained `GH_TOKEN` (the agent uses it for
    `gh pr diff`; posting uses your host `gh` login). Until the file exists, reviews wait and say so.
+   For Jira and Confluence (read-only), add `JIRA_USERNAME` (your Atlassian email) and an Atlassian
+   API token as `JIRA_API_TOKEN`; without them the reviewer has no Atlassian tools.
 2. Build the review image: `make reviewer-image` builds `waterboy-reviewer:fidesplus` from the
-   fidesplus devcontainer in `$(FIDESPLUS)` (default `~/Dev/fidesplus`), with Claude Code pinned.
+   fidesplus devcontainer in `$(FIDESPLUS)` (default `~/Dev/fidesplus`), with Claude Code pinned, plus
+   the reviewer's tooling: the ethyca-talos and superpowers plugins and `adversarial-review`, copied
+   from your Claude Code install without their hooks (`make reviewer-plugins`; rebuild to pick up
+   updates), pyright and typescript-language-server for the LSP tool, semgrep, and `mcp-atlassian`.
 3. Start it: `make install-agent` (at login, via LaunchAgent) or `make start`. The dashboard is at
    <http://127.0.0.1:7465/>.
 

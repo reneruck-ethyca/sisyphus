@@ -21,6 +21,10 @@ This is your first review of this PR.
    Your own earlier reviews are in there too.
 2. Review the change (`gh pr diff {{.PR.Number}} --repo {{.PR.Repo}}`) for correctness, security, tests
    and fit with the codebase (see CLAUDE.md). Run the tests that cover it where that's practical.
+   If you have the `ethyca-talos:code-review` skill, run it with `{{.PR.Number}} repo={{.PR.Repo}}` and
+   follow it for the analysis, but take the diff and discussion from the two sources above, not GitHub
+   MCP tools (you have none), and skip its posting and labelling steps: its Critical findings and
+   Suggestions become your inline comments or the summary in step 3. Jira and Confluence are read-only.
 3. Don't post anything to GitHub yourself. Write your review to /out/review.json and waterboy posts it:
    ```json
    {"event": "APPROVE | REQUEST_CHANGES | COMMENT",

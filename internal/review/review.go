@@ -829,7 +829,12 @@ func (r *Reviewer) claudeScript() string {
 	for i, a := range args {
 		args[i] = shellQuote(a)
 	}
-	sb.WriteString("exec " + strings.Join(args, " ") + " < /waterboy/prompt.md\n")
+	// The image's tooling, if it has any: plugins (skills, LSPs) and MCP servers.
+	sb.WriteString(`extra=()
+for d in /opt/waterboy/plugins/*/; do [ -d "$d" ] && extra+=(--plugin-dir "$d"); done
+[ -f /opt/waterboy/mcp.json ] && extra+=(--mcp-config /opt/waterboy/mcp.json)
+`)
+	sb.WriteString("exec " + strings.Join(args, " ") + ` "${extra[@]}" < /waterboy/prompt.md` + "\n")
 	return sb.String()
 }
 

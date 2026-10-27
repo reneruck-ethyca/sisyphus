@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "mcp-atlassian",
+      "env": {
+        "READ_ONLY_MODE": "true",
+        "JIRA_URL": "https://ethyca.atlassian.net",
+        "JIRA_USERNAME": "${JIRA_USERNAME:-}",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN:-}",
+        "CONFLUENCE_URL": "https://ethyca.atlassian.net/wiki",
+        "CONFLUENCE_USERNAME": "${JIRA_USERNAME:-}",
+        "CONFLUENCE_API_TOKEN": "${JIRA_API_TOKEN:-}"
+      }
+    }
+  }
+}
