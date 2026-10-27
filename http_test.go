@@ -369,3 +369,30 @@ func TestHTTPShowsNoContainerWhenIdle(t *testing.T) {
 		t.Error("idle header should say no review is running")
 	}
 }
+
+func TestHTTPReviewNow(t *testing.T) {
+	srv, svc, _ := newReviewServer(t)
+	post := func(path string) *http.Response {
+		t.Helper()
+		resp, err := http.Post(srv.URL+path, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	if resp := post("/api/prs/ethyca/a/1/review"); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if pr, _ := svc.PR(testkit.RefA.Key()); len(pr.Review.Runs) == 2 && pr.Review.Runs[0].Job.Reason == "manual" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("manual review never started")
+		}
+	}
+	if resp := post("/api/prs/ethyca/a/99/review"); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("untracked PR: status %d", resp.StatusCode)
+	}
+}

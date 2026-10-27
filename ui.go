@@ -21,9 +21,12 @@ var frontend embed.FS
 // app.Service, so Run/OnChange stay out of the frontend's reach.
 type UI struct{ svc *app.Service }
 
-func (u *UI) Status() app.Status   { return u.svc.Status() }
-func (u *UI) RunNow()              { u.svc.RunNow() }
-func (u *UI) Logs() []app.LogEntry { return u.svc.Logs() }
+func (u *UI) Status() app.Status { return u.svc.Status() }
+func (u *UI) RunNow()            { u.svc.RunNow() }
+
+// ReviewNow queues a full review of a tracked PR.
+func (u *UI) ReviewNow(id string) error { return u.svc.ReviewNow(id) }
+func (u *UI) Logs() []app.LogEntry      { return u.svc.Logs() }
 
 func (u *UI) Settings() (app.Settings, error)          { return u.svc.Settings() }
 func (u *UI) SaveSettings(values map[string]any) error { return u.svc.SaveSettings(values) }

@@ -68,6 +68,13 @@ func newHandler(svc *app.Service) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, pr)
 	})
+	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/review", func(w http.ResponseWriter, r *http.Request) {
+		if err := svc.ReviewNow(prID(r)); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)

@@ -67,9 +67,12 @@ type Review struct {
 	PluginsVolume  string                `json:"plugins_volume"`  // Docker volume with Claude plugins ("" = none)
 	Timeout        Duration              `json:"timeout"`         // runs past this are flagged, never stopped
 	MaxConcurrent  int                   `json:"max_concurrent"`
-	Cleanup        bool                  `json:"cleanup"`    // reset worktrees waterboy created after each run
-	StackFrom      string                `json:"stack_from"` // where stacks start: "worktree" (PR code on the host) | "safe"
-	Repos          map[string]RepoReview `json:"repos"`      // only these repos are reviewed
+	Cleanup        bool                  `json:"cleanup"`            // reset worktrees waterboy created after each run
+	StackFrom      string                `json:"stack_from"`         // where stacks start: "worktree" (PR code on the host) | "safe"
+	StepTimeout    Duration              `json:"setup_step_timeout"` // each setup step; past it the step is killed and the run fails
+	Retries        int                   `json:"retries"`            // re-runs of a review that failed before Claude started
+	RetryBackoff   Duration              `json:"retry_backoff"`      // wait before the first retry, doubling after each
+	Repos          map[string]RepoReview `json:"repos"`              // only these repos are reviewed
 }
 
 // RepoReview is how one repo's PRs are reviewed.
@@ -195,6 +198,9 @@ func defaults() Config {
 			MaxConcurrent: 1,
 			Cleanup:       true,
 			StackFrom:     StackFromWorktree,
+			StepTimeout:   Duration{20 * time.Minute},
+			Retries:       3,
+			RetryBackoff:  Duration{2 * time.Minute},
 			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus},
 		},
 	}
@@ -206,6 +212,9 @@ func (r Review) check() error {
 	}
 	if r.StackFrom != StackFromWorktree && r.StackFrom != StackFromSafe {
 		return fmt.Errorf("stack_from must be %q or %q", StackFromWorktree, StackFromSafe)
+	}
+	if r.StepTimeout.Duration <= 0 || r.Retries < 0 || r.RetryBackoff.Duration <= 0 {
+		return errors.New("needs a positive setup_step_timeout and retry_backoff, and retries >= 0")
 	}
 	if r.Model == "" || r.MaxTurns < 1 || r.Timeout.Duration <= 0 || r.MaxConcurrent < 1 {
 		return errors.New("needs a model, max_turns >= 1, a positive timeout and max_concurrent >= 1")

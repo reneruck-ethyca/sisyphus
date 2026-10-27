@@ -124,6 +124,9 @@ func TestReviewNote(t *testing.T) {
 	running := done(review.Running, "4f0b24f88e35", "")
 	running.State = "running"
 	queued := review.PRStatus{State: "queued"}
+	retrying := done(review.Failed, "4f0b24f88e35", "exited 1 before Claude finished")
+	retrying.State, retrying.Queued = "queued", &review.Job{Attempt: 2, NotBefore: time.Now().Add(time.Hour)}
+	at := retrying.Queued.NotBefore.Local().Format("15:04")
 	for _, c := range []struct {
 		name             string
 		rs               review.PRStatus
@@ -134,6 +137,7 @@ func TestReviewNote(t *testing.T) {
 		{"disabled", review.PRStatus{}, false, "", "", "reviews are disabled"},
 		{"running", running, true, "", "", "reviewing (new)"},
 		{"queued", queued, true, "", "", "queued"},
+		{"retry waiting", retrying, true, "", "", "queued: retry 2 at " + at + " after: exited 1 before Claude finished"},
 		{"queued, blocked", queued, true, "env file missing: /x", "", "queued, waiting: env file missing: /x"},
 		{"queued, no runtime", queued, true, "", "docker down", "queued, waiting for the container runtime"},
 		{"never, blocked", review.PRStatus{}, true, "no review.repos entry for o/r", "", "not reviewed: no review.repos entry for o/r"},

@@ -226,7 +226,8 @@
         field("Tracked since", time(p.tracked_at)),
         field("Last seen", time(p.last_seen_at)),
       ].join("")}</dl>
-      <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}</h3>
+      <h3>Reviews ${p.review.state ? `<span class="${esc(p.review.state)}">${esc(p.review.state)}</span>` : ""}
+        <button data-review="${esc(p.id)}">Review now</button> <span id="review-msg" class="muted"></span></h3>
       <p class="muted">${esc(p.review_note ?? "")}</p>
       ${p.review.runs?.length ? `<table><thead><tr><th>Run</th><th>Reason</th><th>Head</th><th>Status</th><th>Started</th><th>Claude</th></tr></thead><tbody>
         ${p.review.runs.map(r => `<tr>
@@ -240,6 +241,13 @@
 
   app.addEventListener("click", e => {
     if (e.target.id === "run") return call("RunNow");
+    if (e.target.dataset.review) {
+      e.target.disabled = true;
+      return call("ReviewNow", e.target.dataset.review).catch(err => {
+        Object.assign(document.getElementById("review-msg"), {textContent: err.message ?? err, className: "err"});
+        e.target.disabled = false;
+      });
+    }
     if (e.target.id === "restart") { say("Restarting… reopen the window from the menu bar.", "muted"); return call("Restart"); }
     if (e.target.dataset.open) return call("OpenRun", route().pr, e.target.dataset.open);
     const a = e.target.closest("a[data-external]");

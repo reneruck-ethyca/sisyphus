@@ -28,8 +28,10 @@ import (
 
 // Job is one review to run, with the PR as the tracker announced it.
 type Job struct {
-	PR     tracker.Tracked `json:"pr"`
-	Reason string          `json:"reason"` // "new" | "commits" | "replies"
+	PR        tracker.Tracked `json:"pr"`
+	Reason    string          `json:"reason"`              // "new" | "commits" | "replies" | "manual"
+	Attempt   int             `json:"attempt,omitempty"`   // retries so far; 0 = first try
+	NotBefore time.Time       `json:"not_before,omitzero"` // a retry waits until then
 }
 
 // Run statuses.
@@ -73,8 +75,9 @@ type RunEvent struct {
 
 // PRStatus is what UIs show for one PR.
 type PRStatus struct {
-	State string `json:"state"` // "" | "queued" | "running"
-	Runs  []Run  `json:"runs"`  // newest first
+	State  string `json:"state"`            // "" | "queued" | "running"
+	Runs   []Run  `json:"runs"`             // newest first
+	Queued *Job   `json:"queued,omitempty"` // the job waiting to run, if any
 }
 
 // Latest is the most recent run, if any.
@@ -99,6 +102,13 @@ var (
 	errDropped    = errors.New("PR dropped")
 	errReset      = errors.New("reset")
 )
+
+// retryable marks a failure before Claude started (setup, the stack, starting
+// the container): likely transient, so the run is retried with backoff. Claude's
+// own failures and posting failures aren't: a re-run would likely fail the same way.
+type retryable struct{ error }
+
+func (e retryable) Unwrap() error { return e.error }
 
 type store struct {
 	Queue  []Job                `json:"queue"`
@@ -287,7 +297,48 @@ func (r *Reviewer) Forget(ctx context.Context, prID string) error {
 	return err
 }
 
-var rank = map[string]int{"replies": 1, "commits": 2, "new": 3}
+// Trigger queues a full review of a PR on request, behind a run in progress, and
+// replacing a waiting retry.
+func (r *Reviewer) Trigger(tr tracker.Tracked) error {
+	if _, ok := r.cfg.Repos[tr.Repo]; !ok {
+		return fmt.Errorf("%s isn't reviewed: no review.repos entry", tr.Repo)
+	}
+	if tr.AnnouncedSHA == "" || tr.AnnouncedSHA != tr.HeadSHA {
+		return fmt.Errorf("%s isn't synced to its head %.12s yet; try after the next sync", tr.Key(), tr.HeadSHA)
+	}
+	slog.Info("review requested", "pr", tr.Key())
+	r.enqueue(Job{PR: tr, Reason: "manual"})
+	return nil
+}
+
+// retry queues a failed run's job again, after a backoff doubling with each
+// attempt, unless the retries are used up or a newer job is queued already.
+func (r *Reviewer) retry(run Run) {
+	j := run.Job
+	id := j.PR.Key()
+	if j.Attempt >= r.cfg.Retries {
+		if r.cfg.Retries > 0 {
+			slog.Warn("review failed, no retries left", "pr", id, "run", run.ID, "retries", r.cfg.Retries)
+		}
+		return
+	}
+	wait := r.cfg.RetryBackoff.Duration << j.Attempt
+	j.Attempt++
+	j.NotBefore = time.Now().Add(wait)
+	r.mu.Lock()
+	queued := slices.ContainsFunc(r.st.Queue, func(q Job) bool { return q.PR.Key() == id })
+	if !queued { // checked and added under one lock: a newer job (new head) must win
+		r.st.Queue = append(r.st.Queue, j)
+		r.saveLocked()
+	}
+	r.mu.Unlock()
+	if !queued {
+		slog.Info("review retry queued", "pr", id, "attempt", j.Attempt, "of", r.cfg.Retries, "at", j.NotBefore.Format(time.TimeOnly))
+		r.changed()
+	}
+}
+
+var rank = map[string]int{"manual": 0, "replies": 1, "commits": 2, "new": 3}
 
 // enqueue adds j, or replaces the PR's queued job with it (keeping the
 // stronger reason, so a never-reviewed PR stays "new").
@@ -437,8 +488,8 @@ func (r *Reviewer) lose(run Run, err error) {
 func (r *Reviewer) Run(ctx context.Context) {
 	for {
 		var recheck <-chan time.Time
-		if r.dispatch(ctx) {
-			recheck = time.After(retryEvery) // jobs wait on Blocked: look again
+		if d := r.dispatch(ctx); d > 0 {
+			recheck = time.After(d) // jobs wait on Blocked or a retry's backoff: look again
 		}
 		select {
 		case <-r.wake:
@@ -487,13 +538,19 @@ func (r *Reviewer) checkRuntime(ctx context.Context) bool {
 	return err == nil
 }
 
-// dispatch starts what it can and reports whether queued jobs wait on Blocked.
-func (r *Reviewer) dispatch(ctx context.Context) (waiting bool) {
+// dispatch starts what it can and says when to look again for jobs waiting on
+// Blocked or a retry's backoff (0 = no need).
+func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 	r.mu.Lock()
 	pending := len(r.st.Queue) > 0 && len(r.active) < r.cfg.MaxConcurrent
 	r.mu.Unlock()
 	if !pending || !r.checkRuntime(ctx) {
-		return false
+		return 0
+	}
+	later := func(d time.Duration) {
+		if recheck == 0 || d < recheck {
+			recheck = d
+		}
 	}
 	r.mu.Lock()
 	repos := map[string]bool{}
@@ -514,11 +571,14 @@ func (r *Reviewer) dispatch(ctx context.Context) (waiting bool) {
 	for i := 0; i < len(r.st.Queue) && len(r.active) < r.cfg.MaxConcurrent; {
 		j := r.st.Queue[i]
 		id := j.PR.Key()
+		wait := time.Until(j.NotBefore)
 		if blocked[j.PR.Repo] != "" {
-			waiting = true
+			later(retryEvery)
+		} else if wait > 0 {
+			later(wait)
 		}
-		if r.active[id] != nil || blocked[j.PR.Repo] != "" {
-			i++ // one run per PR, and none while its repo is blocked; the job waits
+		if r.active[id] != nil || blocked[j.PR.Repo] != "" || wait > 0 {
+			i++ // one run per PR, none while its repo is blocked or before a retry's time; the job waits
 			continue
 		}
 		r.st.Queue = slices.Delete(r.st.Queue, i, i+1)
@@ -539,7 +599,7 @@ func (r *Reviewer) dispatch(ctx context.Context) (waiting bool) {
 		r.changed()
 		go r.execute(ctx, s.runCtx, s.run)
 	}
-	return waiting
+	return recheck
 }
 
 func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
@@ -601,7 +661,7 @@ func (r *Reviewer) endEarly(appCtx, runCtx context.Context, run Run, err error, 
 		return
 	}
 	slog.Warn("review not started", "pr", run.Job.PR.Key(), "run", run.ID, "err", err)
-	r.finish(run, Errored, 0, err, unlock)
+	r.finish(run, Errored, 0, retryable{err}, unlock)
 }
 
 func (r *Reviewer) removeRun(ctx context.Context, runID string) {
@@ -732,10 +792,19 @@ func (r *Reviewer) script(repo config.RepoReview, owned []string) string {
 	for _, d := range owned {
 		fmt.Fprintf(&sb, "sudo -n chown \"$(id -u):$(id -g)\" %s 2>/dev/null || true\n", shellQuote(d))
 	}
-	for _, step := range setupSteps(repo.Setup) { // announced and timed, so the run log shows where it is
+	// Each step is announced and timed, so the run log shows where it is, and runs
+	// in its own shell under setup_step_timeout, so a hung install can't hold the run.
+	limit := int(r.cfg.StepTimeout.Seconds())
+	for _, step := range setupSteps(repo.Setup) {
 		label := strings.Join(strings.Fields(strings.ReplaceAll(step, "\\\n", " ")), " ")
-		fmt.Fprintf(&sb, "echo %s\nt=$SECONDS\n%s\necho \"── waterboy: took $((SECONDS-t))s\"\n",
-			shellQuote("── waterboy: setup: "+label+" ──"), step)
+		fmt.Fprintf(&sb, `echo %s
+t=$SECONDS; rc=0
+timeout -k 30 %d bash -eo pipefail -c %s || rc=$?
+[ $rc -ne 124 ] && [ $rc -ne 137 ] || echo %s
+echo "── waterboy: took $((SECONDS-t))s"
+[ $rc -eq 0 ] || exit $rc
+`, shellQuote("── waterboy: setup: "+label+" ──"), limit, shellQuote(step),
+			shellQuote("── waterboy: timed out after "+r.cfg.StepTimeout.String()+" (setup_step_timeout)"))
 	}
 	sb.WriteString("echo '── waterboy: claude ──'\n")
 	args := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
@@ -883,8 +952,10 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		switch {
 		case result != nil && result.IsError:
 			status, why = Failed, fmt.Errorf("claude: %s", cmp.Or(result.Error, result.Subtype))
+		case code != 0 && result == nil:
+			status, why = Failed, retryable{fmt.Errorf("exited %d before Claude finished (setup failed?)", code)}
 		case code != 0:
-			status, why = Failed, fmt.Errorf("exited %d before Claude finished (setup failed?)", code)
+			status, why = Failed, fmt.Errorf("exited %d after Claude's result", code)
 		case result == nil:
 			status, why = Failed, errors.New("Claude produced no result")
 		}
@@ -1044,6 +1115,9 @@ func (r *Reviewer) finish(run Run, status string, code int, err error, unlock fu
 	if unlock != nil {
 		unlock()
 	}
+	if errors.As(err, new(retryable)) {
+		r.retry(run) // queued while this run still counts as active, so it can't start early
+	}
 	r.mu.Lock()
 	delete(r.active, id)
 	r.mu.Unlock()
@@ -1120,6 +1194,9 @@ func (r *Reviewer) Status() map[string]PRStatus {
 	}
 	for _, j := range r.st.Queue {
 		set(j.PR.Key(), "queued")
+		s := out[j.PR.Key()]
+		s.Queued = &j
+		out[j.PR.Key()] = s
 	}
 	for id := range r.active {
 		set(id, "running")

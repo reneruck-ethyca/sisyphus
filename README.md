@@ -89,6 +89,9 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.timeout` | `60m` | runs longer than this are flagged in the UIs, never stopped |
 | `review.max_concurrent` | `1` | review containers at a time |
 | `review.cleanup` | `true` | after each run, reset worktrees waterboy created to the reviewed head |
+| `review.setup_step_timeout` | `20m` | each setup step; past it the step is killed and the run fails |
+| `review.retries` | `3` | re-runs of a review that failed before Claude started (setup, stack, container start); `0` = none |
+| `review.retry_backoff` | `2m` | wait before the first retry, doubling after each (2m, 4m, 8m) |
 | `review.stack_from` | `worktree` | where local stacks start: `worktree` (the PR's own stack files, run on the host) or `safe` (each repo's `stack.safe_dir`); see [Local stack](#local-stack) |
 | `review.repos` | `ethyca/fidesplus` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`, `stack`; only these repos are reviewed |
 
@@ -120,6 +123,12 @@ for it back instead, and catches up on the next tick. Only repos in `review.repo
 tracked PR that never had a review gets one queued after the next tick. Jobs whose env files are missing
 stay queued, say so, and start within a minute of the file appearing.
 
+A run that fails before Claude starts (a setup step failing or passing `setup_step_timeout`, the stack
+not coming up, the container not starting) is likely transient: it's retried up to `review.retries`
+times, after `review.retry_backoff`, doubling each time. Claude's own failures and posting failures
+aren't retried. New commits, replies, or **Review now** (PR page, both UIs; queues a full review behind
+any run in progress) replace a waiting retry.
+
 Every tick logs one `PR` line per tracked PR: its head, sync state, and where its review stands and
 why (`queued, waiting: env file missing: …`, `up to date: reviewed 4f0b24f8 at …; next one on new
 commits or replies`, …). The UIs show the same line on the PR page and as the review cell's tooltip.
@@ -131,7 +140,8 @@ Each run is Claude Code headless in the repo's image (`make reviewer-image` buil
 1. the repo's cache volumes (`waterboy-<repo>-<path>`) are mounted: relative paths over the worktree
    (`.venv`, `node_modules`), absolute ones as is (fidesplus keeps uv's and npm's download caches in
    `/waterboy/cache/`). Then its `setup` runs, each line a step announced and timed in the run log
-   (`uv sync`, `npm install`, …; a trailing `\` continues a line); a failing step fails the run;
+   (`uv sync`, `npm install`, …; a trailing `\` continues a line), each in its own shell under
+   `setup_step_timeout`; a failing or timed-out step fails the run;
 2. `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`
    gets the rendered prompt (`prompt.md` in the run dir), reads the PR's discussion from
    `/waterboy/context/` (fetched on the host: PR, reviews, inline comments with ids, issue comments),

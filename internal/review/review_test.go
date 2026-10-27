@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -862,22 +863,40 @@ func TestFallbackDoesNotLeakLocalDetails(t *testing.T) {
 	}
 }
 
-// Each setup line is its own step, announced and timed in the run log.
+// setupOutput runs the setup part of the container script in bash on the host.
+func setupOutput(t *testing.T, setup string, limit time.Duration) (string, error) {
+	t.Helper()
+	if _, err := exec.LookPath("timeout"); err != nil {
+		t.Skip("needs GNU timeout")
+	}
+	r := &Reviewer{cfg: config.Review{Model: "opus", MaxTurns: 1, StepTimeout: config.Duration{Duration: limit}}}
+	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil), "echo '── waterboy: claude ──'")
+	out, err := exec.Command("bash", "-c", script).CombinedOutput()
+	return string(out), err
+}
+
+// Each setup line is a step, announced and timed; a backslash continues a line.
 func TestSetupStepsAreAnnouncedAndTimed(t *testing.T) {
-	r := &Reviewer{cfg: config.Review{Model: "opus", MaxTurns: 1}}
-	script := r.script(config.RepoReview{Setup: "uv sync --all-groups\n\n(cd clients && \\\n  npm install)\n"}, nil)
-	want := `echo '── waterboy: setup: uv sync --all-groups ──'
-t=$SECONDS
-uv sync --all-groups
-echo "── waterboy: took $((SECONDS-t))s"
-echo '── waterboy: setup: (cd clients && npm install) ──'
-t=$SECONDS
-(cd clients && \
-  npm install)
-echo "── waterboy: took $((SECONDS-t))s"
-`
-	if !strings.Contains(script, want) {
-		t.Fatalf("script:\n%s\nwant it to contain:\n%s", script, want)
+	out, err := setupOutput(t, "echo one\n\necho two \\\n  three\n", time.Minute)
+	want := "── waterboy: setup: echo one ──\none\n── waterboy: took 0s\n" +
+		"── waterboy: setup: echo two three ──\ntwo three\n── waterboy: took 0s\n"
+	if err != nil || out != want {
+		t.Fatalf("err %v, output:\n%s\nwant:\n%s", err, out, want)
+	}
+}
+
+// A step past setup_step_timeout is killed, says so, and fails the run; later steps don't run.
+func TestSetupStepTimeout(t *testing.T) {
+	out, err := setupOutput(t, "sleep 30\necho never", time.Second)
+	if err == nil || !strings.Contains(out, "── waterboy: timed out after 1s (setup_step_timeout)") || strings.Contains(out, "never") {
+		t.Fatalf("err %v, output:\n%s", err, out)
+	}
+}
+
+func TestSetupStepFailureStopsSetup(t *testing.T) {
+	out, err := setupOutput(t, "false | cat\necho never", time.Minute) // pipefail: a failing pipe fails the step
+	if err == nil || strings.Contains(out, "never") || strings.Contains(out, "timed out") {
+		t.Fatalf("err %v, output:\n%s", err, out)
 	}
 }
 
@@ -899,5 +918,93 @@ func TestPostNote(t *testing.T) {
 		if got := postNote(c.p, c.err, c.posting); got != c.want {
 			t.Errorf("got %q\nwant %q", got, c.want)
 		}
+	}
+}
+
+func withRetries(n int, backoff time.Duration) func(*config.Review) {
+	return func(c *config.Review) { c.Retries, c.RetryBackoff = n, config.Duration{Duration: backoff} }
+}
+
+// A run that fails before Claude starts is retried after a doubling backoff, up to review.retries.
+func TestSetupFailureIsRetriedWithBackoff(t *testing.T) {
+	f := newFixture(t, withRetries(2, 50*time.Millisecond))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	var failedAt []time.Time
+	for n := 1; n <= 3; n++ {
+		waitFor(t, fmt.Sprintf("start %d", n), func() bool { return len(f.rt.Started()) == n })
+		if n > 1 && time.Since(failedAt[n-2]) < 50*time.Millisecond<<(n-2) {
+			t.Fatalf("attempt %d started %v after the failure, before its backoff", n, time.Since(failedAt[n-2]))
+		}
+		f.rt.Finish(f.containers()[0].ID, 1, "npm error code ECONNRESET\n")
+		failedAt = append(failedAt, time.Now())
+		waitFor(t, "run to fail", func() bool { rs := f.runs(); return len(rs) == n && rs[0].Status == Failed })
+	}
+	time.Sleep(300 * time.Millisecond)
+	if len(f.rt.Started()) != 3 || len(f.r.st.Queue) != 0 {
+		t.Fatalf("started %d, queue %+v: want 1 try + 2 retries, then nothing", len(f.rt.Started()), f.r.st.Queue)
+	}
+	if rs := f.runs(); rs[0].Job.Attempt != 2 || rs[2].Job.Attempt != 0 {
+		t.Fatalf("attempts = %d..%d", rs[2].Job.Attempt, rs[0].Job.Attempt)
+	}
+}
+
+// Claude's own failures aren't retried: a re-run would likely fail the same way, and costs.
+func TestClaudeFailureIsNotRetried(t *testing.T) {
+	f := newFixture(t, withRetries(2, time.Millisecond))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "start", f.started(1))
+	f.rt.Finish(f.containers()[0].ID, 1, `{"type":"result","subtype":"error_max_turns","is_error":true}`+"\n")
+	waitFor(t, "run to fail", f.lastStatus(Failed))
+	time.Sleep(50 * time.Millisecond)
+	if len(f.rt.Started()) != 1 || len(f.r.st.Queue) != 0 {
+		t.Fatalf("started %d, queue %+v", len(f.rt.Started()), f.r.st.Queue)
+	}
+}
+
+// New commits replace a waiting retry and run right away.
+func TestNewCommitsReplaceWaitingRetry(t *testing.T) {
+	f := newFixture(t, withRetries(1, time.Hour))
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "start", f.started(1))
+	f.rt.Finish(f.containers()[0].ID, 1, "boom\n")
+	waitFor(t, "retry queued", func() bool { q := f.r.Status()[refA.Key()].Queued; return q != nil && q.Attempt == 1 })
+	f.r.Updated(f.tr, true, 0)
+	waitFor(t, "the new job to start", func() bool { return len(f.rt.Started()) == 2 })
+	if run := f.runs()[0]; run.Job.Attempt != 0 || !run.Job.NotBefore.IsZero() { // reason stays "new": never reviewed yet
+		t.Fatalf("job = %+v", run.Job)
+	}
+}
+
+func TestTriggerQueuesManualReview(t *testing.T) {
+	f := newFixture(t)
+	unsynced := f.tr
+	if err := f.r.Trigger(unsynced); err == nil {
+		t.Fatal("triggered a review of a PR not synced to its head")
+	}
+	other := f.tr
+	other.PRRef = github.PRRef{Repo: "ethyca/zzz", Number: 9}
+	if err := f.r.Trigger(other); err == nil {
+		t.Fatal("triggered a review in a repo without review config")
+	}
+	tr := f.tr
+	tr.AnnouncedSHA = tr.HeadSHA
+	f.start(t)
+	if err := f.r.Trigger(tr); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "start", f.started(1))
+	if err := f.r.Trigger(tr); err != nil { // while it runs: queued behind it
+		t.Fatal(err)
+	}
+	if st := f.r.Status()[refA.Key()]; st.State != "running" || st.Queued == nil || st.Queued.Reason != "manual" || len(f.rt.Started()) != 1 {
+		t.Fatalf("status = %+v, started %d", st, len(f.rt.Started()))
+	}
+	f.succeed(f.containers()[0].ID, "")
+	waitFor(t, "the queued manual review", func() bool { return len(f.rt.Started()) == 2 })
+	if f.rt.Started()[1].Env["WATERBOY_REASON"] != "manual" {
+		t.Fatalf("reason = %q", f.rt.Started()[1].Env["WATERBOY_REASON"])
 	}
 }

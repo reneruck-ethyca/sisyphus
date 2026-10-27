@@ -3,6 +3,7 @@ package app
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -78,6 +79,12 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 		return "reviewing (" + rs.Runs[0].Job.Reason + ")"
 	case "queued":
 		switch {
+		case rs.Queued != nil && time.Until(rs.Queued.NotBefore) > 0:
+			why := ""
+			if last := rs.Latest(); last != nil && last.Error != "" {
+				why = " after: " + last.Error
+			}
+			return fmt.Sprintf("queued: retry %d at %s%s", rs.Queued.Attempt, rs.Queued.NotBefore.Local().Format("15:04"), why)
 		case blocked != "":
 			return "queued, waiting: " + blocked
 		case runtimeErr != "":
@@ -180,6 +187,24 @@ func (s *Service) PR(id string) (PRView, bool) {
 		return PRView{}, false
 	}
 	return st.PRs[i], true
+}
+
+// ReviewNow queues a full review of a tracked PR, behind a run in progress.
+func (s *Service) ReviewNow(id string) error {
+	if s.rev == nil {
+		return errors.New("reviews are disabled")
+	}
+	s.mu.Lock()
+	i := slices.IndexFunc(s.tracked, func(tr tracker.Tracked) bool { return tr.Key() == id })
+	var tr tracker.Tracked
+	if i >= 0 {
+		tr = s.tracked[i]
+	}
+	s.mu.Unlock()
+	if i < 0 {
+		return fmt.Errorf("%s is not tracked", id)
+	}
+	return s.rev.Trigger(tr)
 }
 
 // Logs returns the most recent ops log entries, oldest first.
