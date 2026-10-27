@@ -171,10 +171,13 @@
         ${body ? `<div class="card-b"><div class="review-body clamp">${md(body)}</div><a href="${runHash(p.id, last.id)}">Read the full review →</a></div>` : ""}
         <div class="card-f">${p.up_to_date ? `Up to date with <code>${short(p.head_sha)}</code>. The next review starts on new commits or replies.` : esc(p.review_note)}</div></div>`
       : `<div class="card"><div class="card-b muted">${esc(p.review_note)}</div></div>`;
-    const runs = p.review.runs?.length ? `<section aria-labelledby="runs"><h2 id="runs">Review runs</h2><ol class="list card">${p.review.runs.map(r => `<li>${runChip(r)}
-        <span class="grow"><a href="${runHash(p.id, r.id)}">${stamp(r.started)}</a> <span class="muted">· ${reason(r.job.reason)}</span>
-          <span class="facts">${dur(r)}${r.claude ? ` · ${r.claude.num_turns} turns · $${r.claude.cost_usd.toFixed(2)}` : ""} · head ${short(r.job.pr.head_sha)}${r.overdue ? ` · <span class="err">running longer than the review timeout</span>` : ""}</span>
-          ${r.error ? `<span class="err">${esc(r.error)}</span>` : ""}</span>${ago(r.started)}</li>`).join("")}</ol></section>` : "";
+    const runs = p.review.runs?.length ? `<section aria-labelledby="runs"><h2 id="runs">Review runs</h2><div class="card scrollx"><table class="runs">
+        <thead><tr><th>Outcome</th><th>Started</th><th>Trigger</th><th class="num">Took</th><th class="num">Turns</th><th class="num">Cost</th><th>Head</th></tr></thead>
+        ${p.review.runs.map(r => `<tbody><tr><td>${runChip(r)}</td><td><a href="${runHash(p.id, r.id)}">${stamp(r.started)}</a></td><td>${reason(r.job.reason)}</td>
+          <td class="num">${dur(r)}</td><td class="num">${r.claude ? r.claude.num_turns : "—"}</td><td class="num">${r.claude ? "$" + r.claude.cost_usd.toFixed(2) : "—"}</td>
+          <td><code>${short(r.job.pr.head_sha)}</code></td></tr>
+          ${r.error || r.overdue ? `<tr class="note"><td></td><td colspan="6"><div class="err">${r.overdue ? "Running longer than the review timeout. " : ""}${esc(r.error)}</div></td></tr>` : ""}</tbody>`).join("")}
+      </table></div></section>` : "";
     const stackHTML = !stack && !stackErr ? "" : `<details class="fold" id="fold-stack"><summary>Local stack
         ${stack ? `${chip(stack.state, "neutral")}<span class="muted"><code>${esc(stack.project)}</code> · ${stack.containers?.length ?? 0} containers</span>` : ""}
         ${stackErr ? `<span class="err">${esc(stackErr)}</span>` : ""}</summary>

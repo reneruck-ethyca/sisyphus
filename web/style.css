@@ -93,6 +93,16 @@ details.fold[open] { padding-bottom: 16px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line2); vertical-align: top; overflow-wrap: anywhere; }
 th { font-weight: 600; color: var(--muted); }
+.scrollx { overflow-x: auto; }
+/* Review runs: one row per run, a note row under it for errors; tbody groups the two. */
+.runs { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.runs th, .runs td { padding: 10px 14px; white-space: nowrap; vertical-align: middle; overflow-wrap: normal; }
+.runs th { font-size: 12px; padding-block: 8px; border-bottom: 1px solid var(--line); }
+.runs td { border-bottom: 0; }
+.runs tbody + tbody { border-top: 1px solid var(--line2); }
+.runs .num { text-align: right; }
+.runs tr.note td { padding-top: 0; white-space: normal; }
+.runs tr.note .err { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; } /* the run page has it all */
 dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 24px; margin: 0; font-size: 13px; }
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }

@@ -92,12 +92,15 @@
 </section>
 
 {{with .Review.Runs}}<section aria-labelledby="runs"><h2 id="runs">Review runs</h2>
-<ol class="list card">{{range .}}<li>
-  {{template "chip" .}}
-  <span class="grow"><a href="{{runPath $.PR.ID .ID}}">{{stamp .Started}}</a> <span class="muted">· {{reason .Job.Reason}}</span>
-    <span class="facts">{{dur .}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}} · head {{short .Job.PR.HeadSHA}}{{if .Overdue}} · <span class="err">running longer than the review timeout</span>{{end}}</span>
-    {{with .Error}}<span class="err">{{.}}</span>{{end}}</span>
-  {{ago .Started}}</li>{{end}}</ol>
+<div class="card scrollx"><table class="runs">
+  <thead><tr><th>Outcome</th><th>Started</th><th>Trigger</th><th class="num">Took</th><th class="num">Turns</th><th class="num">Cost</th><th>Head</th></tr></thead>
+  {{range .}}<tbody>
+  <tr><td>{{template "chip" .}}</td><td><a href="{{runPath $.PR.ID .ID}}">{{stamp .Started}}</a></td><td>{{reason .Job.Reason}}</td>
+    <td class="num">{{dur .}}</td><td class="num">{{with .Claude}}{{.NumTurns}}{{else}}—{{end}}</td><td class="num">{{with .Claude}}${{printf "%.2f" .CostUSD}}{{else}}—{{end}}</td>
+    <td><code>{{short .Job.PR.HeadSHA}}</code></td></tr>
+  {{if or .Error .Overdue}}<tr class="note"><td></td><td colspan="6"><div class="err">{{if .Overdue}}Running longer than the review timeout. {{end}}{{.Error}}</div></td></tr>{{end}}
+  </tbody>{{end}}
+</table></div>
 </section>{{end}}
 
 {{if or $.Stack $.StackErr}}<details class="fold" id="fold-stack"><summary>Local stack
