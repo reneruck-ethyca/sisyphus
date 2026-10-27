@@ -17,7 +17,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.Org != "ethyca" || cfg.Interval.Duration != 10*time.Minute || cfg.HookTimeout.Duration != 30*time.Minute {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
-	if cfg.ReposRoot != home+"/Dev" || cfg.StateFile != home+"/.local/state/waterboy/state.json" {
+	if cfg.ReposRoot != home+"/Dev" || cfg.StateFile != home+"/.local/state/sisyphus/state.json" {
 		t.Errorf("bad paths: %+v", cfg)
 	}
 	if cfg.IncludeDrafts || cfg.User != "" {
@@ -25,7 +25,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	r := cfg.Review
 	if r.Disabled || !r.Post || r.Model != "opus" || r.MaxTurns != 200 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
-		r.EnvFile != home+"/.config/waterboy/review.env" {
+		r.EnvFile != home+"/.config/sisyphus/review.env" {
 		t.Errorf("bad review defaults: %+v", r)
 	}
 	if fp := r.Repos["ethyca/fidesplus"]; fp.Image == "" || fp.Workdir != "/fidesplus" || fp.Setup == "" || len(fp.Cache) == 0 ||
@@ -38,14 +38,14 @@ func TestLoadConfigReview(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	p := filepath.Join(home, "c.json")
-	os.WriteFile(p, []byte(`{"review": {"model": "sonnet", "cleanup": false, "env_file": "~/.waterboy.env",
+	os.WriteFile(p, []byte(`{"review": {"model": "sonnet", "cleanup": false, "env_file": "~/.sisyphus.env",
 		"repos": {"ethyca/fides": {"image": "me/fides-reviewer:1", "prompt_file": "~/fides.md"}}}}`), 0o644)
 	cfg, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := cfg.Review
-	if r.Model != "sonnet" || r.Cleanup || r.MaxConcurrent != 1 || r.EnvFile != home+"/.waterboy.env" {
+	if r.Model != "sonnet" || r.Cleanup || r.MaxConcurrent != 1 || r.EnvFile != home+"/.sisyphus.env" {
 		t.Errorf("review = %+v", r)
 	}
 	if r.Repos["ethyca/fides"].PromptFile != home+"/fides.md" || r.Repos["ethyca/fidesplus"].Image == "" {
@@ -107,7 +107,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if value(fs, "org") != "acme" || value(fs, "interval") != "10m" || value(fs, "review.timeout") != "1h" || value(fs, "hook_timeout") != "30m" || value(fs, "review.model") != "sonnet" ||
-		value(fs, "review.max_turns") != 200.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/waterboy/review.env" {
+		value(fs, "review.max_turns") != 200.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/sisyphus/review.env" {
 		t.Fatalf("settings = %+v", fs)
 	}
 

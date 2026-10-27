@@ -1,9 +1,9 @@
-# waterboy
+# sisyphus
 
-Automated PR reviews for the PRs waiting on you. waterboy finds open PRs that request your review,
+Automated PR reviews for the PRs waiting on you. sisyphus finds open PRs that request your review,
 checks each out into its own worktree, and has Claude Code review it in a container built like the
 repo's devcontainer, with the PR's own local services (Postgres, Redis) next to it. The agent reads the
-code and the discussion, runs tests, and writes a review; waterboy posts it to GitHub as you. New
+code and the discussion, runs tests, and writes a review; sisyphus posts it to GitHub as you. New
 commits and replies get follow-up reviews until the PR merges or closes.
 
 It runs on your Mac as a menu-bar app with a local dashboard, every `interval` (default 10m):
@@ -21,12 +21,12 @@ It runs on your Mac as a menu-bar app with a local dashboard, every `interval` (
 Requires `gh` (authenticated), `git` and `wtp` on PATH, Docker, and for fidesplus' local stack `uv`
 on the host. `make install-agent` bakes your current shell's PATH into the LaunchAgent.
 
-1. Put the reviewer's secrets in `~/.config/waterboy/review.env` (`chmod 600`):
+1. Put the reviewer's secrets in `~/.config/sisyphus/review.env` (`chmod 600`):
    `CLAUDE_CODE_OAUTH_TOKEN` and a read-only fine-grained `GH_TOKEN` (the agent uses it for
    `gh pr diff`; posting uses your host `gh` login). Until the file exists, reviews wait and say so.
    For Jira and Confluence (read-only), add `JIRA_USERNAME` (your Atlassian email) and an Atlassian
    API token as `JIRA_API_TOKEN`; without them the reviewer has no Atlassian tools.
-2. Build the review image: `make reviewer-image` builds `waterboy-reviewer:fidesplus` from the
+2. Build the review image: `make reviewer-image` builds `sisyphus-reviewer:fidesplus` from the
    fidesplus devcontainer in `$(FIDESPLUS)` (default `~/Dev/fidesplus`), with Claude Code pinned, plus
    the reviewer's tooling: the ethyca-talos and superpowers plugins and `adversarial-review`, copied
    from your Claude Code install without their hooks (`make reviewer-plugins`; rebuild to pick up
@@ -37,12 +37,12 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
 ## Usage
 
 ```bash
-make build                     # bin/waterboy (needs cgo / Xcode CLT)
+make build                     # bin/sisyphus (needs cgo / Xcode CLT)
 make test
-bin/waterboy -once             # single tick, no tray or window; good for testing
-bin/waterboy                   # menu-bar app ("WB"): status, Open window, Open dashboard, Check now, Open state file, Quit
-bin/waterboy -config <file>    # another config file
-make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/waterboy.log
+bin/sisyphus -once             # single tick, no tray or window; good for testing
+bin/sisyphus                   # menu-bar app ("SY"): status, Open window, Open dashboard, Check now, Open state file, Quit
+bin/sisyphus -config <file>    # another config file
+make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/sisyphus.log
 make start | stop | restart    # through the LaunchAgent if installed, else in the background
 make reset                     # stop, wipe all state (see below), start again
 make reset PR='ethyca/fidesplus#123'   # …just that PR
@@ -53,16 +53,16 @@ make uninstall-agent
 
 The dashboard (`http_addr`) and the window show the same things: every tracked PR with its sync and
 review state, a PR page with its review runs, its stack and the [PR actions](#pr-actions), each run
-streamed live, a live log viewer and the settings. If the port is taken, waterboy logs it and runs
+streamed live, a live log viewer and the settings. If the port is taken, sisyphus logs it and runs
 without the dashboard. If Docker is down, reviews wait in the queue and are retried every minute; at
 login, re-attaching to running reviews waits for it too.
 
 ## Config
 
-Optional JSON at `~/.config/waterboy/config.json` (`-config` to override). The dashboard (`/settings`)
+Optional JSON at `~/.config/sisyphus/config.json` (`-config` to override). The dashboard (`/settings`)
 and the window ("Settings") edit the scalar fields below; `repos`, `hooks`, `env`, `state_file` and
 `http_addr` stay file-only. Saving writes only the changed fields, keeps the rest of the file, and is
-refused if the result wouldn't load. Changes apply on restart: the Restart button re-execs waterboy in
+refused if the result wouldn't load. Changes apply on restart: the Restart button re-execs sisyphus in
 place (same PID, so the LaunchAgent is happy; review containers are re-attached).
 
 | Field | Default | |
@@ -71,7 +71,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `org` | `ethyca` | owner searched for PRs |
 | `interval` | `10m` | Go duration between ticks |
 | `repos_root` | `~/Dev` | clones live at `<repos_root>/<repo>`; PRs without a clone are skipped |
-| `state_file` | `~/.local/state/waterboy/state.json` | tracked PRs |
+| `state_file` | `~/.local/state/sisyphus/state.json` | tracked PRs |
 | `include_drafts` | `false` | also track draft PRs |
 | `hooks` | `{}` | `{"on_conflict": "<shell command>"}` |
 | `hook_timeout` | `30m` | per hook run |
@@ -82,14 +82,14 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.max_turns` | `200` | Claude turn limit; hitting it fails the run |
 | `review.max_budget_usd` | `0` (none) | spend limit (only enforced with API-key auth) |
 | `review.prompt_file` | built-in | Go `text/template` prompt (see `internal/review/prompt.md`) |
-| `review.env_file` | `~/.config/waterboy/review.env` | `CLAUDE_CODE_OAUTH_TOKEN`, and a read-only `GH_TOKEN` for `gh pr diff` (waterboy posts with your host `gh` login) |
-| `review.env` | `[]` | names of variables copied from waterboy's environment |
+| `review.env_file` | `~/.config/sisyphus/review.env` | `CLAUDE_CODE_OAUTH_TOKEN`, and a read-only `GH_TOKEN` for `gh pr diff` (sisyphus posts with your host `gh` login) |
+| `review.env` | `[]` | names of variables copied from sisyphus's environment |
 | `review.claude_settings` | — | a `settings.json` given to Claude in each run |
-| `review.plugins_volume` | `waterboy-claude-plugins` | Docker volume mounted as Claude's `plugins/` |
+| `review.plugins_volume` | `sisyphus-claude-plugins` | Docker volume mounted as Claude's `plugins/` |
 | `review.timeout` | `60m` | runs longer than this are flagged in the UIs, never stopped |
 | `review.max_concurrent` | `1` | review containers at a time |
 | `review.five_hour_percent` | `0` (none) | share of each 5-hour subscription window reviews may use; past it, new reviews wait for the reset |
-| `review.cleanup` | `true` | after each run, reset worktrees waterboy created to the reviewed head |
+| `review.cleanup` | `true` | after each run, reset worktrees sisyphus created to the reviewed head |
 | `review.setup_step_timeout` | `20m` | each setup step; past it the step is killed and the run fails |
 | `review.retries` | `3` | re-runs of a review that failed before Claude started (setup, stack, container start); `0` = none |
 | `review.retry_backoff` | `2m` | wait before the first retry, doubling after each (2m, 4m, 8m) |
@@ -99,14 +99,14 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 ## Which PRs
 
 A PR is picked up only when it requests a review from you or one of your teams. Until you've
-reviewed it, it's dropped (and its worktree removed, if waterboy created it) when it's merged or
+reviewed it, it's dropped (and its worktree removed, if sisyphus created it) when it's merged or
 closed, someone else approved it, it became a draft (unless `include_drafts`), or it no longer requests
 a review from you or your teams. Once you've reviewed it (by hand, or the agent as you), only merging
 or closing drops it: new commits and replies keep getting follow-up reviews, approvals included.
 Fork PRs are skipped.
 
 Syncing on new commits fast-forwards the worktree. After a force-push it hard-resets only if
-the worktree is still exactly where waterboy last put it. Reused worktrees and pre-existing
+the worktree is still exactly where sisyphus last put it. Reused worktrees and pre-existing
 branches are never reset or deleted. Modified tracked files, unpushed local commits, diverged
 history, or an incoming file colliding with an untracked one are a conflict.
 
@@ -135,21 +135,21 @@ why (`queued, waiting: env file missing: …`, `up to date: reviewed 4f0b24f8 at
 commits or replies`, …). The UIs show the same line on the PR page and as the review cell's tooltip.
 
 Each run is Claude Code headless in the repo's image (`make reviewer-image` builds
-`waterboy-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default
+`sisyphus-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default
 `~/Dev/fidesplus`, with Claude Code pinned):
 
-1. the repo's cache volumes (`waterboy-<repo>-<path>`) are mounted: relative paths over the worktree
+1. the repo's cache volumes (`sisyphus-<repo>-<path>`) are mounted: relative paths over the worktree
    (`.venv`, `node_modules`), absolute ones as is (fidesplus keeps uv's and npm's download caches in
-   `/waterboy/cache/`). Then its `setup` runs, each line a step announced and timed in the run log
+   `/sisyphus/cache/`). Then its `setup` runs, each line a step announced and timed in the run log
    (`uv sync`, `npm install`, …; a trailing `\` continues a line), each in its own shell under
    `setup_step_timeout`; a failing or timed-out step fails the run;
 2. `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`
    gets the rendered prompt (`prompt.md` in the run dir), reads the PR's discussion from
-   `/waterboy/context/` (fetched on the host: PR, reviews, inline comments with ids, issue comments),
+   `/sisyphus/context/` (fetched on the host: PR, reviews, inline comments with ids, issue comments),
    reviews, runs tests, and writes its review to `/out/review.json`. A fresh session each run; its
    transcript stays in the run's `claude/` dir;
-3. waterboy posts that review from the host with your `gh` login (`review.post`, default on; off is a
-   dry run): the verdict, body (plus a "🤖 Reviewed by waterboy" footer) and inline comments, pinned to
+3. sisyphus posts that review from the host with your `gh` login (`review.post`, default on; off is a
+   dry run): the verdict, body (plus a "🤖 Reviewed by sisyphus" footer) and inline comments, pinned to
    the reviewed head, and replies in inline threads. If GitHub refuses the review (an inline comment
    outside the diff, or approving your own PR) it's posted once more as one plain comment carrying
    everything. No `review.json` means nothing to say. The agent itself never needs the GitHub API.
@@ -157,16 +157,16 @@ Each run is Claude Code headless in the repo's image (`make reviewer-image` buil
 The worktree is mounted read/write at the repo's `workdir` (`/fidesplus`); its `.git` and the clone's
 `.git` are read-only (a container that could write them could plant hooks or config that host-side git
 would run; it also means no `git commit` inside). The container gets `/out`, the env files (repo's,
-then `review.env_file`), and `WATERBOY_RUN_ID`, `WATERBOY_REASON`, `WATERBOY_PR_URL`, `WATERBOY_REPO`,
-`WATERBOY_PR_NUMBER`, `WATERBOY_BRANCH`, `WATERBOY_HEAD_SHA`, `WATERBOY_WORKTREE`, `WATERBOY_OUT`. With
-`review.cleanup`, worktrees waterboy created are reset to the reviewed head afterwards; reused ones never.
+then `review.env_file`), and `SISYPHUS_RUN_ID`, `SISYPHUS_REASON`, `SISYPHUS_PR_URL`, `SISYPHUS_REPO`,
+`SISYPHUS_PR_NUMBER`, `SISYPHUS_BRANCH`, `SISYPHUS_HEAD_SHA`, `SISYPHUS_WORKTREE`, `SISYPHUS_OUT`. With
+`review.cleanup`, worktrees sisyphus created are reset to the reviewed head afterwards; reused ones never.
 
 Both UIs stream each run live and readably (Claude's text, tool calls, collapsible tool output, the
 final result with turns and cost); the raw output is the run's `log`. Runs live in
 `<state dir>/runs/<owner>/<repo>/<n>/<run>/` (`run.json`, `prompt.md`, `log`, `stack.log`, `context/`,
 `claude/`, `out/`); the
 queue and the last 10 runs per PR are in `<state dir>/reviews.json`. Containers keep running when
-waterboy quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
+sisyphus quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
 
 The agent may approve; the PR stays tracked until it merges or closes.
 
@@ -176,11 +176,11 @@ A repo with a `stack` gets its own services (DB, cache) per PR, next to the revi
 fidesplus uses its per-worktree nox stacks: `{"up": "uv run nox -s dev_datastores", "project":
 "fidesplus-{id}"}`, i.e. Postgres and Redis.
 
-Before the container starts, waterboy runs `up` on the host with `WORKTREE_ID=pr-<n>` (so a PR keeps
+Before the container starts, sisyphus runs `up` on the host with `WORKTREE_ID=pr-<n>` (so a PR keeps
 its compose project, `fidesplus-pr-<n>`, and volumes whichever mode started it), output in the run's
 `stack.log`. The container joins `<project>_default` and reaches the services by name
 (`fidesplus-db:5432`, `fidesplus-redis:6379`); host ports don't matter to it. If `up` fails on a host
-port that's taken ("port is already allocated"), waterboy retries with the next `PORT_OFFSET` slot and
+port that's taken ("port is already allocated"), sisyphus retries with the next `PORT_OFFSET` slot and
 remembers the one that worked for that PR. Any other failure fails the run.
 
 After a succeeded (or cancelled) run the stack is stopped, not removed, so the PR's next review starts
@@ -206,7 +206,7 @@ The `…` menu on a PR's page (dashboard and window), each confirmed first and r
 - **Wipe review data**: the same, plus the PR's stack (containers, network, DB volume) and the images
   its containers ran, unless other containers use them. Tracking and the worktree stay; the reviewer
   image and per-repo caches are shared, so they stay too.
-- **Untrack PR**: wipe, then forget the PR and remove the worktree and branch waterboy created. It's
+- **Untrack PR**: wipe, then forget the PR and remove the worktree and branch sisyphus created. It's
   ignored from then on, even while it requests your review; the PR list's "Untracked" footer tracks it
   again.
 
@@ -214,44 +214,44 @@ The PR page also shows its stack as Docker has it: containers with state and ima
 
 ## Reset
 
-`make reset` (or `bin/waterboy -reset all|owner/repo#n` with the app stopped) removes waterboy's review
+`make reset` (or `bin/sisyphus -reset all|owner/repo#n` with the app stopped) removes sisyphus's review
 containers, local stacks, review history and run directories, the worktrees it created (a worktree it can't remove
-keeps its PR tracked, and the error says why), and the tracked entries. On start, waterboy rediscovers
+keeps its PR tracked, and the error says why), and the tracked entries. On start, sisyphus rediscovers
 whatever still awaits your review as new: fresh worktree, fresh review. PRs you untracked stay ignored.
 
 ## Debug shell
 
-`make shell PR='owner/repo#n'` (`bin/waterboy -shell owner/repo#n`) opens bash in the container a review
+`make shell PR='owner/repo#n'` (`bin/sisyphus -shell owner/repo#n`) opens bash in the container a review
 of that tracked PR would run in: same image, worktree and cache mounts, env files and variables,
-prompt and discussion, with its stack up and the container on its network. `/waterboy/setup.sh` runs
-the setup as a review does; `/waterboy/review.sh` runs setup and then Claude (its review lands in
+prompt and discussion, with its stack up and the container on its network. `/sisyphus/setup.sh` runs
+the setup as a review does; `/sisyphus/review.sh` runs setup and then Claude (its review lands in
 `/out`, nothing is posted). Exiting removes the container and stops the stack, keeping its volumes. It
 runs next to the app without touching its state, and refuses while a review of that PR is running.
 The app keeps syncing the worktree meanwhile, so new commits can move it under the shell.
 
 ## Evals
 
-`bin/waterboy -eval <case file or dir>` replays past reviews to measure the reviewer: each case is a PR
+`bin/sisyphus -eval <case file or dir>` replays past reviews to measure the reviewer: each case is a PR
 whose review (by people, or a run you trust) is the gold standard, written down as the findings it
 raised. A run reviews the PR in a fresh worktree at the head the gold review saw, diffs against the
 merge-base, and sees only the discussion from before the gold review; Claude gets no GitHub token, so
 it can't read the rest. Nothing is posted. Each case runs `-eval-reps` times (3), one run at a time,
 then a judge (`claude -p`, no tools) scores every run against its case and the report lands in
-`report.md` next to the runs (`-eval-out`, default `~/.config/waterboy/eval/runs/<time>`):
+`report.md` next to the runs (`-eval-out`, default `~/.config/sisyphus/eval/runs/<time>`):
 
 - recall: gold findings found (1) or partly found (½), weighted must 3, should 2, nice 1; and the
   same over must findings alone
 - false positives (including any `non_issues` the run reported), and plausible new findings the gold
   review didn't raise: label those in the case, as findings or non-issues, then
-  `bin/waterboy -judge -eval-out <dir>` re-scores the runs against the edited cases
+  `bin/sisyphus -judge -eval-out <dir>` re-scores the runs against the edited cases
 - whether the verdict matches, how many findings the review says it reproduced, cost, turns, minutes
 - leaked: the PR's later commits or its merge commit showing up in the run's log. They're still in the
   clone, so a run that went looking for them is marked, not prevented
 
-A variant is a waterboy config (`-config`): image, prompt, model and turn limit come from it, so to
+A variant is a sisyphus config (`-config`): image, prompt, model and turn limit come from it, so to
 compare two, run the same cases with each and compare the reports. Run evals while the app is idle; they
 don't wait on `review.five_hour_percent`. Keep cases out of this repo (it's public); the default spot
-is `~/.config/waterboy/eval/cases/`. A case:
+is `~/.config/sisyphus/eval/cases/`. A case:
 
 ```json
 {"pr": "ethyca/fidesplus#6529", "sha": "d963d1a7edb5", "cutoff": "2026-10-26T17:17:00Z",
@@ -270,8 +270,8 @@ is `~/.config/waterboy/eval/cases/`. A case:
 Runs via `sh -c` with the worktree as cwd, at most 3 times per PR head (sync is retried after
 each run). If it's still conflicting the PR gets `last_error`; the hook runs again only after a
 new push. Environment:
-`WATERBOY_HOOK`, `WATERBOY_PR_URL`, `WATERBOY_REPO`, `WATERBOY_PR_NUMBER`, `WATERBOY_BRANCH`,
-`WATERBOY_WORKTREE`, `WATERBOY_CONFLICT_REASON` (`dirty` | `ahead` | `diverged` | `untracked-collision`).
+`SISYPHUS_HOOK`, `SISYPHUS_PR_URL`, `SISYPHUS_REPO`, `SISYPHUS_PR_NUMBER`, `SISYPHUS_BRANCH`,
+`SISYPHUS_WORKTREE`, `SISYPHUS_CONFLICT_REASON` (`dirty` | `ahead` | `diverged` | `untracked-collision`).
 
 ## Architecture
 

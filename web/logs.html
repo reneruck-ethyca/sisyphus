@@ -12,7 +12,7 @@
   const src = new EventSource("/api/logs/stream");
   let dropped = false;
   src.onopen = () => {
-    if (dropped) log.replaceChildren(); // waterboy may have restarted: seqs start over, the backlog is resent
+    if (dropped) log.replaceChildren(); // sisyphus may have restarted: seqs start over, the backlog is resent
     state.textContent = "live";
   };
   src.onerror = () => { dropped = true; state.textContent = "disconnected, retrying…"; };

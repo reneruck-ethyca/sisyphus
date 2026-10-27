@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/jsonfile"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/jsonfile"
 )
 
 type Tracked struct {

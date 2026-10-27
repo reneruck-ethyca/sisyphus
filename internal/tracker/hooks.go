@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/worktree"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 const maxHookRuns = 3

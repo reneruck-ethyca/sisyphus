@@ -1,4 +1,4 @@
-module github.com/reneruck/waterboy
+module github.com/reneruck/sisyphus
 
 go 1.27
 

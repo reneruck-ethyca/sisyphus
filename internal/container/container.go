@@ -1,5 +1,5 @@
 // Package container runs review workloads in isolated containers. Runtime is
-// stateless and ID-based, so a restarted waterboy can find and re-attach to
+// stateless and ID-based, so a restarted sisyphus can find and re-attach to
 // containers it started earlier (by label).
 package container
 

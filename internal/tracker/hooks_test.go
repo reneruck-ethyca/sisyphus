@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/worktree"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 func TestSyncWithRetry(t *testing.T) {
@@ -47,8 +47,8 @@ func TestSyncWithRetry(t *testing.T) {
 
 func TestRunHookEnvAndDir(t *testing.T) {
 	dir := t.TempDir()
-	err := runHook(context.Background(), `printf %s "$WATERBOY_PR_URL" > out`, time.Minute, dir,
-		map[string]string{"WATERBOY_PR_URL": "https://x/pull/1"})
+	err := runHook(context.Background(), `printf %s "$SISYPHUS_PR_URL" > out`, time.Minute, dir,
+		map[string]string{"SISYPHUS_PR_URL": "https://x/pull/1"})
 	b, _ := os.ReadFile(filepath.Join(dir, "out"))
 	if err != nil || string(b) != "https://x/pull/1" {
 		t.Fatalf("err=%v out=%q", err, b)

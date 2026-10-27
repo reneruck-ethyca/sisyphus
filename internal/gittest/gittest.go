@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/reneruck/waterboy/internal/proc"
+	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 // Git runs git in dir and fails the test on error.

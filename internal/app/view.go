@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 // Tones colour a verdict in the UIs.

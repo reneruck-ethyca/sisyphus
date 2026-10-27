@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/testkit"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/app"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/testkit"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestUI(t *testing.T) {

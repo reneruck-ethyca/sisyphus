@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/reneruck/waterboy/internal/jsonfile"
+	"github.com/reneruck/sisyphus/internal/jsonfile"
 )
 
 // Field is a setting the UIs edit, named by its key in the config file. The rest
@@ -43,7 +43,7 @@ var fields = []Field{
 	{Key: "review.retry_backoff", Type: "text", Group: "Reviews", Label: "Retry backoff", Help: "Wait before the first retry, doubling after each, e.g. 2m."},
 	{Key: "review.stack_from", Type: "text", Group: "Local stack", Label: "Start stacks from", Options: []string{"worktree", "safe"}, Help: "worktree: the PR's code, on the host. safe: the clone in the repos root."},
 	{Key: "review.setup_step_timeout", Type: "text", Group: "Local stack", Label: "Setup step timeout", Help: "Each setup step (uv sync, npm install…) is killed past this, failing the run. E.g. 20m."},
-	{Key: "review.cleanup", Type: "bool", Group: "Local stack", Label: "Reset worktrees after each run", Help: "Only worktrees waterboy created."},
+	{Key: "review.cleanup", Type: "bool", Group: "Local stack", Label: "Reset worktrees after each run", Help: "Only worktrees sisyphus created."},
 	{Key: "repos_root", Type: "text", Group: "Advanced", Label: "Repos root", Help: "Clones live at <repos root>/<repo>."},
 	{Key: "hook_timeout", Type: "text", Group: "Advanced", Label: "Hook timeout", Help: "Per hook run, e.g. 30m."},
 	{Key: "review.env_file", Type: "text", Group: "Advanced", Label: "Env file", Help: "Holds CLAUDE_CODE_OAUTH_TOKEN and a read-only GH_TOKEN."},

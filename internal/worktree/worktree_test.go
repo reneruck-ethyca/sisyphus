@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/gittest"
-	"github.com/reneruck/waterboy/internal/proc"
+	"github.com/reneruck/sisyphus/internal/gittest"
+	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 func wantConflict(t *testing.T, err error, reason string) {

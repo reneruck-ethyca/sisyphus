@@ -11,7 +11,7 @@ import (
 )
 
 // Window is one reading of the subscription's 5-hour rate-limit window: the
-// share of it used so far (0–1, by the user and waterboy together) and when it resets.
+// share of it used so far (0–1, by the user and sisyphus together) and when it resets.
 type Window struct {
 	ResetsAt time.Time
 	Used     float64
@@ -44,9 +44,9 @@ func observe(spans []Span, w Window) []Span {
 	return append(spans, Span{ResetsAt: w.ResetsAt, First: w.Used, Last: w.Used})
 }
 
-// Budget is waterboy's use of the current 5-hour window against its share.
+// Budget is sisyphus's use of the current 5-hour window against its share.
 type Budget struct {
-	Share    float64   `json:"share"`     // what waterboy may use of each window, 0–1; 0 = no limit
+	Share    float64   `json:"share"`     // what sisyphus may use of each window, 0–1; 0 = no limit
 	Used     float64   `json:"used"`      // what its runs used of the current window
 	Account  float64   `json:"account"`   // the window's latest reading: everyone's use
 	ResetsAt time.Time `json:"resets_at"` // zero = no reading of a current window yet
@@ -61,10 +61,10 @@ func (r *Reviewer) Budget() Budget {
 	return budget(r.st.Runs, float64(r.cfg.FiveHourPct)/100, time.Now())
 }
 
-// budget adds up the rises runs saw in the latest window. Waterboy's use is the
+// budget adds up the rises runs saw in the latest window. Sisyphus's use is the
 // union of its runs' spans: utilization only grows within a window, so runs that
 // overlapped in time overlap here too and aren't counted twice. Whatever the user
-// used meanwhile counts as waterboy's.
+// used meanwhile counts as sisyphus's.
 // ponytail: runs trimmed past keepRuns, or wiped by a reset, drop out of the sum.
 func budget(runs map[string][]Run, share float64, now time.Time) Budget {
 	b := Budget{Share: share}

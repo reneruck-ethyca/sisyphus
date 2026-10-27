@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/jsonfile"
-	"github.com/reneruck/waterboy/internal/tracker"
-	"github.com/reneruck/waterboy/internal/worktree"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/jsonfile"
+	"github.com/reneruck/sisyphus/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 // Job is one review to run, with the PR as the tracker announced it.
@@ -62,7 +62,7 @@ type Run struct {
 	Dir       string        `json:"dir"`
 	Claude    *ClaudeResult `json:"claude,omitempty"`    // Claude's final result line, once it has one
 	Usage     []Span        `json:"usage,omitempty"`     // the 5-hour windows it used, by Claude's rate-limit readings
-	Posted    *Posted       `json:"posted,omitempty"`    // what waterboy posted to GitHub
+	Posted    *Posted       `json:"posted,omitempty"`    // what sisyphus posted to GitHub
 	Stack     *StackRun     `json:"stack,omitempty"`     // the local stack it ran against
 	PostNote  string        `json:"post_note,omitempty"` // what came of posting, in a line (succeeded runs)
 	Overdue   bool          `json:"overdue,omitempty"`   // still running past review.timeout (set by Status)
@@ -266,7 +266,7 @@ func (r *Reviewer) once(key string) bool {
 
 // Forget wipes a PR's review state ("" = every PR's): its queued job, run records
 // and run directories, and its review containers; a review this process is
-// running is stopped. Meant for `waterboy -reset`, with the app stopped.
+// running is stopped. Meant for `sisyphus -reset`, with the app stopped.
 func (r *Reviewer) Forget(ctx context.Context, prID string) error { return r.forget(ctx, prID, true) }
 
 // forget is Forget, leaving stacks alone unless withStacks.
@@ -290,9 +290,9 @@ func (r *Reviewer) forget(ctx context.Context, prID string, withStacks bool) err
 	for _, c := range cancels {
 		c(errReset)
 	}
-	labels := map[string]string{"waterboy": "1"}
+	labels := map[string]string{"sisyphus": "1"}
 	if prID != "" {
-		labels["waterboy.pr"] = prID
+		labels["sisyphus.pr"] = prID
 	}
 	cs, err := r.rt.List(ctx, labels)
 	for _, c := range cs {
@@ -435,7 +435,7 @@ func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func
 		giveUp(context.Cause(runCtx))
 		return
 	}
-	infos, err := r.rt.List(runCtx, map[string]string{"waterboy.run": run.ID})
+	infos, err := r.rt.List(runCtx, map[string]string{"sisyphus.run": run.ID})
 	if err != nil || len(infos) != 1 {
 		for _, c := range infos {
 			r.rt.Remove(context.WithoutCancel(appCtx), c.ID)
@@ -454,7 +454,7 @@ func (r *Reviewer) sweepOrphans(ctx context.Context) {
 	if r.waitRuntime(ctx) != nil {
 		return
 	}
-	cs, err := r.rt.List(ctx, map[string]string{"waterboy": "1"})
+	cs, err := r.rt.List(ctx, map[string]string{"sisyphus": "1"})
 	if err != nil {
 		return
 	}
@@ -467,8 +467,8 @@ func (r *Reviewer) sweepOrphans(ctx context.Context) {
 	}
 	r.mu.Unlock()
 	for _, c := range cs {
-		if !running[c.Labels["waterboy.run"]] {
-			slog.Warn("removing orphaned review container", "container", c.ID, "run", c.Labels["waterboy.run"])
+		if !running[c.Labels["sisyphus.run"]] {
+			slog.Warn("removing orphaned review container", "container", c.ID, "run", c.Labels["sisyphus.run"])
 			r.rt.Remove(ctx, c.ID)
 		}
 	}
@@ -717,7 +717,7 @@ func (r *Reviewer) endEarly(appCtx, runCtx context.Context, run Run, err error, 
 }
 
 func (r *Reviewer) removeRun(ctx context.Context, runID string) {
-	cs, _ := r.rt.List(ctx, map[string]string{"waterboy.run": runID})
+	cs, _ := r.rt.List(ctx, map[string]string{"sisyphus.run": runID})
 	for _, c := range cs {
 		r.rt.Remove(ctx, c.ID)
 	}
@@ -788,11 +788,11 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	}
 	mounts = append(mounts,
 		container.Mount{Source: filepath.Join(run.Dir, "out"), Target: "/out"},
-		container.Mount{Source: filepath.Join(run.Dir, "prompt.md"), Target: "/waterboy/prompt.md", ReadOnly: true},
+		container.Mount{Source: filepath.Join(run.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
 		container.Mount{Source: filepath.Join(run.Dir, "claude"), Target: claudeDir}, // fresh per run
 	)
 	if r.GitHub != nil {
-		mounts = append(mounts, container.Mount{Source: filepath.Join(run.Dir, "context"), Target: "/waterboy/context", ReadOnly: true})
+		mounts = append(mounts, container.Mount{Source: filepath.Join(run.Dir, "context"), Target: "/sisyphus/context", ReadOnly: true})
 	}
 	if r.cfg.PluginsVolume != "" {
 		mounts = append(mounts, container.Mount{Source: r.cfg.PluginsVolume, Target: claudeDir + "/plugins"})
@@ -800,10 +800,10 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	}
 
 	env := map[string]string{
-		"WATERBOY_RUN_ID": run.ID, "WATERBOY_REASON": run.Job.Reason,
-		"WATERBOY_PR_URL": tr.URL, "WATERBOY_REPO": tr.Repo, "WATERBOY_PR_NUMBER": strconv.Itoa(tr.Number),
-		"WATERBOY_BRANCH": tr.HeadRef, "WATERBOY_HEAD_SHA": tr.HeadSHA, "WATERBOY_WORKTREE": workdir,
-		"WATERBOY_OUT":      "/out",
+		"SISYPHUS_RUN_ID": run.ID, "SISYPHUS_REASON": run.Job.Reason,
+		"SISYPHUS_PR_URL": tr.URL, "SISYPHUS_REPO": tr.Repo, "SISYPHUS_PR_NUMBER": strconv.Itoa(tr.Number),
+		"SISYPHUS_BRANCH": tr.HeadRef, "SISYPHUS_HEAD_SHA": tr.HeadSHA, "SISYPHUS_WORKTREE": workdir,
+		"SISYPHUS_OUT":      "/out",
 		"CLAUDE_CONFIG_DIR": claudeDir,
 		// The container's user doesn't own the mounted files; let git work anyway.
 		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": "*",
@@ -826,15 +826,15 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	}
 	return container.Spec{
 		Network: network,
-		Name:    "waterboy-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
+		Name:    "sisyphus-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
 		Image:   repo.Image, Command: []string{"bash", "-c", r.script(repo, owned)}, Env: env, EnvFiles: envFiles,
 		Mounts: mounts, Workdir: workdir,
-		Labels: map[string]string{"waterboy": "1", "waterboy.run": run.ID, "waterboy.pr": tr.Key()},
+		Labels: map[string]string{"sisyphus": "1", "sisyphus.run": run.ID, "sisyphus.pr": tr.Key()},
 	}, nil
 }
 
 // claudeDir is Claude Code's config dir inside review containers.
-const claudeDir = "/waterboy/claude"
+const claudeDir = "/sisyphus/claude"
 
 // script is the container's command: own the volumes, run the repo's setup,
 // then Claude headless on the rendered prompt.
@@ -857,17 +857,17 @@ func (r *Reviewer) setupScript(repo config.RepoReview, owned []string) string {
 t=$SECONDS; rc=0
 timeout -k 30 %d bash -eo pipefail -c %s || rc=$?
 [ $rc -ne 124 ] && [ $rc -ne 137 ] || echo %s
-echo "── waterboy: took $((SECONDS-t))s"
+echo "── sisyphus: took $((SECONDS-t))s"
 [ $rc -eq 0 ] || exit $rc
-`, shellQuote("── waterboy: setup: "+label+" ──"), limit, shellQuote(step),
-			shellQuote("── waterboy: timed out after "+r.cfg.StepTimeout.String()+" (setup_step_timeout)"))
+`, shellQuote("── sisyphus: setup: "+label+" ──"), limit, shellQuote(step),
+			shellQuote("── sisyphus: timed out after "+r.cfg.StepTimeout.String()+" (setup_step_timeout)"))
 	}
 	return sb.String()
 }
 
 func (r *Reviewer) claudeScript() string {
 	var sb strings.Builder
-	sb.WriteString("echo '── waterboy: claude ──'\n")
+	sb.WriteString("echo '── sisyphus: claude ──'\n")
 	args := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
 		"--model", r.cfg.Model, "--max-turns", strconv.Itoa(r.cfg.MaxTurns)}
 	if r.cfg.MaxBudgetUSD > 0 {
@@ -878,10 +878,10 @@ func (r *Reviewer) claudeScript() string {
 	}
 	// The image's tooling, if it has any: plugins (skills, LSPs) and MCP servers.
 	sb.WriteString(`extra=()
-for d in /opt/waterboy/plugins/*/; do [ -d "$d" ] && extra+=(--plugin-dir "$d"); done
-[ -f /opt/waterboy/mcp.json ] && extra+=(--mcp-config /opt/waterboy/mcp.json)
+for d in /opt/sisyphus/plugins/*/; do [ -d "$d" ] && extra+=(--plugin-dir "$d"); done
+[ -f /opt/sisyphus/mcp.json ] && extra+=(--mcp-config /opt/sisyphus/mcp.json)
 `)
-	sb.WriteString("exec " + strings.Join(args, " ") + ` "${extra[@]}" < /waterboy/prompt.md` + "\n")
+	sb.WriteString("exec " + strings.Join(args, " ") + ` "${extra[@]}" < /sisyphus/prompt.md` + "\n")
 	return sb.String()
 }
 
@@ -919,7 +919,7 @@ func volumeName(repo, path string) string {
 			return '-'
 		}, s)
 	}
-	return "waterboy-" + clean(repo) + "-" + clean(path)
+	return "sisyphus-" + clean(repo) + "-" + clean(path)
 }
 
 // previousHead is the head of the PR's last successful review.
@@ -1041,7 +1041,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		}
 		note := postNote(posted, err, r.cfg.Post && r.GitHub != nil)
 		r.record(id, run.ID, func(x *Run) { x.Posted, x.PostNote = posted, note })
-		r.appendLog(id, run, lw, "── waterboy: "+note)
+		r.appendLog(id, run, lw, "── sisyphus: "+note)
 		slog.Info("review "+strings.SplitN(note, ":", 2)[0], "pr", id, "run", run.ID, "note", note)
 		if err != nil {
 			status, why = Failed, fmt.Errorf("posting review: %w", err)
@@ -1090,7 +1090,7 @@ func postNote(p *Posted, err error, posting bool) string {
 	return note
 }
 
-// appendLog adds a waterboy line after the container's output, in the run log
+// appendLog adds a sisyphus line after the container's output, in the run log
 // and to live subscribers. lw is the run's log writer, done by now (nil = no log).
 func (r *Reviewer) appendLog(prID string, run Run, lw *lineWriter, line string) {
 	if lw == nil {

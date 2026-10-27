@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 var RefA = github.PRRef{Repo: "ethyca/a", Number: 1}

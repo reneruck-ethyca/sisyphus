@@ -15,12 +15,12 @@ func TestRunArgs(t *testing.T) {
 		Name: "wb-1", Network: "net", Image: "img:1", Command: []string{"sh", "-c", "echo hi"},
 		Env:     map[string]string{"SECRET": "s3cr3t", "A": "1"},
 		Mounts:  []Mount{{Source: "/w", Target: "/w"}, {Source: "/g", Target: "/g", ReadOnly: true}},
-		Workdir: "/w", Labels: map[string]string{"waterboy": "1"},
+		Workdir: "/w", Labels: map[string]string{"sisyphus": "1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run", "--detach", "--init", "--name", "wb-1", "--network", "net", "--label", "waterboy=1",
+	want := []string{"run", "--detach", "--init", "--name", "wb-1", "--network", "net", "--label", "sisyphus=1",
 		"--env", "A", "--env", "SECRET", "--volume", "/w:/w", "--volume", "/g:/g:ro",
 		"--workdir", "/w", "--entrypoint", "sh", "img:1", "-c", "echo hi"}
 	if !slices.Equal(args, want) {
@@ -35,8 +35,8 @@ func TestRunArgs(t *testing.T) {
 }
 
 func TestParseInspect(t *testing.T) {
-	got, err := parseInspect([]byte(`[{"Id":"abc","Config":{"Labels":{"waterboy.run":"r1"}},"State":{"Running":false,"ExitCode":3}}]`))
-	if err != nil || len(got) != 1 || got[0].ID != "abc" || got[0].Labels["waterboy.run"] != "r1" || got[0].Running || got[0].ExitCode != 3 {
+	got, err := parseInspect([]byte(`[{"Id":"abc","Config":{"Labels":{"sisyphus.run":"r1"}},"State":{"Running":false,"ExitCode":3}}]`))
+	if err != nil || len(got) != 1 || got[0].ID != "abc" || got[0].Labels["sisyphus.run"] != "r1" || got[0].Running || got[0].ExitCode != 3 {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
@@ -49,7 +49,7 @@ func TestDockerRoundTrip(t *testing.T) {
 		t.Skip("no docker")
 	}
 	dir, _ := filepath.EvalSymlinks(t.TempDir()) // /var → /private/var, which Docker Desktop shares
-	labels := map[string]string{"waterboy.test": t.Name()}
+	labels := map[string]string{"sisyphus.test": t.Name()}
 	id, err := d.Start(ctx, Spec{
 		Image: "alpine/git:v2.49.1", Command: []string{"sh", "-c", `echo "hi $WHO"; echo out > /out/f; exit 3`},
 		Env: map[string]string{"WHO": "there"}, Mounts: []Mount{{Source: dir, Target: "/out"}}, Labels: labels,

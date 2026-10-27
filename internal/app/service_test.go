@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/testkit"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/testkit"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestHealth(t *testing.T) {

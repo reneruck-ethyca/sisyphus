@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.}} · waterboy</title>
+<title>{{.}} · sisyphus</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 
 {{/* top is the header bar; .Status is nil on pages that don't show it. */}}
 {{define "top"}}<header class="top">
-  <a class="brand" href="/">waterboy</a>
+  <a class="brand" href="/">sisyphus</a>
   {{with .Status}}{{if .Running}}<span class="checked running">Checking now…</span>
   {{else if .LastRun.IsZero}}<span class="checked running">Starting…</span>
   {{else if .LastError}}<span class="checked failed">Last check failed {{ago .LastRun}}</span>

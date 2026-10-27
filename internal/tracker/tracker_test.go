@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/gittest"
-	"github.com/reneruck/waterboy/internal/worktree"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/gittest"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 func newTestTracker(t *testing.T, gh github.Client, tracked ...*Tracked) *Tracker {
@@ -153,7 +153,7 @@ func TestTickForgetsManuallyDeletedWorktree(t *testing.T) {
 	if len(tr.state.PRs) != 0 || gh.PRCalls != 0 {
 		t.Fatalf("still tracked: %+v calls=%d", tr.state.PRs, gh.PRCalls)
 	}
-	rec.want(t, "dropped worktree deleted outside waterboy")
+	rec.want(t, "dropped worktree deleted outside sisyphus")
 	if worktree.BranchExists(context.Background(), clone, "pr-branch") {
 		t.Fatal("created branch with nothing unpushed should be deleted")
 	}

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/sisyphus/internal/github"
 )
 
 func TestStateRoundTrip(t *testing.T) {

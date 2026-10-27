@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/sisyphus/internal/github"
 )
 
 func at(m int) time.Time { return time.Date(2026, 10, 20, 12, m, 0, 0, time.UTC) }
@@ -88,12 +88,12 @@ func TestRequested(t *testing.T) {
 	}
 }
 
-// What waterboy posts never counts as a reply, whoever's account posted it
+// What sisyphus posts never counts as a reply, whoever's account posted it
 // (otherwise its own review triggers a follow-up review of itself).
-func TestNewRepliesIgnoresWaterboysOwnPosts(t *testing.T) {
-	own := github.Review{User: "poster", State: "COMMENTED", Body: "Looks off.\n\n" + WaterboyMark, SubmittedAt: at(2)}
+func TestNewRepliesIgnoresSisyphussOwnPosts(t *testing.T) {
+	own := github.Review{User: "poster", State: "COMMENTED", Body: "Looks off.\n\n" + SisyphusMark, SubmittedAt: at(2)}
 	pr := github.PR{Reviews: []github.Review{own}, Comments: []github.Comment{
-		{User: "poster", Body: "Thanks!\n\n" + WaterboyMark, CreatedAt: at(3)},
+		{User: "poster", Body: "Thanks!\n\n" + SisyphusMark, CreatedAt: at(3)},
 		{User: "alice", Body: "Fixed.", CreatedAt: at(4)},
 	}}
 	if n, latest := newReplies(pr, "me", at(1)); n != 1 || !latest.Equal(at(4)) {

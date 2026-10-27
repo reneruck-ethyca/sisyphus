@@ -12,12 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
-// Status is a point-in-time snapshot of waterboy for UIs and APIs.
+// Status is a point-in-time snapshot of sisyphus for UIs and APIs.
 type Status struct {
 	User      string    `json:"user"`
 	Org       string    `json:"org"`
@@ -302,7 +302,7 @@ func (s *Service) Wipe(ctx context.Context, id string) error {
 	})
 }
 
-// Untrack is Wipe plus forgetting the PR (its worktree and branch, if waterboy
+// Untrack is Wipe plus forgetting the PR (its worktree and branch, if sisyphus
 // created them); it isn't picked up again until Retrack.
 func (s *Service) Untrack(ctx context.Context, id string) error {
 	return s.do(ctx, func(ctx context.Context) error {

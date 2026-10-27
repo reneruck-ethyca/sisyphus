@@ -12,9 +12,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 // fakeShell records host-side stack commands; fn decides each one's outcome.
@@ -59,8 +59,8 @@ func (s *fakeShell) ups() (ups []shellCall) {
 
 func (s *fakeShell) composed(verb string) (projects []string) {
 	for _, c := range s.get() {
-		if strings.Contains(c.Script, "docker compose -p \"$WATERBOY_STACK\" "+verb) {
-			projects = append(projects, strings.TrimPrefix(c.Env[0], "WATERBOY_STACK="))
+		if strings.Contains(c.Script, "docker compose -p \"$SISYPHUS_STACK\" "+verb) {
+			projects = append(projects, strings.TrimPrefix(c.Env[0], "SISYPHUS_STACK="))
 		}
 	}
 	return projects
@@ -280,7 +280,7 @@ func TestStackStatus(t *testing.T) {
 			{Name: "fidesplus-db-pr-1", Service: "fidesplus-db", State: "running", Status: "Up 5 minutes (healthy)", Image: "postgres:17"},
 			{Name: "fidesplus-redis-pr-1", Service: "fidesplus-redis", State: "exited", Status: "Exited (0) 3 days ago", Image: "redis:8.0-alpine"}},
 		Volumes: []string{"proj-pr-1_postgres"}, Networks: []string{"proj-pr-1_default"}}
-	if !reflect.DeepEqual(*s, want) || sh.get()[0].Env[0] != "WATERBOY_STACK=proj-pr-1" {
+	if !reflect.DeepEqual(*s, want) || sh.get()[0].Env[0] != "SISYPHUS_STACK=proj-pr-1" {
 		t.Fatalf("got %+v", *s)
 	}
 
@@ -313,7 +313,7 @@ func TestWipeStopsRunningReviewThenRemovesEverything(t *testing.T) {
 		t.Fatalf("left: containers %d, runs %d, down %v", len(f.containers()), len(f.runs()), sh.composed("down"))
 	}
 	if !slices.ContainsFunc(sh.get(), func(c shellCall) bool {
-		return strings.Contains(c.Script, "docker image rm") && c.Env[0] == "WATERBOY_IMAGE=postgres:17"
+		return strings.Contains(c.Script, "docker image rm") && c.Env[0] == "SISYPHUS_IMAGE=postgres:17"
 	}) {
 		t.Fatal("the stack's image wasn't removed")
 	}

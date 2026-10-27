@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 // GitHub is what reviews need from GitHub, done on the host with the user's
@@ -46,7 +46,7 @@ type Reply struct {
 	Body      string `json:"body"`
 }
 
-// Posted records what waterboy posted for a run.
+// Posted records what sisyphus posted for a run.
 type Posted struct {
 	URL      string `json:"url,omitempty"`
 	Event    string `json:"event,omitempty"`
@@ -56,7 +56,7 @@ type Posted struct {
 	Error    string `json:"error,omitempty"`
 }
 
-const footer = "\n\n" + tracker.WaterboyMark // also how the tracker knows not to count our posts as replies
+const footer = "\n\n" + tracker.SisyphusMark // also how the tracker knows not to count our posts as replies
 
 var events = []string{"APPROVE", "REQUEST_CHANGES", "COMMENT"}
 

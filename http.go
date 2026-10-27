@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/review"
+	"github.com/reneruck/sisyphus/internal/app"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/review"
 )
 
 //go:embed web/*.html web/style.css

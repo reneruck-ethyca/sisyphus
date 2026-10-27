@@ -20,7 +20,7 @@
   <span id="msg" role="status"></span>
   <button type="button" class="btn quiet" id="discard">Discard</button>
   <button type="submit" class="btn" id="save" form="settings">Save</button>
-  <button type="button" class="btn" id="restart" hidden>Restart waterboy</button>
+  <button type="button" class="btn" id="restart" hidden>Restart sisyphus</button>
 </div>
 
 {{define "fields"}}{{range .}}<div class="field">
@@ -62,7 +62,7 @@
     c.forEach(el => el.type === "checkbox" ? el.defaultChecked = el.checked
       : el.tagName === "SELECT" ? [...el.options].forEach(o => o.defaultSelected = o.selected) : el.defaultValue = el.value);
     form.querySelectorAll(".dirty").forEach(f => f.classList.remove("dirty"));
-    show("Saved. Restart waterboy to apply.", true);
+    show("Saved. Restart sisyphus to apply.", true);
   };
   restart.onclick = async () => {
     restart.disabled = true;

@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"os/exec"
 
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/review"
+	"github.com/reneruck/sisyphus/internal/app"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -44,7 +44,7 @@ func (u *UI) Logs() []app.LogEntry      { return u.svc.Logs() }
 func (u *UI) Settings() (app.Settings, error)          { return u.svc.Settings() }
 func (u *UI) SaveSettings(values map[string]any) error { return u.svc.SaveSettings(values) }
 
-// Restart re-execs waterboy; the new one starts with its window hidden.
+// Restart re-execs sisyphus; the new one starts with its window hidden.
 func (u *UI) Restart() { restartSoon() }
 
 // RunOutput is a run's readable output so far; live "run-event" events with
@@ -103,14 +103,14 @@ func (u *UI) PR(id string) (app.PRView, error) {
 func runApp(cfg config.Config, svc *app.Service) error {
 	assets, _ := fs.Sub(frontend, "frontend") // can't fail: "frontend" is a valid, embedded path
 	wapp := application.New(application.Options{
-		Name:     "waterboy",
+		Name:     "sisyphus",
 		Services: []application.Service{application.NewService(&UI{svc})},
 		Assets:   application.AssetOptions{Handler: wailsAssets(assets)},
 		Mac:      application.MacOptions{ActivationPolicy: application.ActivationPolicyAccessory},
 	})
 
 	win := wapp.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "waterboy", Width: 1100, Height: 760, Hidden: true, URL: "/",
+		Title: "sisyphus", Width: 1100, Height: 760, Hidden: true, URL: "/",
 	})
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		win.Hide() // keep it around for "Open window"
@@ -143,8 +143,8 @@ func runApp(cfg config.Config, svc *app.Service) error {
 	menu.Add("Quit").OnClick(func(*application.Context) { wapp.Quit() })
 
 	tray := wapp.SystemTray.New()
-	tray.SetLabel("WB")
-	tray.SetTooltip("waterboy")
+	tray.SetLabel("SY")
+	tray.SetTooltip("sisyphus")
 	tray.SetMenu(menu)
 
 	svc.OnChange(func(st app.Status) {

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/review"
+	"github.com/reneruck/sisyphus/internal/review"
 )
 
 // JudgeModel scores runs; it only reads text, so it needs no tools.

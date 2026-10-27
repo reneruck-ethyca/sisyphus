@@ -18,7 +18,7 @@ review the code again only if the discussion calls for it.
 This is your first review of this PR.
 {{- end}}
 
-1. Read the PR and its whole discussion in /waterboy/context/: `pr.json` (description, base branch),
+1. Read the PR and its whole discussion in /sisyphus/context/: `pr.json` (description, base branch),
    `reviews.json`, `review_comments.json` (inline comments, with their `id`s) and `issue_comments.json`.
    Your own earlier reviews are in there too.
 2. Perform an in-depth adversarial review of the change (`{{.Diff}}`).
@@ -32,7 +32,7 @@ This is your first review of this PR.
    come from the PR description, the attack lines from the risks you see in the diff, known issues
    from the earlier discussion, and the report goes in your final message. Jira and Confluence are
    read-only; the linked ticket is worth reading for intent.
-3. Don't post anything to GitHub yourself. Write your review to /out/review.json and waterboy posts it:
+3. Don't post anything to GitHub yourself. Write your review to /out/review.json and sisyphus posts it:
    ```json
    {"event": "APPROVE | REQUEST_CHANGES | COMMENT",
     "body": "the review summary (markdown)",

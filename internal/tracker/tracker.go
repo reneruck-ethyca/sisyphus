@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/proc"
-	"github.com/reneruck/waterboy/internal/worktree"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/proc"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 type Tracker struct {
@@ -245,7 +245,7 @@ func (t *Tracker) announce(tr *Tracked) {
 	tr.AnnouncedSHA, tr.UnannouncedReplies = tr.HeadSHA, 0
 }
 
-// Forget stops tracking id, removing its worktree if waterboy created it, so the
+// Forget stops tracking id, removing its worktree if sisyphus created it, so the
 // next tick discovers it from scratch. It waits (until ctx ends) for whatever
 // holds the worktree. Call it on the ticking goroutine.
 func (t *Tracker) Forget(ctx context.Context, id string) error {
@@ -274,7 +274,7 @@ func (t *Tracker) Forget(ctx context.Context, id string) error {
 	return nil
 }
 
-// forgetMissing handles a worktree deleted outside waterboy: drop the entry (the
+// forgetMissing handles a worktree deleted outside sisyphus: drop the entry (the
 // next tick re-tracks the PR if it's still eligible) and delete our branch, but
 // only if it holds nothing unpushed (`git branch -d` refuses otherwise).
 // Untrack forgets a PR (removing the worktree and branch it created) and ignores
@@ -329,8 +329,8 @@ func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 		}
 	}
 	delete(t.state.PRs, tr.Key())
-	slog.Info("worktree deleted outside waterboy, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
-	t.Events.Dropped(*tr, "worktree deleted outside waterboy")
+	slog.Info("worktree deleted outside sisyphus, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
+	t.Events.Dropped(*tr, "worktree deleted outside sisyphus")
 }
 
 func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
@@ -340,9 +340,9 @@ func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
 	if hook := t.cfg.Hooks["on_conflict"]; hook != "" && tr.ConflictHeadSHA != tr.HeadSHA {
 		onConflict = func(reason string) error {
 			return runHook(ctx, hook, t.cfg.HookTimeout.Duration, tr.Worktree, map[string]string{
-				"WATERBOY_HOOK": "on_conflict", "WATERBOY_PR_URL": tr.URL, "WATERBOY_REPO": tr.Repo,
-				"WATERBOY_PR_NUMBER": strconv.Itoa(tr.Number), "WATERBOY_BRANCH": tr.HeadRef,
-				"WATERBOY_WORKTREE": tr.Worktree, "WATERBOY_CONFLICT_REASON": reason,
+				"SISYPHUS_HOOK": "on_conflict", "SISYPHUS_PR_URL": tr.URL, "SISYPHUS_REPO": tr.Repo,
+				"SISYPHUS_PR_NUMBER": strconv.Itoa(tr.Number), "SISYPHUS_BRANCH": tr.HeadRef,
+				"SISYPHUS_WORKTREE": tr.Worktree, "SISYPHUS_CONFLICT_REASON": reason,
 			})
 		}
 	}

@@ -15,14 +15,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/gittest"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/testkit"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/app"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/gittest"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/testkit"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer) {
@@ -349,7 +349,7 @@ func TestHTTPShowsRunningContainer(t *testing.T) {
 		t.Fatalf("reviewing = %+v", st.Reviewing)
 	}
 	a := st.Reviewing[0]
-	if a.PR != testkit.RefA.Key() || a.Run != run.ID || a.Container != run.Container || !strings.HasPrefix(a.Name, "waterboy-ethyca-a-1-") {
+	if a.PR != testkit.RefA.Key() || a.Run != run.ID || a.Container != run.Container || !strings.HasPrefix(a.Name, "sisyphus-ethyca-a-1-") {
 		t.Fatalf("active review = %+v", a)
 	}
 	_, body := get(t, srv.URL+"/")

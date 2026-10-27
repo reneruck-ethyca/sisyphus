@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 // Shell prepares the container a review of tr would run in (image, mounts, env
 // files, stack and its network, prompt and discussion) with an interactive bash
-// in place of the review, for `waterboy -shell`. The review's scripts are at
-// /waterboy/setup.sh and /waterboy/review.sh; nothing is posted. Make r on a
+// in place of the review, for `sisyphus -shell`. The review's scripts are at
+// /sisyphus/setup.sh and /sisyphus/review.sh; nothing is posted. Make r on a
 // scratch dir: it records the stack, which must not touch the app's reviews.json.
 // stop stops the stack again (keeping its volumes, as after a review).
 func (r *Reviewer) Shell(ctx context.Context, tr tracker.Tracked) (spec container.Spec, stop func(), err error) {
@@ -29,14 +29,14 @@ func (r *Reviewer) Shell(ctx context.Context, tr tracker.Tracked) (spec containe
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return spec, stop, err
 		}
-		spec.Mounts = append(spec.Mounts, container.Mount{Source: path, Target: "/waterboy/" + name, ReadOnly: true})
+		spec.Mounts = append(spec.Mounts, container.Mount{Source: path, Target: "/sisyphus/" + name, ReadOnly: true})
 	}
 	spec.Command = []string{"bash", "-c", fmt.Sprintf(`echo %s
-echo '  bash /waterboy/setup.sh    the repo setup, as a review runs it'
-echo '  bash /waterboy/review.sh   setup, then Claude on /waterboy/prompt.md (nothing is posted)'
-exec bash`, shellQuote(fmt.Sprintf("waterboy shell: %s at %.12s, in %s", tr.Key(), tr.HeadSHA, spec.Image)))}
-	// Not "waterboy": the app removes those containers when it has no run for them.
-	spec.Labels = map[string]string{"waterboy.shell": tr.Key()}
+echo '  bash /sisyphus/setup.sh    the repo setup, as a review runs it'
+echo '  bash /sisyphus/review.sh   setup, then Claude on /sisyphus/prompt.md (nothing is posted)'
+exec bash`, shellQuote(fmt.Sprintf("sisyphus shell: %s at %.12s, in %s", tr.Key(), tr.HeadSHA, spec.Image)))}
+	// Not "sisyphus": the app removes those containers when it has no run for them.
+	spec.Labels = map[string]string{"sisyphus.shell": tr.Key()}
 	return spec, stop, nil
 }
 
@@ -53,7 +53,7 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run,
 		return run, spec, stop, fmt.Errorf("env file missing: %s", f)
 	}
 	// Its stack would be re-upped and stopped under it.
-	cs, err := r.rt.List(ctx, map[string]string{"waterboy.pr": tr.Key()})
+	cs, err := r.rt.List(ctx, map[string]string{"sisyphus.pr": tr.Key()})
 	if err != nil {
 		return run, spec, stop, err
 	}
@@ -75,7 +75,7 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run,
 	return run, spec, stop, err
 }
 
-// Eval is a review run for `waterboy -eval`: job.PR's worktree must be at its
+// Eval is a review run for `sisyphus -eval`: job.PR's worktree must be at its
 // HeadSHA, and job.Base set. Claude gets no GitHub token (setup still does), so
 // it can't read what happened on the PR after the review being replayed.
 // Nothing is posted; the output stays in the returned run's Dir.
@@ -86,6 +86,6 @@ func (r *Reviewer) Eval(ctx context.Context, job Job, runID string) (run Run, sp
 	}
 	claude := r.claudeScript()
 	spec.Command[2] = strings.TrimSuffix(spec.Command[2], claude) + "unset GH_TOKEN GITHUB_TOKEN\n" + claude
-	spec.Labels = map[string]string{"waterboy.eval": job.PR.Key()} // not "waterboy", as with Shell
+	spec.Labels = map[string]string{"sisyphus.eval": job.PR.Key()} // not "sisyphus", as with Shell
 	return run, spec, stop, nil
 }

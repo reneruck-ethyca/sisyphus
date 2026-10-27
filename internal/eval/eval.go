@@ -17,13 +17,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/proc"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/tracker"
-	"github.com/reneruck/waterboy/internal/worktree"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/proc"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 // Case is one gold review, a JSON file.
@@ -102,7 +102,7 @@ func loadCase(f string) (Case, error) {
 	return c, nil
 }
 
-// Runner runs cases with one waterboy config: the variant being measured
+// Runner runs cases with one sisyphus config: the variant being measured
 // (image, prompt, model, turn limit all come from it).
 type Runner struct {
 	Cfg   config.Config
@@ -162,7 +162,7 @@ func (e Runner) runCase(ctx context.Context, rev *review.Reviewer, c Case) error
 	if err != nil {
 		return err
 	}
-	branch := fmt.Sprintf("waterboy-eval/%d-%.12s", ref.Number, sha)
+	branch := fmt.Sprintf("sisyphus-eval/%d-%.12s", ref.Number, sha)
 	wt, err := proc.Run(ctx, repoDir, "wtp", "add", "-b", branch, sha, "--quiet")
 	if err != nil {
 		return fmt.Errorf("worktree: %w", err)
@@ -195,7 +195,7 @@ func (e Runner) runCase(ctx context.Context, rev *review.Reviewer, c Case) error
 // its merge. Those stay fetchable from the clone, so the judge checks each
 // run's log for them instead.
 func prepareClone(ctx context.Context, dir string, ref github.PRRef, c Case, p pull) (sha, base string, leaks []string, err error) {
-	tmp := fmt.Sprintf("refs/waterboy-eval/%d", ref.Number)
+	tmp := fmt.Sprintf("refs/sisyphus-eval/%d", ref.Number)
 	if _, err = proc.Run(ctx, dir, "git", "fetch", "--quiet", "origin",
 		fmt.Sprintf("+refs/pull/%d/head:%s", ref.Number, tmp), "+refs/heads/"+p.Base.Ref+":refs/remotes/origin/"+p.Base.Ref); err != nil {
 		return "", "", nil, err

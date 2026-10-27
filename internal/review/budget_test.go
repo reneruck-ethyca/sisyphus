@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
+	"github.com/reneruck/sisyphus/internal/config"
 )
 
 func TestParseRateLimit(t *testing.T) {

@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestVerdict(t *testing.T) {

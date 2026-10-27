@@ -71,7 +71,7 @@
       <button data-action="wipe" data-pr="{{.ID}}" data-src="{{$api}}/wipe"
         data-confirm="Wipe the review data? Stops a running review, forgets the review history, and removes the stack: containers, network, DB volume, and its images unless something else uses them. The next review starts fresh.">Wipe review data<small>+ stack containers, volumes, images</small></button>
       <button class="danger" data-action="untrack" data-pr="{{.ID}}" data-src="{{$api}}/untrack" data-then="/"
-        data-confirm="Untrack this PR? Wipes its review data and stack, removes the worktree and branch waterboy created, and stops tracking it. It isn't picked up again until you track it again.">Untrack PR<small>+ worktree; ignored until tracked again</small></button>
+        data-confirm="Untrack this PR? Wipes its review data and stack, removes the worktree and branch sisyphus created, and stops tracking it. It isn't picked up again until you track it again.">Untrack PR<small>+ worktree; ignored until tracked again</small></button>
     </div></details>
     <span id="action-msg" class="muted" role="status"></span>
   </div>
@@ -124,7 +124,7 @@
   <dt>Worktree</dt><dd><code>{{.Worktree}}</code></dd>
   <dt>Head</dt><dd><code>{{.HeadSHA}}</code></dd>
   <dt>Synced</dt><dd><code>{{or .SyncedSHA "—"}}</code></dd>
-  <dt>Created by waterboy</dt><dd>{{if .CreatedWorktree}}worktree{{if .CreatedBranch}} and branch{{end}}; removed when the PR is untracked{{else}}no, reused an existing worktree{{end}}</dd>
+  <dt>Created by sisyphus</dt><dd>{{if .CreatedWorktree}}worktree{{if .CreatedBranch}} and branch{{end}}; removed when the PR is untracked{{else}}no, reused an existing worktree{{end}}</dd>
   <dt>Tracked since</dt><dd>{{when .TrackedAt}}</dd>
   <dt>Last activity on GitHub</dt><dd>{{when .LastSeenAt}}</dd>
   {{with .ConflictHeadSHA}}<dt>Conflict head</dt><dd><code>{{.}}</code></dd>{{end}}
@@ -230,7 +230,7 @@
 
   // Overview and PR pages reload when the status changes, but not while a menu is
   // open or a field has focus; open sections stay open across the reload.
-  const folds = "waterboy-open-folds:" + location.pathname;
+  const folds = "sisyphus-open-folds:" + location.pathname;
   try { JSON.parse(sessionStorage.getItem(folds) ?? "[]").forEach(id => document.getElementById(id)?.setAttribute("open", "")); } catch {}
   {{if not .Run}}let seen;
   const poll = async () => {
@@ -240,7 +240,7 @@
       if (now === seen || document.hidden || document.querySelector(".menu[open]") || document.activeElement?.matches("input, select, textarea")) return;
       try { sessionStorage.setItem(folds, JSON.stringify([...document.querySelectorAll("details.fold[open]")].map(d => d.id))); } catch {}
       location.reload();
-    } catch {} // waterboy restarting: try again next time
+    } catch {} // sisyphus restarting: try again next time
   };
   poll();
   setInterval(poll, 15000);{{end}}

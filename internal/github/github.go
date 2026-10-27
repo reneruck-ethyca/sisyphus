@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/proc"
+	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 // PRRef identifies a PR. Repo is "owner/name".
@@ -47,7 +47,7 @@ type PR struct {
 	Comments           []Comment // issue + inline review comments
 }
 
-// Client is everything waterboy needs from Client; swap the gh CLI out here.
+// Client is everything sisyphus needs from Client; swap the gh CLI out here.
 type Client interface {
 	CurrentUser(ctx context.Context) (string, error)
 	// Candidates finds open PRs that may await user's review. Search results lag

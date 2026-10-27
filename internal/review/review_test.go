@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/gittest"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/gittest"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 var refA = github.PRRef{Repo: "ethyca/a", Number: 1}
@@ -91,7 +91,7 @@ func (f *fixture) started(n int) func() bool {
 }
 
 func (f *fixture) containers() []container.Info {
-	infos, _ := f.rt.List(context.Background(), map[string]string{"waterboy": "1"})
+	infos, _ := f.rt.List(context.Background(), map[string]string{"sisyphus": "1"})
 	return infos
 }
 
@@ -114,10 +114,10 @@ func TestTrackedRunsReview(t *testing.T) {
 	}
 	s := f.rt.Started()[0]
 	gitDir, _ := filepath.EvalSymlinks(filepath.Join(f.tr.Worktree, ".git"))
-	if s.Image != "img:1" || s.Workdir != f.tr.Worktree || s.Labels["waterboy.pr"] != refA.Key() {
+	if s.Image != "img:1" || s.Workdir != f.tr.Worktree || s.Labels["sisyphus.pr"] != refA.Key() {
 		t.Fatalf("spec = %+v", s)
 	}
-	if s.Env["WATERBOY_REASON"] != "new" || s.Env["WATERBOY_HEAD_SHA"] != f.tr.HeadSHA || s.Env["WATERBOY_OUT"] != "/out" || s.Env["WB_TEST_TOKEN"] != "t0k" {
+	if s.Env["SISYPHUS_REASON"] != "new" || s.Env["SISYPHUS_HEAD_SHA"] != f.tr.HeadSHA || s.Env["SISYPHUS_OUT"] != "/out" || s.Env["WB_TEST_TOKEN"] != "t0k" {
 		t.Fatalf("env = %v", s.Env)
 	}
 	// A clone's .git lives inside the (read/write) worktree; it's overlaid read-only
@@ -134,7 +134,7 @@ func TestTrackedRunsReview(t *testing.T) {
 	f.succeed(f.containers()[0].ID, "looks good\n")
 	waitFor(t, "run to finish", f.lastStatus(Succeeded))
 	run := f.runs()[0]
-	if b, _ := os.ReadFile(filepath.Join(run.Dir, "log")); string(b) != "looks good\n"+okResult+"── waterboy: not posted: review.post is off (dry run); the review is in out/review.json\n" {
+	if b, _ := os.ReadFile(filepath.Join(run.Dir, "log")); string(b) != "looks good\n"+okResult+"── sisyphus: not posted: review.post is off (dry run); the review is in out/review.json\n" {
 		t.Fatalf("log = %q", b)
 	}
 	if _, err := os.Stat(filepath.Join(run.Dir, "run.json")); err != nil {
@@ -165,7 +165,7 @@ func TestMountsCloneGitDirForLinkedWorktree(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s ro=%v", m.Target, m.ReadOnly))
 	}
 	want := []string{wt + " ro=false", wt + "/.git ro=true", common + " ro=true", "/out ro=false",
-		"/waterboy/prompt.md ro=true", "/waterboy/claude ro=false"}
+		"/sisyphus/prompt.md ro=true", "/sisyphus/claude ro=false"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("mounts\n got %q\nwant %q", got, want)
 	}
@@ -208,7 +208,7 @@ func TestReclaimStopsRunAndKicks(t *testing.T) {
 	next.HeadSHA = gittest.Commit(t, f.tr.Worktree, "a.txt", "pushed") // what the tick's sync does
 	f.r.Updated(next, true, 0)
 	waitFor(t, "second container", f.started(1))
-	if s := f.rt.Started()[1]; s.Env["WATERBOY_REASON"] != "commits" || s.Env["WATERBOY_HEAD_SHA"] != next.HeadSHA {
+	if s := f.rt.Started()[1]; s.Env["SISYPHUS_REASON"] != "commits" || s.Env["SISYPHUS_HEAD_SHA"] != next.HeadSHA {
 		t.Fatalf("second run env = %v", s.Env)
 	}
 }
@@ -224,7 +224,7 @@ func TestRepliesQueueBehindRunningReview(t *testing.T) {
 	}
 	f.succeed(f.containers()[0].ID, "")
 	waitFor(t, "follow-up run", func() bool { return len(f.rt.Started()) == 2 })
-	if f.rt.Started()[1].Env["WATERBOY_REASON"] != "replies" || f.runs()[1].Status != Succeeded {
+	if f.rt.Started()[1].Env["SISYPHUS_REASON"] != "replies" || f.runs()[1].Status != Succeeded {
 		t.Fatalf("follow-up = %v, first = %+v", f.rt.Started()[1].Env, f.runs()[1])
 	}
 }
@@ -323,7 +323,7 @@ func TestShutdownThenReattach(t *testing.T) {
 	f.start(t)
 	f.succeed(f.containers()[0].ID, "replayed\n")
 	waitFor(t, "re-attached run to finish", f.lastStatus(Succeeded))
-	if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "log")); string(b) != "replayed\n"+okResult+"── waterboy: not posted: review.post is off (dry run); the review is in out/review.json\n" {
+	if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "log")); string(b) != "replayed\n"+okResult+"── sisyphus: not posted: review.post is off (dry run); the review is in out/review.json\n" {
 		t.Fatalf("log = %q", b)
 	}
 }
@@ -332,7 +332,7 @@ func TestReattachLostRunIsRequeued(t *testing.T) {
 	f := newFixture(t)
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "commits"}, Status: Running, Container: "gone",
 		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "r1")}}
-	orphan := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "zz"}, true, 0, "")
+	orphan := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "zz"}, true, 0, "")
 	f.r.Reattach(context.Background())
 	waitFor(t, "lost and requeued", func() bool {
 		st := f.r.Status()[refA.Key()]
@@ -343,7 +343,7 @@ func TestReattachLostRunIsRequeued(t *testing.T) {
 	})
 	f.start(t)
 	waitFor(t, "requeued run", f.started(1))
-	if f.rt.Started()[0].Env["WATERBOY_REASON"] != "commits" {
+	if f.rt.Started()[0].Env["SISYPHUS_REASON"] != "commits" {
 		t.Fatalf("env = %v", f.rt.Started()[0].Env)
 	}
 }
@@ -468,7 +468,7 @@ func TestRuntimeRetryDoesNotMultiply(t *testing.T) {
 // worktree lock, instead of marking every running review lost.
 func TestReattachWaitsForRuntime(t *testing.T) {
 	f := newFixture(t)
-	id := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "r1"}, true, 0, "")
+	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1"}, true, 0, "")
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
 		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "r1")}}
 	f.rt.SetUnavailable(errors.New("docker not running"))
@@ -487,11 +487,11 @@ func TestReattachWaitsForRuntime(t *testing.T) {
 	waitFor(t, "re-attached run to finish", f.lastStatus(Succeeded))
 }
 
-// A container that finished while waterboy was down is a success, even if the
+// A container that finished while sisyphus was down is a success, even if the
 // run's timeout has passed by the time we look.
 func TestReattachExitedPastDeadline(t *testing.T) {
 	f := newFixture(t)
-	id := f.rt.Seed(map[string]string{"waterboy": "1", "waterboy.run": "r1"}, false, 0, "done\n"+okResult)
+	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1"}, false, 0, "done\n"+okResult)
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
 		Started: time.Now().Add(-2 * time.Hour), Dir: filepath.Join(f.dir, "runs", "r1")}}
 	os.MkdirAll(filepath.Join(f.dir, "runs", "r1"), 0o755)
@@ -510,7 +510,7 @@ func TestClaudeOutputStreamsAndIsRecorded(t *testing.T) {
 	f.r.Tracked(f.tr)
 	waitFor(t, "container start", f.started(1))
 	id := f.containers()[0].ID
-	f.rt.Print(id, "── waterboy: claude ──\n")
+	f.rt.Print(id, "── sisyphus: claude ──\n")
 	f.rt.Print(id, `{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the diff."},{"type":"tool_use","name":"Bash","input":{"command":"gh pr diff 1"}}]}}`+"\n")
 
 	var got []string
@@ -525,7 +525,7 @@ func TestClaudeOutputStreamsAndIsRecorded(t *testing.T) {
 			t.Fatalf("live events so far: %q", got)
 		}
 	}
-	want := []string{"output:── waterboy: claude ──", "text:Reading the diff.", "tool:gh pr diff 1"}
+	want := []string{"output:── sisyphus: claude ──", "text:Reading the diff.", "tool:gh pr diff 1"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("live = %q, want %q", got, want)
 	}
@@ -539,7 +539,7 @@ func TestClaudeOutputStreamsAndIsRecorded(t *testing.T) {
 	evs, next, err := f.r.Events(refA.Key(), run.ID)
 	// After Claude's output: what came of posting (here: a dry run).
 	if err != nil || len(evs) != 5 || evs[3].Kind != "result" || evs[1].Line != 1 || next != 4 ||
-		evs[4].Line != 3 || !strings.HasPrefix(evs[4].Text, "── waterboy: not posted") {
+		evs[4].Line != 3 || !strings.HasPrefix(evs[4].Text, "── sisyphus: not posted") {
 		t.Fatalf("Events = %+v, next %d, %v", evs, next, err)
 	}
 }
@@ -618,8 +618,8 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	s := f.rt.Started()[0]
 	run := f.runs()[0]
 
-	if s.Image != "reviewer:a" || s.Workdir != "/a" || s.Env["PYTHONPATH"] != "/a/src" || s.Env["CLAUDE_CONFIG_DIR"] != "/waterboy/claude" ||
-		s.Env["WATERBOY_WORKTREE"] != "/a" || !slices.Equal(s.EnvFiles, []string{aEnv, secrets}) {
+	if s.Image != "reviewer:a" || s.Workdir != "/a" || s.Env["PYTHONPATH"] != "/a/src" || s.Env["CLAUDE_CONFIG_DIR"] != "/sisyphus/claude" ||
+		s.Env["SISYPHUS_WORKTREE"] != "/a" || !slices.Equal(s.EnvFiles, []string{aEnv, secrets}) {
 		t.Fatalf("spec = %+v", s)
 	}
 	mounts := map[string]container.Mount{}
@@ -629,20 +629,20 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	for target, want := range map[string]container.Mount{
 		"/a":                       {Source: f.tr.Worktree, Target: "/a"},
 		"/a/.git":                  {Source: filepath.Join(f.tr.Worktree, ".git"), Target: "/a/.git", ReadOnly: true},
-		"/a/.venv":                 {Source: "waterboy-ethyca-a-.venv", Target: "/a/.venv"},
-		"/a/clients/node_modules":  {Source: "waterboy-ethyca-a-clients-node_modules", Target: "/a/clients/node_modules"},
-		"/home/u/.cache/uv":        {Source: "waterboy-ethyca-a--home-u-.cache-uv", Target: "/home/u/.cache/uv"}, // absolute: as is
-		"/waterboy/claude/plugins": {Source: "wb-plugins", Target: "/waterboy/claude/plugins"},
-		"/waterboy/prompt.md":      {Source: filepath.Join(run.Dir, "prompt.md"), Target: "/waterboy/prompt.md", ReadOnly: true},
-		"/waterboy/claude":         {Source: filepath.Join(run.Dir, "claude"), Target: "/waterboy/claude"},
+		"/a/.venv":                 {Source: "sisyphus-ethyca-a-.venv", Target: "/a/.venv"},
+		"/a/clients/node_modules":  {Source: "sisyphus-ethyca-a-clients-node_modules", Target: "/a/clients/node_modules"},
+		"/home/u/.cache/uv":        {Source: "sisyphus-ethyca-a--home-u-.cache-uv", Target: "/home/u/.cache/uv"}, // absolute: as is
+		"/sisyphus/claude/plugins": {Source: "wb-plugins", Target: "/sisyphus/claude/plugins"},
+		"/sisyphus/prompt.md":      {Source: filepath.Join(run.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
+		"/sisyphus/claude":         {Source: filepath.Join(run.Dir, "claude"), Target: "/sisyphus/claude"},
 	} {
 		if mounts[target] != want {
 			t.Errorf("mount %s = %+v, want %+v", target, mounts[target], want)
 		}
 	}
 	script := s.Command[2]
-	for _, want := range []string{"sudo -n chown", "'/a/.venv'", "'/home/u/.cache/uv'", "'/waterboy/claude/plugins'", "uv sync",
-		"exec 'claude' '-p' '--output-format' 'stream-json' '--verbose' '--dangerously-skip-permissions' '--model' 'opus' '--max-turns' '10' '--max-budget-usd' '2.5' \"${extra[@]}\" < /waterboy/prompt.md"} {
+	for _, want := range []string{"sudo -n chown", "'/a/.venv'", "'/home/u/.cache/uv'", "'/sisyphus/claude/plugins'", "uv sync",
+		"exec 'claude' '-p' '--output-format' 'stream-json' '--verbose' '--dangerously-skip-permissions' '--model' 'opus' '--max-turns' '10' '--max-budget-usd' '2.5' \"${extra[@]}\" < /sisyphus/prompt.md"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q:\n%s", want, script)
 		}
@@ -767,10 +767,10 @@ func TestPostsReviewFromHost(t *testing.T) {
 	var p map[string]any
 	json.Unmarshal([]byte(reviews[0]), &p)
 	if len(reviews) != 1 || p["commit_id"] != f.tr.HeadSHA || p["event"] != "REQUEST_CHANGES" ||
-		!strings.HasSuffix(p["body"].(string), "🤖 Reviewed by waterboy") || len(p["comments"].([]any)) != 1 {
+		!strings.HasSuffix(p["body"].(string), "🤖 Reviewed by sisyphus") || len(p["comments"].([]any)) != 1 {
 		t.Fatalf("posted %q", reviews)
 	}
-	if !slices.Equal(replies, []string{"7: Fixed in the latest push, thanks.\n\n🤖 Reviewed by waterboy"}) {
+	if !slices.Equal(replies, []string{"7: Fixed in the latest push, thanks.\n\n🤖 Reviewed by sisyphus"}) {
 		t.Fatalf("replies = %q", replies)
 	}
 }
@@ -832,7 +832,7 @@ func TestDiscussionIsHandedToTheAgent(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, "review_comments.json")); string(b) != `[{"id":7}]` {
 		t.Fatalf("context file = %q", b)
 	}
-	if !slices.Contains(f.rt.Started()[0].Mounts, container.Mount{Source: dir, Target: "/waterboy/context", ReadOnly: true}) {
+	if !slices.Contains(f.rt.Started()[0].Mounts, container.Mount{Source: dir, Target: "/sisyphus/context", ReadOnly: true}) {
 		t.Fatalf("context not mounted: %+v", f.rt.Started()[0].Mounts)
 	}
 }
@@ -856,7 +856,7 @@ func TestReviewFileSymlinkIsRefused(t *testing.T) {
 }
 
 func TestFallbackDoesNotLeakLocalDetails(t *testing.T) {
-	err := errors.New("gh api --method POST repos/ethyca/a/pulls/1/reviews --input /Users/me/.local/state/waterboy/runs/x/post.json: exit status 1: gh: Unprocessable Entity (HTTP 422)")
+	err := errors.New("gh api --method POST repos/ethyca/a/pulls/1/reviews --input /Users/me/.local/state/sisyphus/runs/x/post.json: exit status 1: gh: Unprocessable Entity (HTTP 422)")
 	body := folded(ReviewFile{Event: "APPROVE", Body: "ok"}, err)
 	if strings.Contains(body, "/Users/") || strings.Contains(body, "--input") || !strings.Contains(body, "HTTP 422") {
 		t.Fatalf("fallback body = %q", body)
@@ -870,7 +870,7 @@ func setupOutput(t *testing.T, setup string, limit time.Duration) (string, error
 		t.Skip("needs GNU timeout")
 	}
 	r := &Reviewer{cfg: config.Review{Model: "opus", MaxTurns: 1, StepTimeout: config.Duration{Duration: limit}}}
-	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil), "echo '── waterboy: claude ──'")
+	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil), "echo '── sisyphus: claude ──'")
 	out, err := exec.Command("bash", "-c", script).CombinedOutput()
 	return string(out), err
 }
@@ -878,8 +878,8 @@ func setupOutput(t *testing.T, setup string, limit time.Duration) (string, error
 // Each setup line is a step, announced and timed; a backslash continues a line.
 func TestSetupStepsAreAnnouncedAndTimed(t *testing.T) {
 	out, err := setupOutput(t, "echo one\n\necho two \\\n  three\n", time.Minute)
-	want := "── waterboy: setup: echo one ──\none\n── waterboy: took 0s\n" +
-		"── waterboy: setup: echo two three ──\ntwo three\n── waterboy: took 0s\n"
+	want := "── sisyphus: setup: echo one ──\none\n── sisyphus: took 0s\n" +
+		"── sisyphus: setup: echo two three ──\ntwo three\n── sisyphus: took 0s\n"
 	if err != nil || out != want {
 		t.Fatalf("err %v, output:\n%s\nwant:\n%s", err, out, want)
 	}
@@ -888,7 +888,7 @@ func TestSetupStepsAreAnnouncedAndTimed(t *testing.T) {
 // A step past setup_step_timeout is killed, says so, and fails the run; later steps don't run.
 func TestSetupStepTimeout(t *testing.T) {
 	out, err := setupOutput(t, "sleep 30\necho never", time.Second)
-	if err == nil || !strings.Contains(out, "── waterboy: timed out after 1s (setup_step_timeout)") || strings.Contains(out, "never") {
+	if err == nil || !strings.Contains(out, "── sisyphus: timed out after 1s (setup_step_timeout)") || strings.Contains(out, "never") {
 		t.Fatalf("err %v, output:\n%s", err, out)
 	}
 }
@@ -1004,8 +1004,8 @@ func TestTriggerQueuesManualReview(t *testing.T) {
 	}
 	f.succeed(f.containers()[0].ID, "")
 	waitFor(t, "the queued manual review", func() bool { return len(f.rt.Started()) == 2 })
-	if f.rt.Started()[1].Env["WATERBOY_REASON"] != "manual" {
-		t.Fatalf("reason = %q", f.rt.Started()[1].Env["WATERBOY_REASON"])
+	if f.rt.Started()[1].Env["SISYPHUS_REASON"] != "manual" {
+		t.Fatalf("reason = %q", f.rt.Started()[1].Env["SISYPHUS_REASON"])
 	}
 }
 
@@ -1018,16 +1018,16 @@ func TestShellIsTheReviewContainerWithBash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.Image != "reviewer:a" || spec.Workdir != "/a" || spec.Env["WATERBOY_HEAD_SHA"] != f.tr.HeadSHA ||
+	if spec.Image != "reviewer:a" || spec.Workdir != "/a" || spec.Env["SISYPHUS_HEAD_SHA"] != f.tr.HeadSHA ||
 		spec.Command[0] != "bash" || !strings.HasSuffix(spec.Command[2], "exec bash") {
 		t.Fatalf("spec = %+v", spec)
 	}
-	if spec.Labels["waterboy"] != "" || spec.Labels["waterboy.pr"] != "" {
+	if spec.Labels["sisyphus"] != "" || spec.Labels["sisyphus.pr"] != "" {
 		t.Fatalf("labels = %v: the app would sweep it, or take it for a running review", spec.Labels)
 	}
 	scripts := map[string]string{}
 	for _, m := range spec.Mounts {
-		if name, ok := strings.CutPrefix(m.Target, "/waterboy/"); ok && strings.HasSuffix(name, ".sh") {
+		if name, ok := strings.CutPrefix(m.Target, "/sisyphus/"); ok && strings.HasSuffix(name, ".sh") {
 			b, _ := os.ReadFile(m.Source)
 			scripts[name] = string(b)
 		}

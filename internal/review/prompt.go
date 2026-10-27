@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 //go:embed prompt.md

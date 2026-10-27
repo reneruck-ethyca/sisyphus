@@ -1,4 +1,4 @@
-// waterboy tracks PRs awaiting your review: one worktree per PR, kept in sync,
+// sisyphus tracks PRs awaiting your review: one worktree per PR, kept in sync,
 // with new commits/replies recorded and finished PRs cleaned up.
 package main
 
@@ -16,13 +16,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/app"
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/eval"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/app"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/eval"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func checkTools(names ...string) error {
@@ -40,7 +40,7 @@ func main() {
 	reset := flag.String("reset", "", `wipe state for one PR ("owner/repo#n") or "all", then exit; stop the app first (make reset does)`)
 	shell := flag.String("shell", "", `open a shell in the container a review of PR "owner/repo#n" would run in`)
 	evalCases := flag.String("eval", "", "replay the gold review cases in this file or dir (README: Evals), then judge them")
-	evalOut := flag.String("eval-out", "", "where -eval puts its runs (default ~/.config/waterboy/eval/runs/<time>); with -judge, the runs to re-judge")
+	evalOut := flag.String("eval-out", "", "where -eval puts its runs (default ~/.config/sisyphus/eval/runs/<time>); with -judge, the runs to re-judge")
 	evalReps := flag.Int("eval-reps", 3, "runs per case")
 	judge := flag.Bool("judge", false, "re-judge the runs in -eval-out (after editing the cases) and rewrite its report")
 	flag.Parse()
@@ -104,7 +104,7 @@ func main() {
 		return
 	}
 	svc := app.NewService(cfg, tr, rev, logs)
-	slog.Info("waterboy starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
+	slog.Info("sisyphus starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
 
 	if *once {
 		svc.RunOnce(ctx)
@@ -120,7 +120,7 @@ func main() {
 }
 
 // resetState wipes one PR ("owner/repo#n") or "all": review containers, review
-// history and run directories, the worktrees waterboy created, and the tracked
+// history and run directories, the worktrees sisyphus created, and the tracked
 // entries. The next start rediscovers whatever still awaits review, as new. The
 // app must not be running (it would write its state back).
 func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, which string) error {
@@ -164,7 +164,7 @@ func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh g
 		return fmt.Errorf("%s isn't tracked: no worktree to open a shell on", id)
 	}
 	pr := tr.Snapshot()[i]
-	dir, err := os.MkdirTemp("", "waterboy-shell-")
+	dir, err := os.MkdirTemp("", "sisyphus-shell-")
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func runEval(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh git
 	return eval.Runner{Cfg: cfg, RT: container.Docker{}, GH: gh, Locks: tr.Locks, Out: out, Reps: reps}.Run(ctx, cs)
 }
 
-// restart re-execs waterboy with the same arguments, so saved settings apply.
+// restart re-execs sisyphus with the same arguments, so saved settings apply.
 // Review containers keep running and are re-attached; a tick in flight is cut
 // short, as with make restart.
 var restart = func() {
@@ -221,6 +221,6 @@ func restartSoon() {
 }
 
 func fatal(err error) {
-	slog.Error("waterboy", "err", err)
+	slog.Error("sisyphus", "err", err)
 	os.Exit(1)
 }

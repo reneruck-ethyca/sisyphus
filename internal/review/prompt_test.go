@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestRenderPrompt(t *testing.T) {
@@ -15,7 +15,7 @@ func TestRenderPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"git diff base1...HEAD", "#1 in ethyca/a", `"Fix it"`, "/fidesplus", "at abc123", "/out/review.json", "/waterboy/context/", "first review"} {
+	for _, want := range []string{"git diff base1...HEAD", "#1 in ethyca/a", `"Fix it"`, "/fidesplus", "at abc123", "/out/review.json", "/sisyphus/context/", "first review"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("default prompt missing %q:\n%s", want, got)
 		}

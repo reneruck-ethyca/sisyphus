@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/github"
+	"github.com/reneruck/sisyphus/internal/github"
 )
 
 // latestStates returns each human reviewer's effective review state, the way
@@ -72,8 +72,8 @@ func requested(pr github.PR, me string, myTeams []string) bool {
 // newReplies counts human comments and review bodies not by me that are newer
 // than since. latest is the newest timestamp seen on the PR (or since), used to
 // advance the cursor.
-// WaterboyMark ends everything waterboy posts; such posts are never replies.
-const WaterboyMark = "🤖 Reviewed by waterboy"
+// SisyphusMark ends everything sisyphus posts; such posts are never replies.
+const SisyphusMark = "🤖 Reviewed by sisyphus"
 
 func newReplies(pr github.PR, me string, since time.Time) (count int, latest time.Time) {
 	latest = since
@@ -81,7 +81,7 @@ func newReplies(pr github.PR, me string, since time.Time) (count int, latest tim
 		if ts.After(latest) {
 			latest = ts
 		}
-		if counts && !bot && user != me && !strings.Contains(body, WaterboyMark) && ts.After(since) {
+		if counts && !bot && user != me && !strings.Contains(body, SisyphusMark) && ts.After(since) {
 			count++
 		}
 	}

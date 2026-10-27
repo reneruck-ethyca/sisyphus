@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/reneruck/waterboy/internal/proc"
+	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 // ConflictError means a worktree can't be synced without a human (or hook).

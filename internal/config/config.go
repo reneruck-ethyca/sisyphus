@@ -61,14 +61,14 @@ type Review struct {
 	MaxTurns       int                   `json:"max_turns"`
 	MaxBudgetUSD   float64               `json:"max_budget_usd"`  // 0 = no limit (only enforced with API-key auth)
 	PromptFile     string                `json:"prompt_file"`     // Go text/template; "" = built-in prompt
-	Env            []string              `json:"env"`             // names copied from waterboy's own environment
+	Env            []string              `json:"env"`             // names copied from sisyphus's own environment
 	EnvFile        string                `json:"env_file"`        // CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, …
 	ClaudeSettings string                `json:"claude_settings"` // settings.json given to the agent ("" = none)
 	PluginsVolume  string                `json:"plugins_volume"`  // Docker volume with Claude plugins ("" = none)
 	Timeout        Duration              `json:"timeout"`         // runs past this are flagged, never stopped
 	MaxConcurrent  int                   `json:"max_concurrent"`
 	FiveHourPct    float64               `json:"five_hour_percent"`  // share of each 5-hour subscription window reviews may use; 0 = no limit
-	Cleanup        bool                  `json:"cleanup"`            // reset worktrees waterboy created after each run
+	Cleanup        bool                  `json:"cleanup"`            // reset worktrees sisyphus created after each run
 	StackFrom      string                `json:"stack_from"`         // where stacks start: "worktree" (PR code on the host) | "safe"
 	StepTimeout    Duration              `json:"setup_step_timeout"` // each setup step; past it the step is killed and the run fails
 	Retries        int                   `json:"retries"`            // re-runs of a review that failed before Claude started
@@ -105,14 +105,14 @@ const (
 
 // fidesplus mirrors its devcontainer (.devcontainer/devcontainer.json, post-create.sh).
 var fidesplus = RepoReview{
-	Image:   "waterboy-reviewer:fidesplus",
+	Image:   "sisyphus-reviewer:fidesplus",
 	Workdir: "/fidesplus",
 	EnvFile: "~/Dev/fidesplus/.devcontainer/devcontainer.env",
 	Env: map[string]string{"PYTHONPATH": "/fidesplus/src", "RUNNING_IN_DOCKER": "TRUE",
 		// The stack's services by name on its network (devcontainer.env points at host.docker.internal).
 		"FIDES__DATABASE__SERVER": "fidesplus-db", "FIDES__DATABASE__PORT": "5432",
 		"FIDES__REDIS__HOST": "fidesplus-redis", "FIDES__REDIS__PORT": "6379",
-		"UV_CACHE_DIR": "/waterboy/cache/uv", "npm_config_cache": "/waterboy/cache/npm",
+		"UV_CACHE_DIR": "/sisyphus/cache/uv", "npm_config_cache": "/sisyphus/cache/npm",
 		"UV_LINK_MODE": "copy"}, // the uv cache is another volume: hardlinks can't cross it
 	Setup: `uv sync --all-groups
 uv pip install --no-deps -e .
@@ -123,13 +123,13 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 		"src/fidesplus/gpp_js_integration/compiled", "clients/node_modules",
 		// Download caches, so a rebuilt .venv or node_modules doesn't fetch everything again. Not under
 		// $HOME: a volume's missing parent dirs (~/.cache) would be created root-owned.
-		"/waterboy/cache/uv", "/waterboy/cache/npm"},
+		"/sisyphus/cache/uv", "/sisyphus/cache/npm"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}"},
 }
 
 func DefaultPath() string {
-	return expandHome("~/.config/waterboy/config.json")
+	return expandHome("~/.config/sisyphus/config.json")
 }
 
 // Load reads path over the defaults. A missing file means all defaults.
@@ -186,15 +186,15 @@ func defaults() Config {
 		Org:         "ethyca",
 		Interval:    Duration{10 * time.Minute},
 		ReposRoot:   "~/Dev",
-		StateFile:   "~/.local/state/waterboy/state.json",
+		StateFile:   "~/.local/state/sisyphus/state.json",
 		HookTimeout: Duration{30 * time.Minute},
 		HTTPAddr:    "127.0.0.1:7465",
 		Review: Review{
 			Post:          true,
 			Model:         "opus",
 			MaxTurns:      200,
-			EnvFile:       "~/.config/waterboy/review.env",
-			PluginsVolume: "waterboy-claude-plugins",
+			EnvFile:       "~/.config/sisyphus/review.env",
+			PluginsVolume: "sisyphus-claude-plugins",
 			Timeout:       Duration{60 * time.Minute},
 			MaxConcurrent: 1,
 			Cleanup:       true,

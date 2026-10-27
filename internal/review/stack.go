@@ -15,15 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 // StackRun is the local stack (DB, cache) a run started next to its container.
 type StackRun struct {
 	Project string `json:"project"`          // compose project; the container joins <project>_default
 	Dir     string `json:"dir"`              // where up ran: the worktree, or the safe checkout
-	Offset  int    `json:"offset,omitempty"` // PORT_OFFSET waterboy set; 0 = the stack picked its own
+	Offset  int    `json:"offset,omitempty"` // PORT_OFFSET sisyphus set; 0 = the stack picked its own
 }
 
 // Network is the compose project's default network.
@@ -78,7 +78,7 @@ func (r *Reviewer) startStack(ctx context.Context, run Run, st *config.Stack) (*
 		if offset > 0 {
 			env = append(env, "PORT_OFFSET="+strconv.Itoa(offset))
 		}
-		fmt.Fprintf(logf, "── waterboy: %s in %s (%s) ──\n", st.Up, sr.Dir, strings.Join(env, " "))
+		fmt.Fprintf(logf, "── sisyphus: %s in %s (%s) ──\n", st.Up, sr.Dir, strings.Join(env, " "))
 		var out bytes.Buffer
 		upCtx, cancel := context.WithTimeout(ctx, stackUpTimeout)
 		err := r.sh(upCtx, sr.Dir, env, st.Up, io.MultiWriter(logf, &out))
@@ -135,14 +135,14 @@ func lastLines(s string, n int) string {
 // stopStack stops a run's stack after the run, keeping its containers and
 // volumes, so the PR's next review starts on the same DB.
 func (r *Reviewer) stopStack(project string) {
-	r.compose(project, `docker compose -p "$WATERBOY_STACK" stop`)
+	r.compose(project, `docker compose -p "$SISYPHUS_STACK" stop`)
 }
 
 // downStack removes a PR's stack: containers, network and volumes.
 func (r *Reviewer) downStack(project string) error {
 	// Without its compose files, `down --volumes` can't see the named volumes; go by label.
-	return r.compose(project, `docker compose -p "$WATERBOY_STACK" down --remove-orphans &&
-vols=$(docker volume ls -q --filter "label=com.docker.compose.project=$WATERBOY_STACK") &&
+	return r.compose(project, `docker compose -p "$SISYPHUS_STACK" down --remove-orphans &&
+vols=$(docker volume ls -q --filter "label=com.docker.compose.project=$SISYPHUS_STACK") &&
 { [ -z "$vols" ] || docker volume rm $vols; }`)
 }
 
@@ -150,7 +150,7 @@ func (r *Reviewer) compose(project, script string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), stackStopTimeout)
 	defer cancel()
 	var out bytes.Buffer
-	if err := r.sh(ctx, "", []string{"WATERBOY_STACK=" + project}, script, &out); err != nil {
+	if err := r.sh(ctx, "", []string{"SISYPHUS_STACK=" + project}, script, &out); err != nil {
 		slog.Warn("stack command failed", "project", project, "err", err, "output", lastLines(out.String(), 5))
 		return fmt.Errorf("stack %s: %w", project, err)
 	}
@@ -232,7 +232,7 @@ func (r *Reviewer) StackStatus(ctx context.Context, tr tracker.Tracked) (*StackS
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var out bytes.Buffer
-	err := r.sh(ctx, "", []string{"WATERBOY_STACK=" + project}, `f="label=com.docker.compose.project=$WATERBOY_STACK"
+	err := r.sh(ctx, "", []string{"SISYPHUS_STACK=" + project}, `f="label=com.docker.compose.project=$SISYPHUS_STACK"
 docker ps -a --filter "$f" --format 'c	{{.Names}}	{{.Label "com.docker.compose.service"}}	{{.State}}	{{.Status}}	{{.Image}}' &&
 docker volume ls -q --filter "$f" | sed 's/^/v	/' &&
 docker network ls --filter "$f" --format 'n	{{.Name}}'`, &out)
@@ -277,7 +277,7 @@ func (r *Reviewer) ResetReviews(ctx context.Context, prID string) error {
 }
 
 // Wipe is ResetReviews plus the PR's stack (containers, network, volumes, found
-// on Docker whether or not waterboy recorded it) and the images its containers
+// on Docker whether or not sisyphus recorded it) and the images its containers
 // ran, unless other containers still use them. Tracking and the worktree stay;
 // the reviewer image and per-repo caches are shared, so they stay too.
 func (r *Reviewer) Wipe(ctx context.Context, tr tracker.Tracked) error {
@@ -302,7 +302,7 @@ func (r *Reviewer) Wipe(ctx context.Context, tr tracker.Tracked) error {
 	}
 	for img := range images {
 		var out bytes.Buffer
-		if r.sh(ctx, "", []string{"WATERBOY_IMAGE=" + img}, `docker image rm "$WATERBOY_IMAGE"`, &out) != nil {
+		if r.sh(ctx, "", []string{"SISYPHUS_IMAGE=" + img}, `docker image rm "$SISYPHUS_IMAGE"`, &out) != nil {
 			slog.Info("keeping image", "image", img, "why", lastLines(out.String(), 1)) // in use elsewhere
 		} else {
 			slog.Info("removed image", "image", img)

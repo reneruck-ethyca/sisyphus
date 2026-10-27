@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>waterboy</title>
+<title>sisyphus</title>
 <link rel="stylesheet" href="/style.css">
 <style>
   /* The window scrolls its two panes, not the page. */
@@ -95,7 +95,7 @@
       : s.last_error ? `<span class="checked failed">Last check failed ${ago(s.last_run)}</span>`
       : `<span class="checked">Checked ${ago(s.last_run)} · next ${ago(s.next_run)}</span>`;
     const cur = v => view === v ? ` aria-current="page"` : "";
-    return `<header class="top"><a class="brand" href="#">waterboy</a>${checked}
+    return `<header class="top"><a class="brand" href="#">sisyphus</a>${checked}
       <button id="run" class="btn quiet small" ${s.running ? "disabled" : ""}>Check now</button>
       ${s.budget_note ? `<span class="budget" title="${esc(s.budget_note)}">5-hour window
         <meter min="0" max="${s.budget.share}" low="${s.budget.share * 0.75}" high="${s.budget.share * 0.75}" optimum="0" value="${s.budget.used}"></meter>
@@ -151,7 +151,7 @@
   const ACTIONS = {
     reset: ["ResetReviews", "Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays."],
     wipe: ["Wipe", "Wipe the review data? Stops a running review, forgets the review history, and removes the stack: containers, network, DB volume, and its images unless something else uses them. The next review starts fresh."],
-    untrack: ["Untrack", "Untrack this PR? Wipes its review data and stack, removes the worktree and branch waterboy created, and stops tracking it. It isn't picked up again until you track it again."],
+    untrack: ["Untrack", "Untrack this PR? Wipes its review data and stack, removes the worktree and branch sisyphus created, and stops tracking it. It isn't picked up again until you track it again."],
     track: ["Retrack", ""],
   };
   const prMenu = id => `<details class="menu"><summary class="btn quiet">More ▾</summary><div>
@@ -204,7 +204,7 @@
       <details class="fold" id="fold-tracking"><summary>Worktree and tracking <span class="muted">head ${short(p.head_sha)}${p.synced_sha === p.head_sha ? ", synced" : ""}</span></summary>
         <dl><dt>Worktree</dt><dd><code>${esc(p.worktree)}</code></dd><dt>Head</dt><dd><code>${esc(p.head_sha)}</code></dd>
           <dt>Synced</dt><dd><code>${esc(p.synced_sha) || "—"}</code></dd>
-          <dt>Created by waterboy</dt><dd>${p.created_worktree ? `worktree${p.created_branch ? " and branch" : ""}; removed when the PR is untracked` : "no, reused an existing worktree"}</dd>
+          <dt>Created by sisyphus</dt><dd>${p.created_worktree ? `worktree${p.created_branch ? " and branch" : ""}; removed when the PR is untracked` : "no, reused an existing worktree"}</dd>
           <dt>Tracked since</dt><dd>${esc(new Date(p.tracked_at).toLocaleString())}</dd><dt>Last activity on GitHub</dt><dd>${zero(p.last_seen_at) ? "never" : esc(new Date(p.last_seen_at).toLocaleString())}</dd></dl></details>`;
   }
 
@@ -287,7 +287,7 @@
       }).join("")}</form></main>
       <div class="savebar" id="savebar" role="region" aria-label="Unsaved changes" hidden><span id="msg" role="status"></span>
         <button type="button" class="btn quiet" id="discard">Discard</button><button type="submit" class="btn" id="save" form="settings">Save</button>
-        <button type="button" class="btn" id="restart" hidden>Restart waterboy</button></div>`;
+        <button type="button" class="btn" id="restart" hidden>Restart sisyphus</button></div>`;
   }
 
   // Settings: mark what changed and say how much; only changed fields are saved, so defaults aren't pinned into the file.
@@ -312,7 +312,7 @@
     c.forEach(el => el.type === "checkbox" ? el.defaultChecked = el.checked
       : el.tagName === "SELECT" ? [...el.options].forEach(o => o.defaultSelected = o.selected) : el.defaultValue = el.value);
     form.querySelectorAll(".dirty").forEach(f => f.classList.remove("dirty"));
-    showBar("Saved. Restart waterboy to apply.", true);
+    showBar("Saved. Restart sisyphus to apply.", true);
   }
 
   app.addEventListener("click", e => {

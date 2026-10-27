@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reneruck/waterboy/internal/config"
-	"github.com/reneruck/waterboy/internal/container"
-	"github.com/reneruck/waterboy/internal/github"
-	"github.com/reneruck/waterboy/internal/review"
-	"github.com/reneruck/waterboy/internal/testkit"
-	"github.com/reneruck/waterboy/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/container"
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/testkit"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestCheckTools(t *testing.T) {
@@ -32,8 +32,8 @@ func TestResetState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.Seed(map[string]string{"waterboy": "1", "waterboy.pr": testkit.RefA.Key()}, true, 0, "")
-	keep := rt.Seed(map[string]string{"waterboy": "1", "waterboy.pr": b.Key()}, true, 0, "")
+	rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.pr": testkit.RefA.Key()}, true, 0, "")
+	keep := rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.pr": b.Key()}, true, 0, "")
 	ctx := context.Background()
 
 	if err := resetState(ctx, tr, rev, testkit.RefA.Key()); err != nil {
@@ -42,7 +42,7 @@ func TestResetState(t *testing.T) {
 	if snap := tr.Snapshot(); len(snap) != 1 || snap[0].Key() != b.Key() {
 		t.Fatalf("tracked after reset of a: %+v", snap)
 	}
-	if cs, _ := rt.List(ctx, map[string]string{"waterboy": "1"}); len(cs) != 1 || cs[0].ID != keep {
+	if cs, _ := rt.List(ctx, map[string]string{"sisyphus": "1"}); len(cs) != 1 || cs[0].ID != keep {
 		t.Fatalf("containers after reset of a: %+v", cs)
 	}
 	if err := resetState(ctx, tr, rev, "all"); err != nil {
