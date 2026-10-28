@@ -71,6 +71,8 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run,
 		}
 		run.Stack = sr
 	}
+	stopStack := stop
+	stop = func() { stopStack(); dropRelated(run) }
 	spec, err = r.spec(ctx, run)
 	return run, spec, stop, err
 }

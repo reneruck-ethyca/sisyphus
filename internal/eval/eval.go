@@ -303,6 +303,12 @@ func (before) ReplyToComment(context.Context, github.PRRef, int64, string) error
 	return errors.New("evals don't post")
 }
 
+// ponytail: today's open PRs, not those at Cutoff; a case's related checkout can differ from the
+// original run's. Filter by createdAt/merge time if a fides-qa case ever depends on it.
+func (b before) OpenPRs(ctx context.Context, repo, phrase string) ([]github.OpenPR, error) {
+	return b.GH.OpenPRs(ctx, repo, phrase)
+}
+
 // filterDiscussion drops what came after cutoff: comments and reviews by
 // date, and from pr.json everything but what the author wrote (state, merge
 // commit, later heads).

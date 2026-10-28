@@ -85,9 +85,9 @@ type RepoReview struct {
 	Setup      string            `json:"setup"` // shell, run in workdir before Claude starts; each line is a logged, timed step
 	Cache      []string          `json:"cache"` // dirs kept in per-repo volumes: workdir-relative, or absolute container paths
 	PromptFile string            `json:"prompt_file"`
-	Notes      string            `json:"notes"`           // repo-specific instructions, added to the prompt
-	Mounts     map[string]string `json:"mounts"`          // host path → container path, read-only (other checkouts to read)
-	Stack      *Stack            `json:"stack,omitempty"` // nil = no local services
+	Notes      string            `json:"notes"`             // repo-specific instructions, added to the prompt
+	Related    *Related          `json:"related,omitempty"` // another repo the reviewer reads; nil = none
+	Stack      *Stack            `json:"stack,omitempty"`   // nil = no local services
 }
 
 // Stack is the local services (DB, cache) a review needs. Up runs on the host
@@ -97,6 +97,15 @@ type Stack struct {
 	SafeDir string `json:"safe_dir"` // where "safe" runs Up; "" = the repo's clone under repos_root
 	Up      string `json:"up"`       // shell; gets WORKTREE_ID=pr-<n>, and PORT_OFFSET when retrying a port clash
 	Project string `json:"project"`  // compose project Up creates; "{id}" = WORKTREE_ID
+}
+
+// Related is another repo checked out read-only next to the review: the open PR
+// there that names one of the reviewed PR's tickets, else Base.
+type Related struct {
+	Repo   string `json:"repo"`   // "owner/name"
+	Base   string `json:"base"`   // branch checked out when no open PR there names one of the tickets
+	Target string `json:"target"` // container path
+	Clone  string `json:"clone"`  // host clone fetched from; "" = the repo's clone under repos_root
 }
 
 // Stack sources.
@@ -139,11 +148,10 @@ var fidesQA = RepoReview{
 	Env:     map[string]string{"npm_config_cache": "/sisyphus/cache/npm"},
 	Setup:   "(cd cardea && npm install)",
 	Cache:   []string{"cardea/node_modules", "/sisyphus/cache/npm"},
-	Mounts:  map[string]string{"~/Dev/fidesplus": "/fidesplus"},
-	Notes: `This repo is the QA automation for fidesplus. cardea/ holds its Playwright end-to-end specs: read
-cardea/AGENTS.md, and use the ethyca-talos ` + "`cardea-conventions`" + ` skill for its conventions. fidesplus'
-source, the code under test, is mounted read-only at /fidesplus. It's whatever that clone has checked out,
-not necessarily the version these tests target (` + "`git -C /fidesplus log -1`" + `).
+	Related: &Related{Repo: "ethyca/fidesplus", Base: "dev", Target: "/fidesplus"},
+	Notes: `This repo is the QA automation for fidesplus, the code under test (at /fidesplus, see above). cardea/
+holds its Playwright end-to-end specs: read cardea/AGENTS.md, and use the ethyca-talos
+` + "`cardea-conventions`" + ` skill for its conventions.
 
 No Fides deployment is reachable from here, so don't try to run the specs. The review's main question is
 whether the new and changed tests verify what their ticket asks for:
@@ -179,11 +187,11 @@ func Load(path string) (Config, error) {
 			st.SafeDir = expandHome(cmp.Or(st.SafeDir, filepath.Join(cfg.ReposRoot, filepath.Base(name))))
 			repo.Stack = &st
 		}
-		mounts := make(map[string]string, len(repo.Mounts)) // the defaults share theirs
-		for host, target := range repo.Mounts {
-			mounts[expandHome(host)] = target
+		if repo.Related != nil {
+			rel := *repo.Related // the defaults share theirs
+			rel.Clone = expandHome(cmp.Or(rel.Clone, filepath.Join(cfg.ReposRoot, filepath.Base(rel.Repo))))
+			repo.Related = &rel
 		}
-		repo.Mounts = mounts
 		r.Repos[name] = repo
 	}
 	cfg.StateFile = expandHome(cfg.StateFile)

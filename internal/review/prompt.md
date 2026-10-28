@@ -9,6 +9,8 @@ There's no Docker or nox in here: the services the tests need (database, cache) 
 and the environment points at them, so run the tests directly.
 {{else -}}
 There's no Docker in here and no local services.
+{{end}}{{with .Related}}
+{{.}}
 {{end}}{{with .Notes}}
 {{.}}
 {{end}}

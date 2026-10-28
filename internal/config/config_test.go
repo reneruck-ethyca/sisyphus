@@ -33,7 +33,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Errorf("bad fidesplus defaults: %+v", fp)
 	}
 	if qa := r.Repos["ethyca/fides-qa"]; qa.Workdir != "/fides-qa" || qa.Stack != nil || qa.Notes == "" ||
-		qa.Mounts[home+"/Dev/fidesplus"] != "/fidesplus" {
+		qa.Related == nil || qa.Related.Clone != home+"/Dev/fidesplus" || qa.Related.Target != "/fidesplus" {
 		t.Errorf("bad fides-qa defaults: %+v", qa)
 	}
 }

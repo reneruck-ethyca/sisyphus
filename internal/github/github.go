@@ -97,6 +97,25 @@ func (c CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
 	return parsePR(d[0].Body, d[1].Body, d[2].Body, d[3].Body)
 }
 
+// OpenPR is an open PR a search found.
+type OpenPR struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	HeadSHA   string    `json:"headRefOid"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// OpenPRs are repo's open PRs with phrase in their title or body.
+func (CLI) OpenPRs(ctx context.Context, repo, phrase string) ([]OpenPR, error) {
+	out, err := proc.Run(ctx, "", "gh", "pr", "list", "--repo", repo, "--state", "open",
+		"--search", fmt.Sprintf("%q in:title,body", phrase), "--json", "number,title,headRefOid,updatedAt", "--limit", "20")
+	if err != nil {
+		return nil, err
+	}
+	var prs []OpenPR
+	return prs, json.Unmarshal([]byte(out), &prs)
+}
+
 // DiscussionFile is one raw GitHub API response about a PR.
 type DiscussionFile struct {
 	Name string // pr.json, reviews.json, review_comments.json, issue_comments.json

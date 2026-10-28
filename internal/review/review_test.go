@@ -610,8 +610,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	f := newFixture(t, func(c *config.Review) {
 		c.EnvFile, c.ClaudeSettings, c.PluginsVolume, c.MaxBudgetUSD = secrets, settings, "wb-plugins", 2.5
 		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", EnvFile: aEnv, PromptFile: prompt,
-			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules", "/home/u/.cache/uv"},
-			Mounts: map[string]string{"/host/fidesplus": "/fidesplus"}}
+			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules", "/home/u/.cache/uv"}}
 	})
 	f.start(t)
 	f.r.Tracked(f.tr)
@@ -634,7 +633,6 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 		"/a/clients/node_modules":  {Source: "sisyphus-ethyca-a-clients-node_modules", Target: "/a/clients/node_modules"},
 		"/home/u/.cache/uv":        {Source: "sisyphus-ethyca-a--home-u-.cache-uv", Target: "/home/u/.cache/uv"}, // absolute: as is
 		"/sisyphus/claude/plugins": {Source: "wb-plugins", Target: "/sisyphus/claude/plugins"},
-		"/fidesplus":               {Source: "/host/fidesplus", Target: "/fidesplus", ReadOnly: true},
 		"/sisyphus/prompt.md":      {Source: filepath.Join(run.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
 		"/sisyphus/claude":         {Source: filepath.Join(run.Dir, "claude"), Target: "/sisyphus/claude"},
 	} {
@@ -711,9 +709,11 @@ func TestForget(t *testing.T) {
 // fakeGH records what the reviewer posts.
 type fakeGH struct {
 	mu         sync.Mutex
-	failCreate int      // CreateReview fails this many times first
-	reviews    []string // posted payloads
-	replies    []string // "id: body"
+	failCreate int                        // CreateReview fails this many times first
+	reviews    []string                   // posted payloads
+	replies    []string                   // "id: body"
+	open       map[string][]github.OpenPR // OpenPRs results, by phrase
+	searches   []string                   // "repo phrase"
 }
 
 func (g *fakeGH) Discussion(context.Context, github.PRRef) ([]github.DiscussionFile, error) {
@@ -735,6 +735,12 @@ func (g *fakeGH) ReplyToComment(_ context.Context, _ github.PRRef, id int64, bod
 	defer g.mu.Unlock()
 	g.replies = append(g.replies, fmt.Sprintf("%d: %s", id, body))
 	return nil
+}
+func (g *fakeGH) OpenPRs(_ context.Context, repo, phrase string) ([]github.OpenPR, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.searches = append(g.searches, repo+" "+phrase)
+	return g.open[phrase], nil
 }
 func (g *fakeGH) posted() ([]string, []string) {
 	g.mu.Lock()

@@ -20,6 +20,7 @@ type PromptData struct {
 	PreviousHead string // head of this PR's last successful review ("" if none)
 	Workdir      string // where the worktree is inside the container
 	Diff         string // the command that shows the change
+	Related      string // what's checked out of the related repo, and why ("" = none)
 	Notes        string // the repo's own instructions
 	Stack        bool   // local services are running for the tests
 }

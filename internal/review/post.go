@@ -22,6 +22,7 @@ type GitHub interface {
 	Discussion(ctx context.Context, ref github.PRRef) ([]github.DiscussionFile, error)
 	CreateReview(ctx context.Context, ref github.PRRef, file string) (url string, err error)
 	ReplyToComment(ctx context.Context, ref github.PRRef, commentID int64, body string) error
+	OpenPRs(ctx context.Context, repo, phrase string) ([]github.OpenPR, error)
 }
 
 // ReviewFile is what the agent writes to /out/review.json.
