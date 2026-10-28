@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.}} · sisyphus</title>
 <link rel="stylesheet" href="/style.css">
+<script>
+  // Chrome keeps left pages in its back/forward cache with their streams open; six of them use up
+  // the browser's connections to this host and the next page waits. Close them on leaving, and
+  // reload a page restored from the cache, its streams and status are gone or stale.
+  const streams = [], stream = (url) => { const s = new EventSource(url); streams.push(s); return s; };
+  addEventListener("pagehide", () => streams.forEach(s => s.close()));
+  addEventListener("pageshow", (e) => e.persisted && location.reload());
+</script>
 </head>
 <body>
 {{end}}

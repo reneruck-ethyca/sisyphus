@@ -183,7 +183,7 @@
       } else div.textContent = e.text;
       return div;
     };
-    const src = new EventSource(events.dataset.src);
+    const src = stream(events.dataset.src);
     src.onmessage = (m) => {
       const e = JSON.parse(m.data), follow = innerHeight + scrollY >= document.body.scrollHeight - 40;
       if (e.kind === "output") { setup.append(e.text + "\n"); setup.scrollTop = setup.scrollHeight; }
@@ -242,7 +242,7 @@
     location.reload();
   };
   // Pushed on every change; after a restart the stream reconnects and the fresh status differs, so the page reloads.
-  new EventSource("/api/status/stream").onmessage = (m) => onStatus(m.data);
+  stream("/api/status/stream").onmessage = (m) => onStatus(m.data);
   setInterval(() => pending && onStatus(pending), 5000);{{end}}
 </script>
 {{template "foot"}}
