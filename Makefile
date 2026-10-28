@@ -34,12 +34,16 @@ stop:
 	@for i in $$(seq 1 50); do pgrep -x sisyphus >/dev/null || exit 0; sleep 0.2; done; \
 		echo "sisyphus didn't stop" >&2; exit 1
 
-# Starts sisyphus: through the LaunchAgent if it's installed, else in the background.
-# Either way it logs to $(LOG).
-start: build
+# Starts this checkout's build (a worktree's too): through the LaunchAgent if it's
+# installed, re-rendered to point here, else in the background. Either way it logs
+# to $(LOG). A running sisyphus is stopped first; launchd only reads the plist on bootstrap.
+start: build stop
 	@if [ -f $(PLIST) ]; then \
-		launchctl print gui/$$(id -u)/$(LABEL) >/dev/null 2>&1 || launchctl bootstrap gui/$$(id -u) $(PLIST); \
-		launchctl kickstart gui/$$(id -u)/$(LABEL) && echo "sisyphus started (LaunchAgent)"; \
+		$(MAKE) --no-print-directory -s plist && \
+		launchctl bootstrap gui/$$(id -u) $(PLIST) && \
+		for i in $$(seq 1 25); do pgrep -x sisyphus >/dev/null && break; sleep 0.2; done; \
+		pgrep -x sisyphus >/dev/null && echo "sisyphus started (LaunchAgent): $(CURDIR)/bin/sisyphus" || \
+			{ echo "sisyphus didn't start; see $(LOG) and: launchctl print gui/$$(id -u)/$(LABEL)" >&2; exit 1; }; \
 	else mkdir -p $(dir $(LOG)) && nohup $(CURDIR)/bin/sisyphus >> $(LOG) 2>&1 & echo "sisyphus started, logging to $(LOG)"; fi
 
 restart: stop start
