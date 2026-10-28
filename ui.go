@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -14,6 +15,11 @@ import (
 // windowUserAgent marks the window's requests, so the pages know to open
 // external links through /api/open instead of navigating the webview away.
 const windowUserAgent = "sisyphus-window"
+
+// trayIcon is 44px so it stays sharp at the 22pt menu-bar height on Retina.
+//
+//go:embed trayicon.png
+var trayIcon []byte
 
 // runApp owns the macOS main thread: menu-bar item, window, and the tick loop.
 // The window shows the dashboard; there is no second UI.
@@ -55,7 +61,7 @@ func runApp(cfg config.Config, svc *app.Service) error {
 	menu.Add("Quit").OnClick(func(*application.Context) { wapp.Quit() })
 
 	tray := wapp.SystemTray.New()
-	tray.SetLabel("SY")
+	tray.SetTemplateIcon(trayIcon)
 	tray.SetTooltip("sisyphus")
 	tray.SetMenu(menu)
 
