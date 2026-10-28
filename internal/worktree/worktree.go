@@ -63,7 +63,17 @@ func Create(ctx context.Context, repoDir, branch string) (string, error) {
 	if err := fetch(ctx, repoDir, branch); err != nil {
 		return "", err
 	}
-	out, err := proc.Run(ctx, repoDir, "wtp", "add", branch, "--quiet")
+	return add(ctx, repoDir, branch)
+}
+
+// CreateAt makes a new branch at commit and a worktree for it, via wtp.
+func CreateAt(ctx context.Context, repoDir, branch, commit string) (string, error) {
+	return add(ctx, repoDir, "-b", branch, commit)
+}
+
+// add runs `wtp add` and returns the new worktree's path.
+func add(ctx context.Context, repoDir string, args ...string) (string, error) {
+	out, err := proc.Run(ctx, repoDir, "wtp", append(append([]string{"add"}, args...), "--quiet")...)
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +81,7 @@ func Create(ctx context.Context, repoDir, branch string) (string, error) {
 	lines := strings.Split(out, "\n")
 	path := strings.TrimSpace(lines[len(lines)-1])
 	if path == "" {
-		return "", fmt.Errorf("wtp add %s: no path printed", branch)
+		return "", fmt.Errorf("wtp add %s: no path printed", strings.Join(args, " "))
 	}
 	return path, nil
 }

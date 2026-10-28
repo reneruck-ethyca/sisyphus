@@ -29,11 +29,25 @@ import (
 // Job is one review to run, with the PR as the tracker announced it.
 type Job struct {
 	PR        tracker.Tracked `json:"pr"`
-	Reason    string          `json:"reason"`              // "new" | "commits" | "replies" | "manual"
+	Reason    string          `json:"reason"`              // Reason*
 	Attempt   int             `json:"attempt,omitempty"`   // retries so far; 0 = first try
 	NotBefore time.Time       `json:"not_before,omitzero"` // a retry waits until then
 	Base      string          `json:"base,omitempty"`      // diff against this commit, not GitHub's diff (evals)
 }
+
+// Why a job was queued.
+const (
+	ReasonNew     = "new"     // first review of a PR
+	ReasonCommits = "commits" // new commits since the last one
+	ReasonReplies = "replies" // new replies since the last one
+	ReasonManual  = "manual"  // asked for by the user
+)
+
+// A PR's review state, in PRStatus.State; "" = idle.
+const (
+	StateQueued  = "queued"
+	StateRunning = "running"
+)
 
 // Run statuses.
 const (
@@ -77,7 +91,7 @@ type RunEvent struct {
 
 // PRStatus is what UIs show for one PR.
 type PRStatus struct {
-	State  string `json:"state"`            // "" | "queued" | "running"
+	State  string `json:"state"`            // "" | StateQueued | StateRunning
 	Runs   []Run  `json:"runs"`             // newest first
 	Queued *Job   `json:"queued,omitempty"` // the job waiting to run, if any
 }
@@ -168,7 +182,7 @@ func (r *Reviewer) storePath() string { return filepath.Join(r.dir, "reviews.jso
 
 func (r *Reviewer) Tracked(tr tracker.Tracked) {
 	if r.reviewable(tr) {
-		r.enqueue(Job{PR: tr, Reason: "new"})
+		r.enqueue(Job{PR: tr, Reason: ReasonNew})
 	}
 }
 
@@ -176,9 +190,9 @@ func (r *Reviewer) Updated(tr tracker.Tracked, newCommits bool, _ int) {
 	if !r.reviewable(tr) {
 		return
 	}
-	reason := "replies" // replies don't interrupt a running review; they queue behind it
+	reason := ReasonReplies // replies don't interrupt a running review; they queue behind it
 	if newCommits {
-		reason = "commits"
+		reason = ReasonCommits
 		r.cancel(tr.Key(), errSuperseded)
 	}
 	r.enqueue(Job{PR: tr, Reason: reason})
@@ -251,7 +265,7 @@ func (r *Reviewer) Ensure(prs []tracker.Tracked) {
 			!slices.ContainsFunc(r.st.Queue, func(j Job) bool { return j.PR.Key() == id })
 		r.mu.Unlock()
 		if none {
-			r.enqueue(Job{PR: tr, Reason: "new"})
+			r.enqueue(Job{PR: tr, Reason: ReasonNew})
 		}
 	}
 }
@@ -318,7 +332,7 @@ func (r *Reviewer) Trigger(tr tracker.Tracked) error {
 		return fmt.Errorf("%s isn't synced to its head %.12s yet; try after the next sync", tr.Key(), tr.HeadSHA)
 	}
 	slog.Info("review requested", "pr", tr.Key())
-	r.enqueue(Job{PR: tr, Reason: "manual"})
+	r.enqueue(Job{PR: tr, Reason: ReasonManual})
 	return nil
 }
 
@@ -349,7 +363,7 @@ func (r *Reviewer) retry(run Run) {
 	}
 }
 
-var rank = map[string]int{"manual": 0, "replies": 1, "commits": 2, "new": 3}
+var rank = map[string]int{ReasonManual: 0, ReasonReplies: 1, ReasonCommits: 2, ReasonNew: 3}
 
 // enqueue adds j, or replaces the PR's queued job with it (keeping the
 // stronger reason, so a never-reviewed PR stays "new").
@@ -437,11 +451,15 @@ func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func
 		return
 	}
 	infos, err := r.rt.List(runCtx, map[string]string{"sisyphus.run": run.ID})
-	if err != nil || len(infos) != 1 {
+	if err != nil {
+		giveUp(fmt.Errorf("couldn't re-attach after restart: %w", err))
+		return
+	}
+	if len(infos) != 1 {
 		for _, c := range infos {
-			r.rt.Remove(context.WithoutCancel(appCtx), c.ID)
+			r.removeContainer(context.WithoutCancel(appCtx), run.ID, c.ID)
 		}
-		giveUp(fmt.Errorf("couldn't re-attach after restart (containers %d, err %v)", len(infos), err))
+		giveUp(fmt.Errorf("couldn't re-attach after restart: %d containers for the run", len(infos)))
 		return
 	}
 	run.Container = infos[0].ID
@@ -470,7 +488,7 @@ func (r *Reviewer) sweepOrphans(ctx context.Context) {
 	for _, c := range cs {
 		if !running[c.Labels["sisyphus.run"]] {
 			slog.Warn("removing orphaned review container", "container", c.ID, "run", c.Labels["sisyphus.run"])
-			r.rt.Remove(ctx, c.ID)
+			r.removeContainer(ctx, c.Labels["sisyphus.run"], c.ID)
 		}
 	}
 }
@@ -718,9 +736,20 @@ func (r *Reviewer) endEarly(appCtx, runCtx context.Context, run Run, err error, 
 }
 
 func (r *Reviewer) removeRun(ctx context.Context, runID string) {
-	cs, _ := r.rt.List(ctx, map[string]string{"sisyphus.run": runID})
+	cs, err := r.rt.List(ctx, map[string]string{"sisyphus.run": runID})
+	if err != nil {
+		slog.Warn("listing review containers", "run", runID, "err", err)
+	}
 	for _, c := range cs {
-		r.rt.Remove(ctx, c.ID)
+		r.removeContainer(ctx, runID, c.ID)
+	}
+}
+
+// removeContainer removes a review container, logging a failure: the orphan
+// sweep at the next start retries it.
+func (r *Reviewer) removeContainer(ctx context.Context, runID, id string) {
+	if err := r.rt.Remove(ctx, id); err != nil {
+		slog.Warn("removing review container", "run", runID, "container", id, "err", err)
 	}
 }
 
@@ -964,7 +993,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	}
 	var result *ClaudeResult
 	var lw *lineWriter
-	os.MkdirAll(run.Dir, 0o755)
+	_ = os.MkdirAll(run.Dir, 0o755)                       // a failure shows as os.Create's
 	logf, err := os.Create(filepath.Join(run.Dir, "log")) // docker replays from the start, so truncate
 	if err != nil {
 		slog.Warn("creating run log", "run", run.ID, "err", err)
@@ -987,7 +1016,9 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		go func() {
 			defer close(logsDone)
 			defer logf.Close()
-			r.rt.Logs(logsCtx, run.Container, lw)
+			if err := r.rt.Logs(logsCtx, run.Container, lw); err != nil && logsCtx.Err() == nil {
+				slog.Warn("following review output", "run", run.ID, "err", err)
+			}
 			lw.Flush()
 		}()
 	}
@@ -1002,11 +1033,13 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		why = context.Cause(runCtx)
 		status = Cancelled
 		bg, cancel := context.WithTimeout(context.WithoutCancel(appCtx), time.Minute)
-		r.rt.Stop(bg, run.Container)
+		if err := r.rt.Stop(bg, run.Container); err != nil {
+			slog.Warn("stopping review container", "run", run.ID, "err", err) // removed below either way
+		}
 		code, _ = r.rt.Wait(bg, run.Container)
 		cancel()
 	default: // couldn't wait for it: don't trust it to ever exit
-		r.rt.Remove(context.WithoutCancel(appCtx), run.Container)
+		r.removeContainer(context.WithoutCancel(appCtx), run.ID, run.Container)
 		drainLogs()
 		if reattached {
 			unlock()
@@ -1030,7 +1063,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		case code != 0:
 			status, why = Failed, fmt.Errorf("exited %d after Claude's result", code)
 		case result == nil:
-			status, why = Failed, errors.New("Claude produced no result")
+			status, why = Failed, errors.New("claude produced no result")
 		}
 	}
 	bg := context.WithoutCancel(appCtx)
@@ -1048,9 +1081,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 			status, why = Failed, fmt.Errorf("posting review: %w", err)
 		}
 	}
-	if err := r.rt.Remove(bg, run.Container); err != nil {
-		slog.Warn("removing review container", "run", run.ID, "err", err)
-	}
+	r.removeContainer(bg, run.ID, run.Container)
 	var cleanupErr error
 	if r.cfg.Cleanup && run.Job.PR.CreatedWorktree { // reused worktrees may hold the user's own work
 		cleanupErr = worktree.Reset(bg, run.Job.PR.Worktree, run.Job.PR.HeadSHA)
@@ -1182,7 +1213,7 @@ func (r *Reviewer) finish(run Run, status string, code int, err error, unlock fu
 		case Succeeded, Cancelled: // kept, stopped: the PR's next review starts on the same DB
 			r.stopStack(run.Stack.Project)
 		default: // failed or errored: its DB may be half set up, and nothing should be left behind
-			r.removeStacks(func(prID string) bool { return prID == id })
+			_ = r.removeStacks(func(prID string) bool { return prID == id }) // logged; stays recorded for the next try
 		}
 	}
 	if unlock != nil {
@@ -1250,6 +1281,8 @@ func (r *Reviewer) writeRunJSON(run Run) {
 	}
 }
 
+// ponytail: rewrites all of reviews.json on every record, several times per run;
+// fine at a review queue's size, append-only per-run files if it grows.
 func (r *Reviewer) saveLocked() {
 	if err := jsonfile.Save(r.storePath(), r.st); err != nil {
 		slog.Error("saving reviews", "err", err)
@@ -1279,20 +1312,17 @@ func (r *Reviewer) Status() map[string]PRStatus {
 		out[id] = s
 	}
 	for _, j := range r.st.Queue {
-		set(j.PR.Key(), "queued")
+		set(j.PR.Key(), StateQueued)
 		s := out[j.PR.Key()]
 		s.Queued = &j
 		out[j.PR.Key()] = s
 	}
 	for id := range r.active {
-		set(id, "running")
+		set(id, StateRunning)
 	}
 	for _, s := range out {
 		for i := range s.Runs {
 			s.Runs[i].Overdue = s.Runs[i].Status == Running && time.Since(s.Runs[i].Started) > r.cfg.Timeout.Duration
-			if x := &s.Runs[i]; x.PostNote == "" && x.Posted != nil { // recorded before post_note existed
-				x.PostNote = postNote(x.Posted, nil, true)
-			}
 		}
 	}
 	return out

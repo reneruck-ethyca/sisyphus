@@ -201,7 +201,6 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 		return
 	}
 	tr.LastError = ""
-	tr.Author = pr.Author // backfills PRs tracked before Author was stored
 	newCommits := pr.HeadSHA != tr.HeadSHA
 	n, latest := newReplies(pr, t.cfg.User, tr.LastSeenAt)
 	if newCommits || n > 0 {

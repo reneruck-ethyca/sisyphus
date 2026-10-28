@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,26 +66,16 @@ func (CLI) CurrentUser(ctx context.Context) (string, error) {
 }
 
 func (CLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
-	seen := map[string]bool{}
-	var refs []PRRef
-	for _, filter := range []string{"--review-requested=" + user} {
-		out, err := proc.Run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, filter,
-			"--json", "repository,number", "--limit", "200")
-		if err != nil {
-			return nil, err
-		}
-		found, err := parseSearch([]byte(out))
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range found {
-			if !seen[r.Key()] {
-				seen[r.Key()] = true
-				refs = append(refs, r)
-			}
-		}
+	out, err := proc.Run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, "--review-requested="+user,
+		"--json", "repository,number", "--limit", "200")
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].Key() < refs[j].Key() })
+	refs, err := parseSearch([]byte(out))
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(refs, func(a, b PRRef) int { return strings.Compare(a.Key(), b.Key()) })
 	return refs, nil
 }
 
@@ -98,7 +88,7 @@ func (CLI) Teams(ctx context.Context, org string) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
-// ponytail: per_page=100, no pagination — same ceiling as pr-review-queue.sh.
+// ponytail: per_page=100, no pagination: a PR with more reviews or comments loses the newest; paginate then.
 func (c CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
 	d, err := c.Discussion(ctx, ref)
 	if err != nil {

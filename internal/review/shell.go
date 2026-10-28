@@ -19,7 +19,7 @@ import (
 // scratch dir: it records the stack, which must not touch the app's reviews.json.
 // stop stops the stack again (keeping its volumes, as after a review).
 func (r *Reviewer) Shell(ctx context.Context, tr tracker.Tracked) (spec container.Spec, stop func(), err error) {
-	run, spec, stop, err := r.prepare(ctx, Job{PR: tr, Reason: "new"}, "shell-"+time.Now().UTC().Format("20060102-150405"))
+	run, spec, stop, err := r.prepare(ctx, Job{PR: tr, Reason: ReasonNew}, "shell-"+time.Now().UTC().Format("20060102-150405"))
 	if err != nil {
 		return spec, stop, err
 	}

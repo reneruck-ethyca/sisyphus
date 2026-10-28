@@ -163,11 +163,10 @@ func (e Runner) runCase(ctx context.Context, rev *review.Reviewer, c Case) error
 		return err
 	}
 	branch := fmt.Sprintf("sisyphus-eval/%d-%.12s", ref.Number, sha)
-	wt, err := proc.Run(ctx, repoDir, "wtp", "add", "-b", branch, sha, "--quiet")
+	wt, err := worktree.CreateAt(ctx, repoDir, branch, sha)
 	if err != nil {
 		return fmt.Errorf("worktree: %w", err)
 	}
-	wt = strings.TrimSpace(wt[strings.LastIndex(wt, "\n")+1:]) // hooks may print too
 	defer func() {
 		if err := worktree.Remove(context.WithoutCancel(ctx), repoDir, branch, true); err != nil {
 			slog.Warn("eval: removing worktree", "branch", branch, "err", err)
@@ -183,7 +182,7 @@ func (e Runner) runCase(ctx context.Context, rev *review.Reviewer, c Case) error
 		}
 		id := fmt.Sprintf("eval-%.12s-r%d", sha, k)
 		slog.Info("eval: run", "pr", c.PR, "run", id)
-		if err := e.runOnce(ctx, rev, review.Job{PR: tr, Reason: "new", Base: base}, id, c, leaks); err != nil {
+		if err := e.runOnce(ctx, rev, review.Job{PR: tr, Reason: review.ReasonNew, Base: base}, id, c, leaks); err != nil {
 			slog.Error("eval: run failed", "pr", c.PR, "run", id, "err", err)
 		}
 	}
@@ -200,7 +199,11 @@ func prepareClone(ctx context.Context, dir string, ref github.PRRef, c Case, p p
 		fmt.Sprintf("+refs/pull/%d/head:%s", ref.Number, tmp), "+refs/heads/"+p.Base.Ref+":refs/remotes/origin/"+p.Base.Ref); err != nil {
 		return "", "", nil, err
 	}
-	defer proc.Run(context.WithoutCancel(ctx), dir, "git", "update-ref", "-d", tmp)
+	defer func() {
+		if _, err := proc.Run(context.WithoutCancel(ctx), dir, "git", "update-ref", "-d", tmp); err != nil {
+			slog.Warn("eval: removing temporary ref", "ref", tmp, "err", err)
+		}
+	}()
 	if sha, err = proc.Run(ctx, dir, "git", "rev-parse", "--verify", "--quiet", c.SHA+"^{commit}"); err != nil {
 		if _, err = proc.Run(ctx, dir, "git", "fetch", "--quiet", "origin", c.SHA); err != nil {
 			return "", "", nil, fmt.Errorf("sha %s isn't on the remote: %w", c.SHA, err)
@@ -246,12 +249,20 @@ func (e Runner) runOnce(ctx context.Context, rev *review.Reviewer, job review.Jo
 	if err != nil {
 		return err
 	}
-	defer e.RT.Remove(context.WithoutCancel(ctx), cid)
+	defer func() {
+		if err := e.RT.Remove(context.WithoutCancel(ctx), cid); err != nil {
+			slog.Warn("eval: removing container", "run", id, "err", err)
+		}
+	}()
 	if err := e.RT.Logs(ctx, cid, log); err != nil && ctx.Err() == nil {
 		slog.Warn("eval: logs", "run", id, "err", err)
 	}
-	if code, err := e.RT.Wait(ctx, cid); err != nil || code != 0 {
-		return fmt.Errorf("container exited %d: %v (log: %s)", code, err, log.Name())
+	code, err := e.RT.Wait(ctx, cid)
+	if err != nil {
+		return fmt.Errorf("waiting for the container (log: %s): %w", log.Name(), err)
+	}
+	if code != 0 {
+		return fmt.Errorf("container exited %d (log: %s)", code, log.Name())
 	}
 	return nil
 }

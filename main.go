@@ -181,7 +181,7 @@ func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh g
 		return err
 	}
 	var exit *exec.ExitError
-	if err := rt.Interactive(ctx, spec); err != nil && !(errors.As(err, &exit) && exit.ExitCode() != 125) {
+	if err := rt.Interactive(ctx, spec); err != nil && (!errors.As(err, &exit) || exit.ExitCode() == 125) {
 		return fmt.Errorf("docker run: %w", err) // 125: docker's own failure, not the shell's exit status
 	}
 	return nil

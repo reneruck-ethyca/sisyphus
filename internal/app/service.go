@@ -50,7 +50,7 @@ type ActiveReview struct {
 
 func (s Status) Summary() string {
 	out := fmt.Sprintf("%d tracked", len(s.PRs))
-	for _, state := range []string{"running", "queued"} {
+	for _, state := range []string{review.StateRunning, review.StateQueued} {
 		n := 0
 		for _, pr := range s.PRs {
 			if pr.Review.State == state {
@@ -68,7 +68,7 @@ func (s Status) Summary() string {
 type PRView struct {
 	tracker.Tracked
 	ID         string          `json:"id"`     // "owner/repo#n"
-	Health     string          `json:"health"` // "conflict" | "error" | "ok" (tracking, not review)
+	Health     string          `json:"health"` // Health* (tracking, not review)
 	Review     review.PRStatus `json:"review"`
 	ReviewNote string          `json:"review_note"` // why a review is or isn't happening, in a line
 	UpToDate   bool            `json:"up_to_date"`  // the latest review covered the head; nothing pending
@@ -105,12 +105,12 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 	}
 	short := func(sha string) string { return sha[:min(len(sha), 8)] }
 	switch rs.State {
-	case "running":
+	case review.StateRunning:
 		if len(rs.Runs) == 0 { // a stopped run whose history was just reset, still letting go
 			return "stopping a review"
 		}
 		return "reviewing (" + rs.Runs[0].Job.Reason + ")"
-	case "queued":
+	case review.StateQueued:
 		switch {
 		case rs.Queued != nil && time.Until(rs.Queued.NotBefore) > 0:
 			why := ""
@@ -143,11 +143,11 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 func health(tr tracker.Tracked) string {
 	switch {
 	case tr.ConflictHeadSHA != "" && tr.ConflictHeadSHA == tr.HeadSHA:
-		return "conflict"
+		return HealthConflict
 	case tr.LastError != "":
-		return "error"
+		return HealthError
 	}
-	return "ok"
+	return HealthOK
 }
 
 // Service is the boundary every UI (tray, web, Wails, a future API) talks to. It
@@ -448,7 +448,7 @@ func (s *Service) publish() {
 		}
 		rs := reviews[tr.Key()]
 		why := blocked[tr.Repo]
-		if why == "" && rs.State == "queued" && wait != "" {
+		if why == "" && rs.State == review.StateQueued && wait != "" {
 			why = "the 5-hour budget, until " + budget.ResetsAt.Local().Format("15:04")
 		}
 		v := PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs, UpToDate: upToDate(tr, rs),

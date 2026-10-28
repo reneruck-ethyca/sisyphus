@@ -1,8 +1,8 @@
 package tracker
 
 import (
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +13,7 @@ import (
 // GitHub computes it: COMMENTED and PENDING never override an earlier verdict.
 func latestStates(reviews []github.Review) map[string]string {
 	rs := append([]github.Review(nil), reviews...)
-	sort.SliceStable(rs, func(i, j int) bool { return rs[i].SubmittedAt.Before(rs[j].SubmittedAt) })
+	slices.SortStableFunc(rs, func(a, b github.Review) int { return a.SubmittedAt.Compare(b.SubmittedAt) })
 	states := map[string]string{}
 	for _, r := range rs {
 		if r.Bot || r.State == "COMMENTED" || r.State == "PENDING" {
@@ -38,12 +38,7 @@ func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string
 	}
 	// Not reviewed by me yet: someone else's approval means it doesn't need me.
 	states := latestStates(pr.Reviews)
-	users := make([]string, 0, len(states))
-	for u := range states {
-		users = append(users, u)
-	}
-	sort.Strings(users)
-	for _, u := range users {
+	for _, u := range slices.Sorted(maps.Keys(states)) {
 		if states[u] == "APPROVED" {
 			return "approved by " + u
 		}

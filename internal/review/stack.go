@@ -135,7 +135,7 @@ func lastLines(s string, n int) string {
 // stopStack stops a run's stack after the run, keeping its containers and
 // volumes, so the PR's next review starts on the same DB.
 func (r *Reviewer) stopStack(project string) {
-	r.compose(project, `docker compose -p "$SISYPHUS_STACK" stop`)
+	_ = r.compose(project, `docker compose -p "$SISYPHUS_STACK" stop`) // logged; the next up starts it anyway
 }
 
 // downStack removes a PR's stack: containers, network and volumes.
@@ -197,7 +197,7 @@ func (r *Reviewer) dropStack(prID string) {
 		return
 	}
 	defer unlock()
-	r.removeStacks(func(id string) bool { return id == prID })
+	_ = r.removeStacks(func(id string) bool { return id == prID }) // logged; stays recorded for the next try
 }
 
 // StackStatus is what's on Docker for a PR's stack right now.

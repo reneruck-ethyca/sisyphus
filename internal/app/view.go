@@ -19,6 +19,13 @@ const (
 	ToneBad     = "bad"     // needs a person
 )
 
+// A tracked PR's sync health (PRView.Health).
+const (
+	HealthOK       = "ok"
+	HealthConflict = "conflict" // the worktree can't be synced to the head without a person
+	HealthError    = "error"    // the last sync or fetch failed
+)
+
 // Groups sort the PR list by what the user has to do.
 const (
 	GroupAttention = "attention"
@@ -60,11 +67,11 @@ func Outcome(r review.Run) (label, tone string) {
 func verdict(tr tracker.Tracked, health string, rs review.PRStatus) (label, tone, group string, at time.Time) {
 	last := rs.Latest()
 	switch {
-	case health == "conflict":
+	case health == HealthConflict:
 		return "Merge conflict", ToneBad, GroupAttention, tr.LastSeenAt
-	case health == "error":
+	case health == HealthError:
 		return "Sync failed", ToneBad, GroupAttention, tr.LastSeenAt
-	case rs.State == "running" && last != nil:
+	case rs.State == review.StateRunning && last != nil:
 		return "Reviewing", ToneLive, GroupReviewing, last.Started
 	case rs.State != "": // queued, or a stopped run letting go
 		return "Queued", ToneLive, GroupReviewing, time.Time{}

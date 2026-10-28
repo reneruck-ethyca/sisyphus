@@ -125,7 +125,7 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult, *Window) {
 // toolSummary picks the one input field that says what a tool call does.
 func toolSummary(name string, input json.RawMessage) string {
 	var in map[string]any
-	json.Unmarshal(input, &in)
+	_ = json.Unmarshal(input, &in) // not an object: the default case shows it raw
 	str := func(k string) string { s, _ := in[k].(string); return s }
 	var s string
 	switch {
@@ -157,7 +157,7 @@ func resultText(raw json.RawMessage) string {
 	var blocks []struct {
 		Type, Text string
 	}
-	json.Unmarshal(raw, &blocks)
+	_ = json.Unmarshal(raw, &blocks) // neither form: no text
 	var parts []string
 	for _, b := range blocks {
 		if b.Text != "" {

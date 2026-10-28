@@ -1,4 +1,4 @@
-.PHONY: build test plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
+.PHONY: build test lint plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
 
 LABEL := com.reneruck.sisyphus
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -12,7 +12,10 @@ build:
 	go build -tags production -o bin/sisyphus .
 
 test:
-	go test ./...
+	go test -race ./...
+
+lint:
+	golangci-lint run ./...
 
 # Renders the LaunchAgent. PATH is captured from the installing shell so gh/git/wtp
 # resolve under launchd; plutil sets values literally (no sed escaping pitfalls).

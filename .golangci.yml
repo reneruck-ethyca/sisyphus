@@ -1,0 +1,29 @@
+version: "2"
+
+run:
+  build-tags: [production]
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - errorlint # errors.Is/As over == and type switches on wrapped errors
+  settings:
+    errcheck:
+      # Best-effort writes and cleanup: a failed Close or response write has nowhere to go.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*os.Root).Close
+        - (net/http.ResponseWriter).Write
+        - (*net/http.ResponseController).Flush
+        - (*encoding/json.Encoder).Encode
+        - (*bytes.Buffer).WriteTo
+        - fmt.Fprintf
+        - os.Remove
+        - os.RemoveAll
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck] # tests fail on what they check; setup writes fail loudly anyway
+    paths:
+      - reviewer/staged

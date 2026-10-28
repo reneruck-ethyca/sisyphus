@@ -38,12 +38,13 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
 
 ```bash
 make build                     # bin/sisyphus (needs cgo / Xcode CLT)
-make test
+make test                      # with -race
+make lint                      # golangci-lint (.golangci.yml)
 bin/sisyphus -once             # single tick, no tray or window; good for testing
 bin/sisyphus                   # menu-bar app ("SY"): status, Open window, Open dashboard, Check now, Open state file, Quit
 bin/sisyphus -config <file>    # another config file
 make install-agent             # run at login via LaunchAgent; logs to ~/Library/Logs/sisyphus.log
-make start | stop | restart    # through the LaunchAgent if installed, else in the background
+make start | stop | restart    # this checkout's build, through the LaunchAgent if installed, else in the background
 make reset                     # stop, wipe all state (see below), start again
 make reset PR='ethyca/fidesplus#123'   # …just that PR
 make shell PR='ethyca/fidesplus#123'   # a shell in that PR's review container (see below)

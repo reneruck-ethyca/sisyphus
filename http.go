@@ -110,7 +110,8 @@ func rel(t time.Time) string {
 	return v + " ago"
 }
 
-var reasons = map[string]string{"new": "PR first seen", "commits": "new commits", "replies": "new replies", "manual": "run by you"}
+var reasons = map[string]string{review.ReasonNew: "PR first seen", review.ReasonCommits: "new commits",
+	review.ReasonReplies: "new replies", review.ReasonManual: "run by you"}
 
 func reasonLabel(r string) string { return cmp.Or(reasons[r], r) }
 

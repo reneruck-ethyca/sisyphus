@@ -22,7 +22,9 @@ func Tracker(t testing.TB, gh github.Client, tracked ...*tracker.Tracked) (confi
 	dir := t.TempDir()
 	cfg := config.Config{User: "me", Org: "ethyca", Interval: config.Duration{Duration: time.Hour},
 		ReposRoot: filepath.Join(dir, "repos"), StateFile: filepath.Join(dir, "state.json"), Path: filepath.Join(dir, "config.json")}
-	os.Mkdir(cfg.ReposRoot, 0o755)
+	if err := os.Mkdir(cfg.ReposRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	st := &tracker.State{PRs: map[string]*tracker.Tracked{}}
 	for _, tr := range tracked {
 		if tr.Worktree == "" {
