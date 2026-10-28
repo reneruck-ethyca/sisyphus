@@ -132,8 +132,9 @@ func TestHTTPSettings(t *testing.T) {
 func TestHTTPPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{
-		"/":               {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "Starting…", "<h1>Overview</h1>", `class="chip neutral">Not reviewed`},
-		"/prs/ethyca/a/1": {"ethyca/a #1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `aria-current="page"`, `href="https://github.com/octocat"`},
+		"/": {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "Starting…", "<h1>Overview</h1>", `class="chip neutral">Not reviewed`},
+		"/prs/ethyca/a/1": {"ethyca/a #1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `aria-current="page"`,
+			`href="https://github.com/octocat" target="_blank" rel="noopener"`, `href="https://github.com/ethyca/a/pull/1" target="_blank" rel="noopener"`},
 	} {
 		code, body := get(t, srv.URL+path)
 		if code != 200 {

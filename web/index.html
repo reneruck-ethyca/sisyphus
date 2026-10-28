@@ -60,11 +60,11 @@
 {{template "notices" $}}
 <div class="pagehead">
   <h1>{{.Title}}</h1>
-  <div class="meta-line"><span>{{.Repo}} #{{.Number}}</span>{{with .Author}}<span>by <a href="https://github.com/{{.}}">{{.}}</a></span>{{end}}
+  <div class="meta-line"><span>{{.Repo}} #{{.Number}}</span>{{with .Author}}<span>by <a href="https://github.com/{{.}}" target="_blank" rel="noopener">{{.}}</a></span>{{end}}
     <code>{{.HeadRef}}</code><span>tracked {{ago .TrackedAt}}</span></div>
   <div class="actions">
     <button id="review-now" class="btn" data-src="{{$api}}/review">{{if .Review.Runs}}Review again{{else}}Review now{{end}}</button>
-    <a class="btn quiet" href="{{.URL}}">Open on GitHub ↗</a>
+    <a class="btn quiet" href="{{.URL}}" target="_blank" rel="noopener">Open on GitHub ↗</a>
     <details class="menu"><summary class="btn quiet">More ▾</summary><div>
       <button data-action="reset" data-pr="{{.ID}}" data-src="{{$api}}/reset"
         data-confirm="Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays.">Reset review status<small>forget history, review again</small></button>
@@ -84,7 +84,7 @@
   <div class="card-h">{{template "chip" .}}
     {{with .Posted}}{{if .Comments}}<span class="muted">{{.Comments}} inline comment{{if ne .Comments 1}}s{{end}}</span>{{end}}{{end}}
     <span class="muted">{{if eq .Status "running"}}started {{ago .Started}}{{else}}{{ago .Finished}}{{end}}</span>
-    {{with .Posted}}{{with .URL}}<a class="end" href="{{.}}">View on GitHub ↗</a>{{end}}{{end}}</div>
+    {{with .Posted}}{{with .URL}}<a class="end" href="{{.}}" target="_blank" rel="noopener">View on GitHub ↗</a>{{end}}{{end}}</div>
   {{with .Error}}<div class="card-b err">{{.}}</div>{{end}}
   {{with $.ReviewFile}}{{if .Body}}<div class="card-b"><div class="review-body clamp">{{md .Body}}</div>
     <a href="{{runPath $.PR.ID $.PR.Review.Latest.ID}}">Read the full review →</a></div>{{end}}{{end}}
@@ -147,7 +147,7 @@
 {{with $.ReviewFile}}<section class="card" aria-labelledby="written">
   <div class="card-h"><h2 id="written">{{if $.Run.Posted}}Posted to GitHub{{else}}Written, not posted{{end}}</h2>
     {{with $.Run.Posted}}<span>{{if .Comments}}{{.Comments}} inline comment{{if ne .Comments 1}}s{{end}}{{end}}{{if .Replies}} · {{.Replies}} replies{{end}}{{if .Fallback}} · as a plain comment (GitHub refused the review){{end}}</span>
-    {{with .URL}}<a class="end" href="{{.}}">View on GitHub ↗</a>{{end}}{{end}}</div>
+    {{with .URL}}<a class="end" href="{{.}}" target="_blank" rel="noopener">View on GitHub ↗</a>{{end}}{{end}}</div>
   <div class="card-b review-body">{{md .Body}}</div>
 </section>{{end}}
 

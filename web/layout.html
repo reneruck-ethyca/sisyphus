@@ -33,7 +33,8 @@
     return !v ? (s < 0 ? "in a moment" : "just now") : s < 0 ? `in ${v}` : `${v} ago`;
   };
   setInterval(() => document.querySelectorAll("time[data-rel]").forEach(el => el.textContent = rel(el.dateTime)), 30000);
-  // In the app window the webview can't leave the dashboard: external links open in the browser via sisyphus.
+  // External links carry target="_blank" for browsers. The app window can't open tabs or leave the dashboard,
+  // so there they go to the default browser via sisyphus.
   if (navigator.userAgent.includes("sisyphus-window")) document.addEventListener("click", (e) => {
     const a = e.target.closest("a[href]");
     if (!a || a.origin === location.origin) return;
