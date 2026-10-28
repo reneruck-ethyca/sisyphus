@@ -766,7 +766,8 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 		}
 	}
 	prompt, err := renderPrompt(cmp.Or(repo.PromptFile, r.cfg.PromptFile),
-		PromptData{PR: tr, Reason: run.Job.Reason, PreviousHead: r.previousHead(tr.Key()), Workdir: workdir, Diff: diffCommand(run.Job)})
+		PromptData{PR: tr, Reason: run.Job.Reason, PreviousHead: r.previousHead(tr.Key()), Workdir: workdir, Diff: diffCommand(run.Job),
+			Notes: repo.Notes, Stack: repo.Stack != nil})
 	if err != nil {
 		return container.Spec{}, fmt.Errorf("prompt: %w", err)
 	}
@@ -804,6 +805,9 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	}
 	if real, _ := filepath.EvalSymlinks(dotGit); gitDir != real {
 		mounts = append(mounts, container.Mount{Source: gitDir, Target: gitDir, ReadOnly: true})
+	}
+	for _, host := range slices.Sorted(maps.Keys(repo.Mounts)) {
+		mounts = append(mounts, container.Mount{Source: host, Target: repo.Mounts[host], ReadOnly: true})
 	}
 	// Dependency caches: per-repo volumes over the worktree, so the host's macOS
 	// builds stay out and installs survive between runs. Volumes start root-owned.

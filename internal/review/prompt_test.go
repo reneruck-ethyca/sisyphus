@@ -20,6 +20,13 @@ func TestRenderPrompt(t *testing.T) {
 			t.Errorf("default prompt missing %q:\n%s", want, got)
 		}
 	}
+	if strings.Contains(got, "already running") {
+		t.Errorf("stackless prompt mentions services:\n%s", got)
+	}
+	d.Stack, d.Notes = true, "Check the specs against /fidesplus."
+	if got, _ := renderPrompt("", d); !strings.Contains(got, "already running") || !strings.Contains(got, "\nCheck the specs against /fidesplus.\n") {
+		t.Errorf("stack + notes prompt:\n%s", got)
+	}
 	d.Reason, d.PreviousHead = "commits", "old999"
 	if got, _ := renderPrompt("", d); !strings.Contains(got, "git diff old999..HEAD") || strings.Contains(got, "first review") {
 		t.Errorf("commits prompt:\n%s", got)

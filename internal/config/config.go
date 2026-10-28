@@ -85,6 +85,8 @@ type RepoReview struct {
 	Setup      string            `json:"setup"` // shell, run in workdir before Claude starts; each line is a logged, timed step
 	Cache      []string          `json:"cache"` // dirs kept in per-repo volumes: workdir-relative, or absolute container paths
 	PromptFile string            `json:"prompt_file"`
+	Notes      string            `json:"notes"`           // repo-specific instructions, added to the prompt
+	Mounts     map[string]string `json:"mounts"`          // host path → container path, read-only (other checkouts to read)
 	Stack      *Stack            `json:"stack,omitempty"` // nil = no local services
 }
 
@@ -128,6 +130,34 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}"},
 }
 
+// fides-qa is fidesplus' QA automation; reviews cover cardea/, its Playwright suite. Nothing runs the
+// specs yet (they need a Fides deployment), so a review checks them against the ticket and against
+// fidesplus' source. The fidesplus image already has node and the talos plugins.
+var fidesQA = RepoReview{
+	Image:   "sisyphus-reviewer:fidesplus",
+	Workdir: "/fides-qa",
+	Env:     map[string]string{"npm_config_cache": "/sisyphus/cache/npm"},
+	Setup:   "(cd cardea && npm install)",
+	Cache:   []string{"cardea/node_modules", "/sisyphus/cache/npm"},
+	Mounts:  map[string]string{"~/Dev/fidesplus": "/fidesplus"},
+	Notes: `This repo is the QA automation for fidesplus. cardea/ holds its Playwright end-to-end specs: read
+cardea/AGENTS.md, and use the ethyca-talos ` + "`cardea-conventions`" + ` skill for its conventions. fidesplus'
+source, the code under test, is mounted read-only at /fidesplus. It's whatever that clone has checked out,
+not necessarily the version these tests target (` + "`git -C /fidesplus log -1`" + `).
+
+No Fides deployment is reachable from here, so don't try to run the specs. The review's main question is
+whether the new and changed tests verify what their ticket asks for:
+- Find the Jira ticket (PR title, branch or description) and use the ethyca-talos
+  ` + "`check-acceptance-criteria`" + ` skill's steps 1-3 to gather its criteria and linked plans and trace each
+  criterion to the PR's tests; skip its interactive steps. If the ticket links a fidesplus feature ticket,
+  its criteria count too. With no ticket, say so and work from the PR description.
+- For each criterion: is there a test that fails when the behaviour breaks? Flag criteria no test covers,
+  tests that assert something the criteria don't say, and assertions too weak to catch a regression.
+- Check the selectors, routes and API calls the tests rely on against /fidesplus (clients/admin-ui,
+  clients/privacy-center, src/).
+- Run ` + "`npm run lint`, `npm run typecheck` and `npm run format:check`" + ` in cardea/.`,
+}
+
 func DefaultPath() string {
 	return expandHome("~/.config/sisyphus/config.json")
 }
@@ -149,6 +179,11 @@ func Load(path string) (Config, error) {
 			st.SafeDir = expandHome(cmp.Or(st.SafeDir, filepath.Join(cfg.ReposRoot, filepath.Base(name))))
 			repo.Stack = &st
 		}
+		mounts := make(map[string]string, len(repo.Mounts)) // the defaults share theirs
+		for host, target := range repo.Mounts {
+			mounts[expandHome(host)] = target
+		}
+		repo.Mounts = mounts
 		r.Repos[name] = repo
 	}
 	cfg.StateFile = expandHome(cfg.StateFile)
@@ -202,7 +237,7 @@ func defaults() Config {
 			StepTimeout:   Duration{20 * time.Minute},
 			Retries:       3,
 			RetryBackoff:  Duration{2 * time.Minute},
-			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus},
+			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus, "ethyca/fides-qa": fidesQA},
 		},
 	}
 }

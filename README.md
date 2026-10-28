@@ -95,7 +95,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.retries` | `3` | re-runs of a review that failed before Claude started (setup, stack, container start); `0` = none |
 | `review.retry_backoff` | `2m` | wait before the first retry, doubling after each (2m, 4m, 8m) |
 | `review.stack_from` | `worktree` | where local stacks start: `worktree` (the PR's own stack files, run on the host) or `safe` (each repo's `stack.safe_dir`); see [Local stack](#local-stack) |
-| `review.repos` | `ethyca/fidesplus` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`, `stack`; only these repos are reviewed |
+| `review.repos` | `ethyca/fidesplus`, `ethyca/fides-qa` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`, `notes` (repo instructions added to the prompt), `mounts` (host path → container path, read-only), `stack`; only these repos are reviewed |
 
 ## Which PRs
 
@@ -137,7 +137,7 @@ commits or replies`, …). The UIs show the same line on the PR page and as the 
 
 Each run is Claude Code headless in the repo's image (`make reviewer-image` builds
 `sisyphus-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default
-`~/Dev/fidesplus`, with Claude Code pinned):
+`~/Dev/fidesplus`, with Claude Code pinned; fides-qa reviews reuse it):
 
 1. the repo's cache volumes (`sisyphus-<repo>-<path>`) are mounted: relative paths over the worktree
    (`.venv`, `node_modules`), absolute ones as is (fidesplus keeps uv's and npm's download caches in
@@ -157,7 +157,7 @@ Each run is Claude Code headless in the repo's image (`make reviewer-image` buil
 
 The worktree is mounted read/write at the repo's `workdir` (`/fidesplus`); its `.git` and the clone's
 `.git` are read-only (a container that could write them could plant hooks or config that host-side git
-would run; it also means no `git commit` inside). The container gets `/out`, the env files (repo's,
+would run; it also means no `git commit` inside). A repo's `mounts` add other checkouts read-only. The container gets `/out`, the env files (repo's,
 then `review.env_file`), and `SISYPHUS_RUN_ID`, `SISYPHUS_REASON`, `SISYPHUS_PR_URL`, `SISYPHUS_REPO`,
 `SISYPHUS_PR_NUMBER`, `SISYPHUS_BRANCH`, `SISYPHUS_HEAD_SHA`, `SISYPHUS_WORKTREE`, `SISYPHUS_OUT`. With
 `review.cleanup`, worktrees sisyphus created are reset to the reviewed head afterwards; reused ones never.
@@ -170,6 +170,15 @@ queue and the last 10 runs per PR are in `<state dir>/reviews.json`. Containers 
 sisyphus quits and are re-attached on start; a run whose container is gone is marked `lost` and requeued.
 
 The agent may approve; the PR stays tracked until it merges or closes.
+
+### fides-qa
+
+fides-qa reviews cover `cardea/`, the Playwright suite. Nothing runs the specs yet (they need a Fides
+deployment), so the prompt's repo notes point the agent at the ticket instead: it gathers the Jira
+ticket's acceptance criteria and linked plans (talos `check-acceptance-criteria`, steps 1-3), traces
+each criterion to the PR's tests, checks selectors, routes and API calls against fidesplus' source
+(`~/Dev/fidesplus`, mounted read-only at `/fidesplus`, at whatever that clone has checked out), and runs
+cardea's lint, typecheck and format check.
 
 ## Local stack
 

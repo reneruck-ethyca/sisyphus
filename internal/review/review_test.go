@@ -610,7 +610,8 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 	f := newFixture(t, func(c *config.Review) {
 		c.EnvFile, c.ClaudeSettings, c.PluginsVolume, c.MaxBudgetUSD = secrets, settings, "wb-plugins", 2.5
 		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Workdir: "/a", EnvFile: aEnv, PromptFile: prompt,
-			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules", "/home/u/.cache/uv"}}
+			Env: map[string]string{"PYTHONPATH": "/a/src"}, Setup: "uv sync", Cache: []string{".venv", "clients/node_modules", "/home/u/.cache/uv"},
+			Mounts: map[string]string{"/host/fidesplus": "/fidesplus"}}
 	})
 	f.start(t)
 	f.r.Tracked(f.tr)
@@ -633,6 +634,7 @@ func TestSpecForConfiguredRepo(t *testing.T) {
 		"/a/clients/node_modules":  {Source: "sisyphus-ethyca-a-clients-node_modules", Target: "/a/clients/node_modules"},
 		"/home/u/.cache/uv":        {Source: "sisyphus-ethyca-a--home-u-.cache-uv", Target: "/home/u/.cache/uv"}, // absolute: as is
 		"/sisyphus/claude/plugins": {Source: "wb-plugins", Target: "/sisyphus/claude/plugins"},
+		"/fidesplus":               {Source: "/host/fidesplus", Target: "/fidesplus", ReadOnly: true},
 		"/sisyphus/prompt.md":      {Source: filepath.Join(run.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
 		"/sisyphus/claude":         {Source: filepath.Join(run.Dir, "claude"), Target: "/sisyphus/claude"},
 	} {

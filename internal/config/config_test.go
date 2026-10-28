@@ -32,6 +32,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 		fp.EnvFile != home+"/Dev/fidesplus/.devcontainer/devcontainer.env" {
 		t.Errorf("bad fidesplus defaults: %+v", fp)
 	}
+	if qa := r.Repos["ethyca/fides-qa"]; qa.Workdir != "/fides-qa" || qa.Stack != nil || qa.Notes == "" ||
+		qa.Mounts[home+"/Dev/fidesplus"] != "/fidesplus" {
+		t.Errorf("bad fides-qa defaults: %+v", qa)
+	}
 }
 
 func TestLoadConfigReview(t *testing.T) {

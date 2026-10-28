@@ -4,9 +4,14 @@ You are reviewing pull request #{{.PR.Number}} in {{.PR.Repo}}: "{{.PR.Title}}"
 The PR branch `{{.PR.HeadRef}}` is checked out in the current directory ({{.Workdir}}) at {{.PR.HeadSHA}}.
 You can read and edit files and run commands, including the repo's tests. Git metadata is read-only:
 you can't commit, stash or switch branches, and local edits are thrown away after the review.
+{{if .Stack -}}
 There's no Docker or nox in here: the services the tests need (database, cache) are already running
 and the environment points at them, so run the tests directly.
-
+{{else -}}
+There's no Docker in here and no local services.
+{{end}}{{with .Notes}}
+{{.}}
+{{end}}
 {{if eq .Reason "commits" -}}
 New commits were pushed since your last review{{with .PreviousHead}} at {{.}}{{end}}. Focus on what changed
 {{- with .PreviousHead}} (`git diff {{.}}..HEAD`, if that commit is still available){{end}}, and check

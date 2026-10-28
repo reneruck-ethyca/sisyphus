@@ -20,6 +20,8 @@ type PromptData struct {
 	PreviousHead string // head of this PR's last successful review ("" if none)
 	Workdir      string // where the worktree is inside the container
 	Diff         string // the command that shows the change
+	Notes        string // the repo's own instructions
+	Stack        bool   // local services are running for the tests
 }
 
 func diffCommand(j Job) string {
