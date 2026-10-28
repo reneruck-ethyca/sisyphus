@@ -60,7 +60,9 @@ func (r *Reviewer) checkoutRelated(ctx context.Context, run Run, rel *config.Rel
 }
 
 // relatedRef picks the commit of rel.Repo to check out: the head of the most
-// recently updated open PR there naming one of tr's tickets, else rel.Base.
+// recently updated open PR there naming one of tr's tickets, else rel.Base. Fork
+// PRs don't count, and PRs are named by number only: their titles are text for
+// the prompt that nobody reviewed.
 func (r *Reviewer) relatedRef(ctx context.Context, tr tracker.Tracked, rel *config.Related) (sha, why string, err error) {
 	keys := ticketKeys(tr.Title, tr.HeadRef)
 	var found []github.OpenPR
@@ -73,7 +75,7 @@ func (r *Reviewer) relatedRef(ctx context.Context, tr tracker.Tracked, rel *conf
 			return "", "", err
 		}
 		for _, p := range prs {
-			if !slices.ContainsFunc(found, func(f github.OpenPR) bool { return f.Number == p.Number }) {
+			if !p.Fork && !slices.ContainsFunc(found, func(f github.OpenPR) bool { return f.Number == p.Number }) {
 				found = append(found, p)
 			}
 		}
@@ -85,11 +87,11 @@ func (r *Reviewer) relatedRef(ctx context.Context, tr tracker.Tracked, rel *conf
 		if _, err := proc.Run(ctx, rel.Clone, "git", "fetch", "--quiet", "--no-tags", "origin", fmt.Sprintf("refs/pull/%d/head", p.Number)); err != nil {
 			return "", "", err
 		}
-		why = fmt.Sprintf("the head of %s#%d (%q), the open PR there for %s", rel.Repo, p.Number, p.Title, tickets)
+		why = fmt.Sprintf("the head of %s#%d, the open PR there for %s", rel.Repo, p.Number, tickets)
 		if len(found) > 1 {
 			var others []string
 			for _, o := range found[1:] {
-				others = append(others, fmt.Sprintf("#%d (%q)", o.Number, o.Title))
+				others = append(others, fmt.Sprintf("#%d", o.Number))
 			}
 			why += "; other open PRs there for them: " + strings.Join(others, ", ")
 		}

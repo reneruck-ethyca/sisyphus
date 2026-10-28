@@ -181,7 +181,7 @@ runs cardea's lint, typecheck and format check.
 
 fidesplus is the repo's `related` checkout, read-only at `/fidesplus`. Before each run sisyphus takes the
 Jira keys from the PR's title and branch (not its body, whose "Part of" epics match unrelated PRs) and
-looks for open fidesplus PRs naming one (`gh pr list --search '"ENG-…" in:title,body'`). The most
+looks for open fidesplus PRs naming one (`gh pr list --search '"ENG-…" in:title,body'`, forks left out). The most
 recently updated one's head is checked out, else `dev`; the prompt says which and why. It's a
 `git archive` of that commit from `~/Dev/fidesplus` into the run dir, deleted after the run: tracked
 files only, so nothing ignored in your clone (`.env` files) reaches the container, and no git metadata.

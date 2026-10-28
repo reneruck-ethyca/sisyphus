@@ -38,8 +38,9 @@ func TestRelatedCheckout(t *testing.T) {
 		open       map[string][]github.OpenPR
 		want, says string
 	}{
-		"no PR: base": {nil, "one", "main, since no open PR there names ENG-1"},
-		"open PR":     {map[string][]github.OpenPR{"ENG-1": {{Number: 7, Title: "Feature", HeadSHA: prHead}}}, "two", `the head of ethyca/b#7 ("Feature")`},
+		"no PR: base":   {nil, "one", "main, since no open PR there names ENG-1"},
+		"open PR":       {map[string][]github.OpenPR{"ENG-1": {{Number: 7, HeadSHA: prHead}}}, "two", "the head of ethyca/b#7, the open PR there for ENG-1"},
+		"fork PR: base": {map[string][]github.OpenPR{"ENG-1": {{Number: 8, HeadSHA: prHead, Fork: true}}}, "one", "main, since no open PR there names ENG-1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, func(c *config.Review) {
