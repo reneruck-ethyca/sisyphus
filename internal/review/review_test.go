@@ -758,8 +758,8 @@ func runWithReview(t *testing.T, gh *fakeGH, reviewJSON string, mutate ...func(*
 
 func TestPostsReviewFromHost(t *testing.T) {
 	gh := &fakeGH{}
-	f, run := runWithReview(t, gh, `{"event":"REQUEST_CHANGES","body":"One bug.","comments":[{"path":"a.txt","line":1,"body":"off by one"}],
-		"replies":[{"comment_id":7,"body":"Fixed in the latest push, thanks."}]}`)
+	f, run := runWithReview(t, gh, `{"event":"REQUEST_CHANGES","body":"One bug.\n\n🤖 Reviewed by waterboy","comments":[{"path":"a.txt","line":1,"body":"off by one"}],
+		"replies":[{"comment_id":7,"body":"Fixed in the latest push, thanks.\n\n🤖 Reviewed by sisyphus"}]}`)
 	if run.Status != Succeeded || run.Posted == nil || run.Posted.URL == "" || run.Posted.Event != "REQUEST_CHANGES" || run.Posted.Comments != 1 || run.Posted.Replies != 1 {
 		t.Fatalf("run = %+v posted = %+v", run, run.Posted)
 	}
@@ -767,7 +767,7 @@ func TestPostsReviewFromHost(t *testing.T) {
 	var p map[string]any
 	json.Unmarshal([]byte(reviews[0]), &p)
 	if len(reviews) != 1 || p["commit_id"] != f.tr.HeadSHA || p["event"] != "REQUEST_CHANGES" ||
-		!strings.HasSuffix(p["body"].(string), "🤖 Reviewed by sisyphus") || len(p["comments"].([]any)) != 1 {
+		p["body"] != "One bug.\n\n🤖 Reviewed by sisyphus" || len(p["comments"].([]any)) != 1 {
 		t.Fatalf("posted %q", reviews)
 	}
 	if !slices.Equal(replies, []string{"7: Fixed in the latest push, thanks.\n\n🤖 Reviewed by sisyphus"}) {

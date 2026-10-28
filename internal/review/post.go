@@ -58,6 +58,12 @@ type Posted struct {
 
 const footer = "\n\n" + tracker.SisyphusMark // also how the tracker knows not to count our posts as replies
 
+// Agents copy the footer of earlier reviews they read (even waterboy's, from
+// before the rename); drop theirs so only ours ends the post.
+var copiedFooters = regexp.MustCompile(`(\s*🤖 Reviewed by \S+)+\s*$`)
+
+func signed(s string) string { return copiedFooters.ReplaceAllString(s, "") + footer }
+
 var events = []string{"APPROVE", "REQUEST_CHANGES", "COMMENT"}
 
 // writeDiscussion puts the PR's discussion into dir for the agent.
@@ -112,11 +118,12 @@ func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
 		return nil, err
 	}
 	f := *pf
+	f.Body = copiedFooters.ReplaceAllString(f.Body, "")
 	ref := run.Job.PR.PRRef
 	p := &Posted{Event: f.Event, Comments: len(f.Comments), Replies: len(f.Replies)}
 	var errs []error
 	if f.Event != "" {
-		payload := map[string]any{"commit_id": run.Job.PR.HeadSHA, "event": f.Event, "body": f.Body + footer}
+		payload := map[string]any{"commit_id": run.Job.PR.HeadSHA, "event": f.Event, "body": signed(f.Body)}
 		if len(f.Comments) > 0 {
 			payload["comments"] = f.Comments
 		}
@@ -124,14 +131,14 @@ func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
 		if err != nil {
 			// e.g. an inline comment outside the diff, or approving your own PR.
 			url, err = r.createReview(ctx, ref, run.Dir, "post-fallback.json", map[string]any{
-				"commit_id": run.Job.PR.HeadSHA, "event": "COMMENT", "body": folded(f, err) + footer})
+				"commit_id": run.Job.PR.HeadSHA, "event": "COMMENT", "body": signed(folded(f, err))})
 			p.Fallback = err == nil
 		}
 		p.URL = url
 		errs = append(errs, err)
 	}
 	for _, rep := range f.Replies {
-		if err := r.GitHub.ReplyToComment(ctx, ref, rep.CommentID, rep.Body+footer); err != nil {
+		if err := r.GitHub.ReplyToComment(ctx, ref, rep.CommentID, signed(rep.Body)); err != nil {
 			errs = append(errs, fmt.Errorf("reply to comment %d: %w", rep.CommentID, err))
 		}
 	}
