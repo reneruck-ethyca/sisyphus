@@ -5,12 +5,14 @@
 <div class="cols{{if .Archive}} archive{{end}}">
 <aside aria-label="Pull requests">
   {{$sel := ""}}{{with .PR}}{{$sel = .ID}}{{end}}
-  {{if .Archive}}<h2><span>No longer tracked</span><span>{{len .History}}</span></h2>
-    {{range .History}}<a class="pr" href="/history/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
+  {{if .Archive}}<div class="search"><input type="search" id="pr-search" placeholder="Search titles" aria-label="Search PR titles" autocomplete="off"></div>
+    <h2><span>No longer tracked</span><span id="pr-count">{{len .History}}</span></h2>
+    {{range .History}}<a class="pr" href="/history/{{.Repo}}/{{.Number}}" data-title="{{.Title}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
       <span class="row">{{with .Runs}}{{template "chip" index . 0}}{{else}}<span class="chip">Not reviewed</span>{{end}}</span>
       <span class="title">{{.Title}}</span>
       <span class="meta">{{base .Repo}} #{{.Number}} · picked up {{stamp .TrackedAt}}</span>
     </a>{{else}}<p class="empty">No PRs dropped yet.</p>{{end}}
+    <p class="empty" id="no-match" hidden>No title matches.</p>
   {{else}}
   {{range .Groups}}
     <h2><span>{{.Label}}</span><span>{{len .PRs}}</span></h2>
@@ -232,6 +234,26 @@
     };
     src.addEventListener("done", () => { src.close(); location.reload(); });
   }
+  // History search: every word of the query must appear in the title, its letters in order ("rbc dflt" finds "RBAC the default").
+  const search = document.getElementById("pr-search");
+  if (search) {
+    const fuzzy = (word, title) => { let i = 0; for (const c of title) if (c === word[i]) i++; return i === word.length; };
+    const filter = () => {
+      const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      document.querySelectorAll("aside a.pr").forEach(a => {
+        const title = a.dataset.title.toLowerCase();
+        shown += !(a.hidden = !words.every(w => fuzzy(w, title)));
+      });
+      document.getElementById("no-match").hidden = shown > 0;
+      document.getElementById("pr-count").textContent = shown;
+      try { sessionStorage.setItem("sisyphus-history-search", search.value); } catch {}
+    };
+    try { search.value = sessionStorage.getItem("sisyphus-history-search") ?? ""; } catch {}
+    search.oninput = filter;
+    filter();
+  }
+
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => {
     const on = b.getAttribute("aria-pressed") !== "true";
     b.setAttribute("aria-pressed", on);
