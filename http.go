@@ -156,6 +156,10 @@ func newHandler(svc *app.Service) http.Handler {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		w.Write(styleCSS)
 	})
+	mux.HandleFunc("GET /icon.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(trayIcon)
+	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, svc.Status())
 	})
