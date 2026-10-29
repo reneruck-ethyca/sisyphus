@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/reneruck/sisyphus/internal/app"
 	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 //go:embed web/*.html web/style.css
@@ -61,8 +63,16 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"pct":     func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
 	"warnAt":  func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
 	"base":    path.Base,
-	"top":     func(page string) topbar { return topbar{Page: page} },
-	"md":      inlineMarkdown,
+	// dict passes several values to a template: dict "Key" value ...
+	"dict": func(kv ...any) map[string]any {
+		m := map[string]any{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return m
+	},
+	"top": func(page string) topbar { return topbar{Page: page} },
+	"md":  inlineMarkdown,
 	// checked is a bool setting's checkbox state; Invert fields show the other way round.
 	"checked": func(f config.Field) bool { v, _ := f.Value.(bool); return v != f.Invert },
 	"outputs": func(evs []review.Event) (n int) {
@@ -245,9 +255,42 @@ func newHandler(svc *app.Service) http.Handler {
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
 	})
-	mux.HandleFunc("GET /history", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "history.html", historyPage{Top: topbar{Page: "history"}, Rows: svc.History()})
-	})
+	history := func(w http.ResponseWriter, r *http.Request) {
+		d := dashboard{Status: svc.Status(), History: svc.History()}
+		if r.PathValue("number") != "" {
+			i := slices.IndexFunc(d.History, func(h app.HistoryRow) bool { return h.ID == prID(r) })
+			if i < 0 {
+				http.NotFound(w, r)
+				return
+			}
+			d.Hist = &d.History[i]
+			pr := historyView(*d.Hist)
+			d.PR = &pr
+			show := pr.Review.Latest()
+			if id := r.PathValue("run"); id != "" {
+				if d.Run = findRun(pr, id); d.Run == nil {
+					http.NotFound(w, r)
+					return
+				}
+				var err error
+				if d.Events, d.Next, err = svc.RunEvents(pr.ID, id); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				show = d.Run
+			}
+			if show != nil {
+				var err error
+				if d.ReviewFile, err = svc.ReviewFile(pr.ID, show.ID); err != nil {
+					slog.Warn("review file", "pr", pr.ID, "run", show.ID, "err", err)
+				}
+			}
+		}
+		render(w, "index.html", d)
+	}
+	mux.HandleFunc("GET /history", history)
+	mux.HandleFunc("GET /history/{owner}/{repo}/{number}", history)
+	mux.HandleFunc("GET /history/{owner}/{repo}/{number}/runs/{run}", history)
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, svc.History())
 	})
@@ -331,6 +374,17 @@ type dashboard struct {
 	StackErr error
 
 	ReviewFile *review.ReviewFile // what the shown (or latest) run's agent wrote; nil = nothing
+
+	History []app.HistoryRow // non-nil on the history pages, which list it instead of the tracked PRs
+	Hist    *app.HistoryRow  // the history entry shown, if any; PR is its view
+}
+
+func (d dashboard) Archive() bool { return d.History != nil }
+
+// historyView shows a history entry with the PR templates.
+func historyView(h app.HistoryRow) app.PRView {
+	return app.PRView{ID: h.ID, Review: review.PRStatus{Runs: h.Runs}, Tracked: tracker.Tracked{
+		PRRef: h.PRRef, URL: h.URL, Title: h.Title, Author: h.Author, TrackedAt: h.TrackedAt}}
 }
 
 // topbar is the header: the dashboard shows Status in it, other pages don't.
@@ -339,7 +393,12 @@ type topbar struct {
 	Status *app.Status
 }
 
-func (d dashboard) Top() topbar { return topbar{Status: &d.Status} }
+func (d dashboard) Top() topbar {
+	if d.Archive() {
+		return topbar{Status: &d.Status, Page: "history"}
+	}
+	return topbar{Status: &d.Status}
+}
 
 type prGroup struct {
 	Label string
@@ -371,11 +430,6 @@ func (d dashboard) InGroup(group string) []app.PRView {
 	return out
 }
 
-type historyPage struct {
-	Top  topbar
-	Rows []app.HistoryRow
-}
-
 type logsPage struct {
 	Top     topbar
 	Entries []app.LogEntry
@@ -387,6 +441,8 @@ func (d dashboard) Title() string {
 		return "Run " + d.Run.ID
 	case d.PR != nil:
 		return d.PR.ID
+	case d.Archive():
+		return "History"
 	}
 	return "Status"
 }

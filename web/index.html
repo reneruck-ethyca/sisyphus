@@ -1,8 +1,17 @@
 {{template "head" .Title}}
 {{template "top" .Top}}
-<div class="cols">
+{{if .Archive}}<div class="archive-banner" role="note"><span><b>History.</b> Every PR sisyphus has tracked, including ones it no longer tracks. Nothing here updates live.</span>
+  <a href="/">Back to current PRs →</a></div>{{end}}
+<div class="cols{{if .Archive}} archive{{end}}">
 <aside aria-label="Pull requests">
   {{$sel := ""}}{{with .PR}}{{$sel = .ID}}{{end}}
+  {{if .Archive}}<h2><span>Tracked PRs, newest first</span><span>{{len .History}}</span></h2>
+    {{range .History}}<a class="pr" href="/history/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
+      <span class="row">{{with .Runs}}{{template "chip" index . 0}}{{else}}<span class="chip">Not reviewed</span>{{end}}{{if .Tracking}}<span class="chip live">tracking</span>{{end}}</span>
+      <span class="title">{{.Title}}</span>
+      <span class="meta">{{base .Repo}} #{{.Number}} · picked up {{stamp .TrackedAt}}</span>
+    </a>{{else}}<p class="empty">No PRs tracked yet.</p>{{end}}
+  {{else}}
   {{range .Groups}}
     <h2><span>{{.Label}}</span><span>{{len .PRs}}</span></h2>
     {{range .PRs}}<a class="pr" href="/prs/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
@@ -16,9 +25,10 @@
   {{with .Ignored}}<h2><span>Untracked</span><span>{{len .}}</span></h2>
     {{range .}}<div class="untracked"><span title="{{.Title}}">{{.Key}}</span><button class="linkbtn" data-action="track" data-pr="{{.Key}}"
       data-src="/api/prs/{{.Repo}}/{{.Number}}/track">Track again</button></div>{{end}}{{end}}
+  {{end}}
 </aside>
 <main>
-{{if .Run}}{{template "run" .}}{{else if .PR}}{{template "pr" .}}{{else}}{{template "overview" .}}{{end}}
+{{if .Run}}{{template "run" .}}{{else if .Archive}}{{template "archived" .}}{{else if .PR}}{{template "pr" .}}{{else}}{{template "overview" .}}{{end}}
 </main>
 </div>
 
@@ -94,15 +104,7 @@
 </section>
 
 {{with .Review.Runs}}<section aria-labelledby="runs"><h2 id="runs">Review runs</h2>
-<div class="card scrollx"><table class="runs">
-  <thead><tr><th>Outcome</th><th>Started</th><th>Trigger</th><th class="num">Took</th><th class="num">Turns</th><th class="num">Cost</th><th>Head</th></tr></thead>
-  {{range .}}<tbody>
-  <tr><td>{{template "chip" .}}</td><td><a href="{{runPath $.PR.ID .ID}}">{{stamp .Started}}</a></td><td>{{reason .Job.Reason}}</td>
-    <td class="num">{{dur .}}</td><td class="num">{{with .Claude}}{{.NumTurns}}{{else}}—{{end}}</td><td class="num">{{with .Claude}}${{printf "%.2f" .CostUSD}}{{else}}—{{end}}</td>
-    <td><code>{{short .Job.PR.HeadSHA}}</code></td></tr>
-  {{if or .Error .Overdue}}<tr class="note"><td></td><td colspan="6"><div class="err">{{if .Overdue}}Running longer than the review timeout. {{end}}{{.Error}}</div></td></tr>{{end}}
-  </tbody>{{end}}
-</table></div>
+{{template "runtable" (dict "Runs" . "Base" (printf "/prs/%s/%d/runs" $.PR.Repo $.PR.Number))}}
 </section>{{end}}
 
 {{if or $.Stack $.StackErr}}<details class="fold" id="fold-stack"><summary>Local stack
@@ -132,9 +134,48 @@
 </details>
 {{end}}{{end}}
 
+{{/* runtable lists .Runs, each linked to .Base/<run id>. */}}
+{{define "runtable"}}<div class="card scrollx"><table class="runs">
+  <thead><tr><th>Outcome</th><th>Started</th><th>Trigger</th><th class="num">Took</th><th class="num">Turns</th><th class="num">Cost</th><th>Head</th></tr></thead>
+  {{range .Runs}}<tbody>
+  <tr><td>{{template "chip" .}}</td><td><a href="{{$.Base}}/{{.ID}}">{{stamp .Started}}</a></td><td>{{reason .Job.Reason}}</td>
+    <td class="num">{{dur .}}</td><td class="num">{{with .Claude}}{{.NumTurns}}{{else}}—{{end}}</td><td class="num">{{with .Claude}}${{printf "%.2f" .CostUSD}}{{else}}—{{end}}</td>
+    <td><code>{{short .Job.PR.HeadSHA}}</code></td></tr>
+  {{if or .Error .Overdue}}<tr class="note"><td></td><td colspan="6"><div class="err">{{if .Overdue}}Running longer than the review timeout. {{end}}{{.Error}}</div></td></tr>{{end}}
+  </tbody>{{end}}
+</table></div>{{end}}
+
+{{define "archived"}}{{with .Hist}}{{$base := printf "/history/%s/%d/runs" .Repo .Number}}
+<div class="pagehead">
+  <h1>{{.Title}}</h1>
+  <div class="meta-line"><span>{{.Repo}} #{{.Number}}</span>{{with .Author}}<span>by <a href="https://github.com/{{.}}" target="_blank" rel="noopener">{{.}}</a></span>{{end}}
+    <span>picked up {{when .TrackedAt}}</span>
+    {{if .Tracking}}<span>still tracked</span>{{else if .DroppedAt.IsZero}}<span>dropped: unknown</span>{{else}}<span>dropped {{when .DroppedAt}}: {{.Reason}}</span>{{end}}</div>
+  <div class="actions">{{if .Tracking}}<a class="btn" href="/prs/{{.Repo}}/{{.Number}}">Open the current view</a>{{end}}
+    <a class="btn quiet" href="{{.URL}}" target="_blank" rel="noopener">Open on GitHub ↗</a></div>
+</div>
+<section aria-labelledby="latest"><h2 id="latest">Latest review</h2>
+{{with .Runs}}{{$last := index . 0}}<div class="card">
+  <div class="card-h">{{template "chip" $last}}
+    {{with $last.Posted}}{{if .Comments}}<span class="muted">{{.Comments}} inline comment{{if ne .Comments 1}}s{{end}}</span>{{end}}{{end}}
+    <span class="muted">{{stamp $last.Started}}</span>
+    {{with $last.Posted}}{{with .URL}}<a class="end" href="{{.}}" target="_blank" rel="noopener">View on GitHub ↗</a>{{end}}{{end}}</div>
+  {{with $last.Error}}<div class="card-b err">{{.}}</div>{{end}}
+  {{with $.ReviewFile}}{{if .Body}}<div class="card-b"><div class="review-body clamp">{{md .Body}}</div>
+    <a href="{{$base}}/{{$last.ID}}">Read the full review →</a></div>{{end}}{{end}}
+</div>
+{{else}}<div class="card"><div class="card-b muted">No reviews kept. A PR's reviews are deleted when it's untracked, reset or wiped.</div></div>{{end}}
+</section>
+{{with .Runs}}<section aria-labelledby="runs"><h2 id="runs">Review runs</h2>
+{{template "runtable" (dict "Runs" . "Base" $base)}}
+</section>{{end}}
+{{else}}<div class="pagehead"><h1>History</h1>
+  <div class="muted">Pick a PR on the left to see whether it was reviewed and what the reviews came to. PRs dropped before history was kept show as dropped "unknown".</div></div>
+{{end}}{{end}}
+
 {{define "run"}}{{$pr := .PR}}{{with .Run}}{{$base := runPath $pr.ID .ID}}
 {{template "notices" $}}
-<nav class="meta-line" aria-label="Breadcrumb"><a href="/prs/{{$pr.Repo}}/{{$pr.Number}}">{{base $pr.Repo}} #{{$pr.Number}} {{$pr.Title}}</a></nav>
+<nav class="meta-line" aria-label="Breadcrumb"><a href="{{if $.Archive}}/history{{else}}/prs{{end}}/{{$pr.Repo}}/{{$pr.Number}}">{{base $pr.Repo}} #{{$pr.Number}} {{$pr.Title}}</a></nav>
 <div class="pagehead">
   <div class="actions"><h1>Review run · {{stamp .Started}}</h1>{{template "chip" .}}</div>
   <div class="meta-line"><span>{{reason .Job.Reason}} · {{dur .}}{{with .Claude}} · {{.NumTurns}} turns · ${{printf "%.2f" .CostUSD}}{{end}}</span>
@@ -232,7 +273,7 @@
   // open or a field has focus; open sections stay open across the reload.
   const folds = "sisyphus-open-folds:" + location.pathname;
   try { JSON.parse(sessionStorage.getItem(folds) ?? "[]").forEach(id => document.getElementById(id)?.setAttribute("open", "")); } catch {}
-  {{if not .Run}}let seen, pending;
+  {{if not (or .Run .Archive)}}let seen, pending;
   const onStatus = (now) => {
     seen ??= now;
     if (now === seen) return;

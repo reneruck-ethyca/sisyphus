@@ -194,6 +194,13 @@ func TestHTTPHistory(t *testing.T) {
 		rows[0].Tracking || rows[0].Reason != "untracked by hand" || rows[0].Title != "Fix <things>" {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
+	code, body = get(t, srv.URL+"/history/ethyca/a/1")
+	if code != 200 || !strings.Contains(body, "untracked by hand") || !strings.Contains(body, "archive-banner") {
+		t.Fatalf("history PR page %d: %s", code, body)
+	}
+	if code, _ = get(t, srv.URL+"/history/ethyca/a/2"); code != 404 {
+		t.Fatalf("unknown history PR = %d", code)
+	}
 }
 
 func TestHTTPLogStream(t *testing.T) {
