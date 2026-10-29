@@ -1,16 +1,16 @@
 {{template "head" .Title}}
 {{template "top" .Top}}
-{{if .Archive}}<div class="archive-banner" role="note"><span><b>History.</b> Every PR sisyphus has tracked, including ones it no longer tracks. Nothing here updates live.</span>
+{{if .Archive}}<div class="archive-banner" role="note"><span><b>History.</b> PRs sisyphus no longer tracks. Nothing here updates live.</span>
   <a href="/">Back to current PRs →</a></div>{{end}}
 <div class="cols{{if .Archive}} archive{{end}}">
 <aside aria-label="Pull requests">
   {{$sel := ""}}{{with .PR}}{{$sel = .ID}}{{end}}
-  {{if .Archive}}<h2><span>Tracked PRs, newest first</span><span>{{len .History}}</span></h2>
+  {{if .Archive}}<h2><span>No longer tracked</span><span>{{len .History}}</span></h2>
     {{range .History}}<a class="pr" href="/history/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
-      <span class="row">{{with .Runs}}{{template "chip" index . 0}}{{else}}<span class="chip">Not reviewed</span>{{end}}{{if .Tracking}}<span class="chip live">tracking</span>{{end}}</span>
+      <span class="row">{{with .Runs}}{{template "chip" index . 0}}{{else}}<span class="chip">Not reviewed</span>{{end}}</span>
       <span class="title">{{.Title}}</span>
       <span class="meta">{{base .Repo}} #{{.Number}} · picked up {{stamp .TrackedAt}}</span>
-    </a>{{else}}<p class="empty">No PRs tracked yet.</p>{{end}}
+    </a>{{else}}<p class="empty">No PRs dropped yet.</p>{{end}}
   {{else}}
   {{range .Groups}}
     <h2><span>{{.Label}}</span><span>{{len .PRs}}</span></h2>
@@ -150,9 +150,8 @@
   <h1>{{.Title}}</h1>
   <div class="meta-line"><span>{{.Repo}} #{{.Number}}</span>{{with .Author}}<span>by <a href="https://github.com/{{.}}" target="_blank" rel="noopener">{{.}}</a></span>{{end}}
     <span>picked up {{when .TrackedAt}}</span>
-    {{if .Tracking}}<span>still tracked</span>{{else if .DroppedAt.IsZero}}<span>dropped: unknown</span>{{else}}<span>dropped {{when .DroppedAt}}: {{.Reason}}</span>{{end}}</div>
-  <div class="actions">{{if .Tracking}}<a class="btn" href="/prs/{{.Repo}}/{{.Number}}">Open the current view</a>{{end}}
-    <a class="btn quiet" href="{{.URL}}" target="_blank" rel="noopener">Open on GitHub ↗</a></div>
+    {{if .DroppedAt.IsZero}}<span>dropped: unknown</span>{{else}}<span>dropped {{when .DroppedAt}}: {{.Reason}}</span>{{end}}</div>
+  <div class="actions"><a class="btn quiet" href="{{.URL}}" target="_blank" rel="noopener">Open on GitHub ↗</a></div>
 </div>
 <section aria-labelledby="latest"><h2 id="latest">Latest review</h2>
 {{with .Runs}}{{$last := index . 0}}<div class="card">

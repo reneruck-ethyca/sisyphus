@@ -182,7 +182,7 @@ func TestHTTPLogs(t *testing.T) {
 func TestHTTPHistory(t *testing.T) {
 	srv, svc, _ := newTestServer(t)
 	code, body := get(t, srv.URL+"/history")
-	if code != 200 || !strings.Contains(body, "Fix &lt;things&gt;") || !strings.Contains(body, ">tracking<") {
+	if code != 200 || strings.Contains(body, "Fix &lt;things&gt;") { // still tracked
 		t.Fatalf("history page %d: %s", code, body)
 	}
 	if err := svc.Untrack(context.Background(), testkit.RefA.Key()); err != nil {
@@ -191,7 +191,7 @@ func TestHTTPHistory(t *testing.T) {
 	code, body = get(t, srv.URL+"/api/history")
 	var rows []app.HistoryRow
 	if err := json.Unmarshal([]byte(body), &rows); code != 200 || err != nil || len(rows) != 1 ||
-		rows[0].Tracking || rows[0].Reason != "untracked by hand" || rows[0].Title != "Fix <things>" {
+		rows[0].Reason != "untracked by hand" || rows[0].Title != "Fix <things>" {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
 	code, body = get(t, srv.URL+"/history/ethyca/a/1")

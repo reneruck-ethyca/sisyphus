@@ -8,15 +8,14 @@ import (
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
-// HistoryRow is a PR sisyphus tracks or tracked, for the history page.
+// HistoryRow is a PR sisyphus no longer tracks, for the history page.
 type HistoryRow struct {
-	tracker.Dropped              // DroppedAt is zero while Tracking, and when unknown
+	tracker.Dropped              // DroppedAt is zero when unknown
 	ID              string       `json:"id"`
-	Tracking        bool         `json:"tracking"`
 	Runs            []review.Run `json:"runs"` // newest first; none left after an untrack, reset or wipe
 }
 
-// History lists every PR sisyphus tracked, most recently picked up first. PRs
+// History lists the PRs sisyphus tracked and no longer does, most recently picked up first. PRs
 // reviewed before drops were recorded show with reason "unknown".
 func (s *Service) History() []HistoryRow {
 	var reviews map[string]review.PRStatus
@@ -33,8 +32,8 @@ func (s *Service) History() []HistoryRow {
 		}
 	}
 	s.mu.Lock()
-	for _, tr := range s.tracked {
-		rows[tr.Key()] = HistoryRow{Dropped: tr.AsDropped("", time.Time{}), Tracking: true}
+	for _, tr := range s.tracked { // re-tracked PRs too
+		delete(rows, tr.Key())
 	}
 	s.mu.Unlock()
 	out := make([]HistoryRow, 0, len(rows))
