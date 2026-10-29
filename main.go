@@ -121,7 +121,7 @@ func main() {
 
 // resetState wipes one PR ("owner/repo#n") or "all": review containers, review
 // history and run directories, the worktrees sisyphus created, and the tracked
-// entries. The next start rediscovers whatever still awaits review, as new. The
+// entries; "all" also clears the history page. The next start rediscovers whatever still awaits review, as new. The
 // app must not be running (it would write its state back).
 func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, which string) error {
 	id := which
@@ -145,6 +145,9 @@ func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, 
 		if err := tr.Forget(ctx, id); err != nil {
 			errs = append(errs, fmt.Errorf("%s stays tracked: %w", id, err))
 		}
+	}
+	if which == "all" {
+		tr.ClearHistory()
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("reset %s: %w", which, err)

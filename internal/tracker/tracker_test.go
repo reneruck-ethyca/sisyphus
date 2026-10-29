@@ -66,6 +66,9 @@ func TestTickDropsClosedReused(t *testing.T) {
 	if err != nil || len(tr.state.PRs) != 0 || len(reloaded.PRs) != 0 {
 		t.Fatalf("not dropped: %+v %+v %v", tr.state.PRs, reloaded.PRs, err)
 	}
+	if h := reloaded.History[refA.Key()]; h.Reason == "" || h.DroppedAt.IsZero() {
+		t.Fatalf("drop not archived: %+v", reloaded.History)
+	}
 }
 
 func TestTickSkipsForkAndMissingClone(t *testing.T) {
@@ -398,6 +401,10 @@ func TestUntrackIgnoresUntilRetracked(t *testing.T) {
 	reloaded, _ := LoadState(tr.cfg.StateFile)
 	if ig := tr.IgnoredPRs(); len(ig) != 1 || ig[0].Title != "T" || len(reloaded.Ignored) != 1 {
 		t.Fatalf("ignored = %+v (saved %+v)", ig, reloaded.Ignored)
+	}
+	// its worktree was gone too; the manual untrack is what's kept
+	if h := tr.History(); len(h) != 1 || h[0].Reason != "untracked by hand" || h[0].Title != "T" {
+		t.Fatalf("history = %+v", h)
 	}
 	if err := tr.Untrack(ctx, refA.Key()); err == nil {
 		t.Fatal("untracked an untracked PR")

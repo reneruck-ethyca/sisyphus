@@ -195,6 +195,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 				return
 			}
 		}
+		t.archive(*tr, reason)
 		delete(t.state.PRs, key)
 		slog.Info("dropped PR", "pr", key, "reason", reason, "removed_worktree", tr.CreatedWorktree)
 		t.Events.Dropped(*tr, reason)
@@ -266,10 +267,11 @@ func (t *Tracker) announce(tr *Tracked) {
 func (t *Tracker) Forget(ctx context.Context, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.forget(ctx, id)
+	return t.forget(ctx, id, "reset")
 }
 
-func (t *Tracker) forget(ctx context.Context, id string) error {
+// forget drops id, archiving it with reason.
+func (t *Tracker) forget(ctx context.Context, id, reason string) error {
 	tr := t.state.PRs[id]
 	if tr == nil {
 		return nil
@@ -281,6 +283,7 @@ func (t *Tracker) forget(ctx context.Context, id string) error {
 	defer unlock()
 	if _, err := os.Stat(tr.Worktree); errors.Is(err, os.ErrNotExist) {
 		t.forgetMissing(ctx, tr) // already gone: nothing for wtp to remove
+		t.archive(*tr, reason)
 		t.save()
 		return nil
 	}
@@ -289,6 +292,7 @@ func (t *Tracker) forget(ctx context.Context, id string) error {
 			return err
 		}
 	}
+	t.archive(*tr, reason)
 	delete(t.state.PRs, id)
 	t.save()
 	slog.Info("forgot PR", "pr", id, "removed_worktree", tr.CreatedWorktree)
@@ -305,7 +309,7 @@ func (t *Tracker) Untrack(ctx context.Context, id string) error {
 		return fmt.Errorf("%s is not tracked", id)
 	}
 	ig := Ignored{PRRef: tr.PRRef, Title: tr.Title, At: time.Now()}
-	if err := t.forget(ctx, id); err != nil {
+	if err := t.forget(ctx, id, "untracked by hand"); err != nil {
 		return err
 	}
 	if t.state.Ignored == nil {
@@ -345,6 +349,29 @@ func (t *Tracker) ignored() []Ignored {
 	return out
 }
 
+// archive records tr in the history as dropped now, replacing an earlier drop of it.
+func (t *Tracker) archive(tr Tracked, reason string) {
+	if t.state.History == nil {
+		t.state.History = map[string]Dropped{}
+	}
+	t.state.History[tr.Key()] = tr.AsDropped(reason, time.Now())
+}
+
+// History copies the PRs no longer tracked, in no particular order.
+func (t *Tracker) History() []Dropped {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Collect(maps.Values(t.state.History))
+}
+
+// ClearHistory forgets every dropped PR.
+func (t *Tracker) ClearHistory() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.state.History = nil
+	t.save()
+}
+
 // forgetMissing handles a worktree deleted outside sisyphus: drop the entry (the
 // next tick re-tracks the PR if it's still eligible) and delete our branch, but
 // only if it holds nothing unpushed (`git branch -d` refuses otherwise).
@@ -358,6 +385,7 @@ func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 			slog.Warn("keeping branch of deleted worktree", "pr", tr.Key(), "branch", tr.HeadRef, "err", err)
 		}
 	}
+	t.archive(*tr, "worktree deleted outside sisyphus")
 	delete(t.state.PRs, tr.Key())
 	slog.Info("worktree deleted outside sisyphus, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
 	t.Events.Dropped(*tr, "worktree deleted outside sisyphus")

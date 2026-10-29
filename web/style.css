@@ -105,6 +105,7 @@ th { font-weight: 600; color: var(--muted); }
 .runs td { border-bottom: 0; }
 .runs tbody + tbody { border-top: 1px solid var(--line2); }
 .runs .num { text-align: right; }
+.history .runs td:first-child { white-space: normal; }
 .runs tr.note td { padding-top: 0; white-space: normal; }
 .runs tr.note .err { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; } /* the run page has it all */
 dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 24px; margin: 0; font-size: 13px; }

@@ -34,6 +34,22 @@ type Tracked struct {
 type State struct {
 	PRs     map[string]*Tracked `json:"prs"`               // key = PRRef.Key()
 	Ignored map[string]Ignored  `json:"ignored,omitempty"` // untracked by hand: never picked up again until re-tracked
+	History map[string]Dropped  `json:"history,omitempty"` // every PR no longer tracked, as last seen
+}
+
+// Dropped is a PR sisyphus stopped tracking, kept for the history page.
+type Dropped struct {
+	github.PRRef
+	URL       string    `json:"url"`
+	Title     string    `json:"title"`
+	Author    string    `json:"author"`
+	TrackedAt time.Time `json:"tracked_at"`
+	DroppedAt time.Time `json:"dropped_at"`
+	Reason    string    `json:"reason"`
+}
+
+func (tr Tracked) AsDropped(reason string, at time.Time) Dropped {
+	return Dropped{PRRef: tr.PRRef, URL: tr.URL, Title: tr.Title, Author: tr.Author, TrackedAt: tr.TrackedAt, DroppedAt: at, Reason: reason}
 }
 
 // Ignored is a PR the user untracked.

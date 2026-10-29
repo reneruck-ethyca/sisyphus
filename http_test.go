@@ -179,6 +179,23 @@ func TestHTTPLogs(t *testing.T) {
 	}
 }
 
+func TestHTTPHistory(t *testing.T) {
+	srv, svc, _ := newTestServer(t)
+	code, body := get(t, srv.URL+"/history")
+	if code != 200 || !strings.Contains(body, "Fix &lt;things&gt;") || !strings.Contains(body, ">tracking<") {
+		t.Fatalf("history page %d: %s", code, body)
+	}
+	if err := svc.Untrack(context.Background(), testkit.RefA.Key()); err != nil {
+		t.Fatal(err)
+	}
+	code, body = get(t, srv.URL+"/api/history")
+	var rows []app.HistoryRow
+	if err := json.Unmarshal([]byte(body), &rows); code != 200 || err != nil || len(rows) != 1 ||
+		rows[0].Tracking || rows[0].Reason != "untracked by hand" || rows[0].Title != "Fix <things>" {
+		t.Fatalf("%d %v %s", code, err, body)
+	}
+}
+
 func TestHTTPLogStream(t *testing.T) {
 	srv, _, logs := newTestServer(t)
 	log := slog.New(logs.Handler(slog.NewTextHandler(io.Discard, nil)))

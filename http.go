@@ -245,6 +245,12 @@ func newHandler(svc *app.Service) http.Handler {
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
 	})
+	mux.HandleFunc("GET /history", func(w http.ResponseWriter, r *http.Request) {
+		render(w, "history.html", historyPage{Top: topbar{Page: "history"}, Rows: svc.History()})
+	})
+	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, svc.History())
+	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
 		st, err := svc.Settings()
 		render(w, "settings.html", settingsPage{st, err})
@@ -363,6 +369,11 @@ func (d dashboard) InGroup(group string) []app.PRView {
 		}
 	}
 	return out
+}
+
+type historyPage struct {
+	Top  topbar
+	Rows []app.HistoryRow
 }
 
 type logsPage struct {
