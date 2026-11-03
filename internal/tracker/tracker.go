@@ -204,6 +204,11 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 	tr.LastError = ""
 	newCommits := pr.HeadSHA != tr.HeadSHA
 	n, latest := newReplies(pr, t.cfg.User, tr.LastSeenAt)
+	if latestStates(pr.Reviews)[t.cfg.User] == "APPROVED" {
+		// Once I've approved, only new commits wake us; replies are seen but not acted on.
+		n, tr.UnannouncedReplies = 0, 0
+		tr.LastSeenAt = latest
+	}
 	if newCommits || n > 0 {
 		tr.HeadSHA, tr.LastSeenAt = pr.HeadSHA, latest
 		tr.UnannouncedReplies += n

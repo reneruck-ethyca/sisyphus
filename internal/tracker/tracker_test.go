@@ -105,6 +105,24 @@ func TestTickRecordsNewReply(t *testing.T) {
 	rec.want(t, "updated a commits=false replies=1")
 }
 
+func TestTickIgnoresRepliesOnceIApproved(t *testing.T) {
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): {
+		PRRef: refA, State: "open", HeadRepo: "ethyca/a", HeadSHA: "a",
+		Reviews:  []github.Review{{User: "me", State: "APPROVED", SubmittedAt: at(1)}},
+		Comments: []github.Comment{{User: "alice", CreatedAt: at(2)}},
+	}}}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", AnnouncedSHA: "a", LastSeenAt: at(1), UnannouncedReplies: 1})
+	rec := record(tr)
+	if err := tr.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := tr.state.PRs[refA.Key()]
+	if !got.LastSeenAt.Equal(at(2)) || got.UnannouncedReplies != 0 {
+		t.Fatalf("got %+v", got)
+	}
+	rec.want(t)
+}
+
 func TestTickKeepsRequestedPRMissingFromSearch(t *testing.T) {
 	gh := &github.Fake{PRs: map[string]github.PR{refA.Key(): {PRRef: refA, State: "open", HeadSHA: "a", RequestedReviewers: []string{"me"}}}}
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", CreatedWorktree: true})

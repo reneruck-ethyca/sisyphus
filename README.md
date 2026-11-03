@@ -106,7 +106,8 @@ A PR is picked up only when it requests a review from you or one of your teams. 
 reviewed it, it's dropped (and its worktree removed, if sisyphus created it) when it's merged or
 closed, someone else approved it, it became a draft (unless `include_drafts`), or it no longer requests
 a review from you or your teams. Once you've reviewed it (by hand, or the agent as you), only merging
-or closing drops it: new commits and replies keep getting follow-up reviews, approvals included.
+or closing drops it: new commits and replies keep getting follow-up reviews. Once your latest verdict
+is an approval, only new commits trigger one; replies are ignored.
 Fork PRs are skipped.
 
 Syncing on new commits fast-forwards the worktree. After a force-push it hard-resets only if
