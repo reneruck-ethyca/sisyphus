@@ -236,6 +236,28 @@ func (t *Tracker) Refresh(ctx context.Context, id string) (Tracked, error) {
 	return *tr, nil
 }
 
+// SetAgent changes a tracked PR's review agent. nil makes it inherit the
+// application-wide review.agent profile again.
+func (t *Tracker) SetAgent(id string, agent *config.Agent) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tr := t.state.PRs[id]
+	if tr == nil {
+		return fmt.Errorf("%s is not tracked", id)
+	}
+	if agent != nil {
+		if err := agent.Check(); err != nil {
+			return err
+		}
+		copy := *agent
+		tr.Agent = &copy
+	} else {
+		tr.Agent = nil
+	}
+	t.save()
+	return nil
+}
+
 // lock takes tr's worktree lock, or asks its holder to let go (we retry next tick).
 func (t *Tracker) lock(tr *Tracked) (unlock func(), ok bool) {
 	if unlock, ok = t.Locks.TryLock(tr.Key()); !ok {

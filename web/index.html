@@ -91,6 +91,18 @@
 {{if eq .Health "conflict"}}<p class="notice">Merge conflict at head <code>{{short .HeadSHA}}</code>: the on_conflict hook couldn't resolve it. {{.LastError}}</p>
 {{else if eq .Health "error"}}<p class="notice">Syncing the worktree failed: {{.LastError}}</p>{{end}}
 
+<details class="fold" id="fold-agent"><summary>Review agent
+  <span class="muted">{{.Agent.Vendor}} · {{.Agent.Model}}{{with .Agent.Effort}} · {{.}}{{end}}{{if .OverridesAgent}} · this PR override{{else}} · app default{{end}}</span>
+</summary><div>
+  <form id="pr-agent" data-src="{{$api}}/agent">
+    <label><input type="checkbox" name="inherit"{{if not .OverridesAgent}} checked{{end}}> Use the app-wide default</label>
+    <div class="field"><label for="agent-vendor"><b>Vendor</b></label><span class="control"><select id="agent-vendor" name="vendor"><option{{if eq .Agent.Vendor "claude"}} selected{{end}}>claude</option><option{{if eq .Agent.Vendor "codex"}} selected{{end}}>codex</option></select></span></div>
+    <div class="field"><label for="agent-model"><b>Model</b></label><span class="control"><select id="agent-model" name="model"><option selected>{{.Agent.Model}}</option></select></span></div>
+    <div class="field"><label for="agent-effort"><b>Reasoning effort</b></label><span class="control"><select id="agent-effort" name="effort"><option selected>{{.Agent.Effort}}</option></select></span></div>
+    <button class="btn" type="submit">Save agent</button><span id="agent-msg" class="muted" role="status"></span>
+  </form>
+</div></details>
+
 <section aria-labelledby="latest"><h2 id="latest">Latest review</h2>
 {{with .Review.Latest}}<div class="card">
   <div class="card-h">{{template "chip" .}}
@@ -259,6 +271,38 @@
     b.setAttribute("aria-pressed", on);
     events.classList.toggle("no-" + b.dataset.filter, !on);
   });
+
+  const agentForm = document.getElementById("pr-agent");
+  if (agentForm) {
+    const inherit = agentForm.elements.inherit, controls = [...agentForm.elements].filter(el => el.name && el.name !== "inherit");
+    const profiles = {
+      claude: {models: ["opus", "sonnet", "haiku"], efforts: ["low", "medium", "high"]},
+      codex: {models: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-codex"], efforts: ["low", "medium", "high", "xhigh", "max", "ultra"]}
+    };
+    const agentVendor = agentForm.elements.vendor, agentModel = agentForm.elements.model, agentEffort = agentForm.elements.effort;
+    const setOptions = (select, values) => {
+      const selected = select.value;
+      if (selected && !values.includes(selected)) values = [selected, ...values];
+      select.replaceChildren(...values.map(value => new Option(value, value, false, value === selected)));
+    };
+    const syncProfileOptions = () => {
+      const profile = profiles[agentVendor.value];
+      setOptions(agentModel, profile.models); setOptions(agentEffort, profile.efforts);
+    };
+    const syncAgent = () => controls.forEach(el => el.disabled = inherit.checked);
+    inherit.onchange = syncAgent;
+    agentVendor.onchange = () => { agentModel.value = ""; agentEffort.value = ""; syncProfileOptions(); };
+    syncProfileOptions(); syncAgent();
+    agentForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("agent-msg"), submit = agentForm.querySelector("button[type=submit]");
+      submit.disabled = true; msg.textContent = "Saving…";
+      const fd = new FormData(agentForm), agent = Object.fromEntries(controls.map(el => [el.name, fd.get(el.name)]));
+      const r = await fetch(agentForm.dataset.src, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({inherit: inherit.checked, agent})});
+      if (!r.ok) { msg.textContent = await r.text(); submit.disabled = false; return; }
+      location.reload();
+    };
+  }
 
   // The PR's More menu and "Track again": each action confirms what it removes, then reloads.
   document.querySelectorAll("[data-action]").forEach(b => b.onclick = async (e) => {

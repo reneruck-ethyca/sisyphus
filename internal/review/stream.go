@@ -66,6 +66,11 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult, *Window) {
 	if !strings.HasPrefix(trimmed, "{") || json.Unmarshal([]byte(trimmed), &m) != nil || m.Type == "" {
 		return []Event{{Line: n, Kind: "output", Text: line}}, nil, nil
 	}
+	// Codex CLI's --json event stream. Normalize its final turn and item
+	// events into the same UI event vocabulary used by Claude.
+	if item, ok := codexEvent(n, trimmed); ok {
+		return item.events, item.result, nil
+	}
 	ev := func(kind, tool, text string, isErr bool) Event {
 		return Event{Line: n, Kind: kind, Tool: tool, Text: text, IsError: isErr}
 	}
@@ -120,6 +125,64 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult, *Window) {
 		}
 	}
 	return []Event{ev("system", "", m.Type, false)}, nil, nil
+}
+
+type normalizedCodex struct {
+	events []Event
+	result *ClaudeResult
+}
+
+func codexEvent(n int, line string) (normalizedCodex, bool) {
+	var m struct {
+		Type string `json:"type"`
+		Item struct {
+			Type, ID, Command, Text string
+			Status                  string `json:"status"`
+			ExitCode                *int   `json:"exit_code"`
+		} `json:"item"`
+		Usage struct {
+			Input  int `json:"input_tokens"`
+			Output int `json:"output_tokens"`
+		} `json:"usage"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(line), &m) != nil || !strings.Contains(m.Type, ".") {
+		return normalizedCodex{}, false
+	}
+	e := func(kind, tool, text string, bad bool) Event {
+		return Event{Line: n, Kind: kind, Tool: tool, Text: text, IsError: bad}
+	}
+	switch m.Type {
+	case "thread.started":
+		return normalizedCodex{events: []Event{e("init", "", "Codex session started", false)}}, true
+	case "item.started", "item.completed":
+		switch m.Item.Type {
+		case "agent_message":
+			if m.Item.Text != "" {
+				return normalizedCodex{events: []Event{e("text", "", m.Item.Text, false)}}, true
+			}
+		case "command_execution":
+			if m.Type == "item.started" {
+				return normalizedCodex{events: []Event{e("tool", "Bash", m.Item.Command, false)}}, true
+			}
+			return normalizedCodex{events: []Event{e("tool_result", "", m.Item.Status, m.Item.Status == "failed")}}, true
+		case "file_change":
+			return normalizedCodex{events: []Event{e("tool", "File changes", m.Item.Status, false)}}, true
+		}
+		return normalizedCodex{}, true
+	case "turn.completed":
+		return normalizedCodex{events: []Event{e("result", "", "Codex turn completed", false)}, result: &ClaudeResult{Subtype: "success"}}, true
+	case "turn.failed", "error":
+		msg := m.Error.Message
+		if msg == "" {
+			msg = m.Type
+		}
+		return normalizedCodex{events: []Event{e("result", "", msg, true)}, result: &ClaudeResult{Subtype: "error", IsError: true, Error: msg}}, true
+	default:
+		return normalizedCodex{events: []Event{e("system", "", m.Type, false)}}, true
+	}
 }
 
 // toolSummary picks the one input field that says what a tool call does.

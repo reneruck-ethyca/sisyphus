@@ -45,7 +45,7 @@ func newFixture(t *testing.T, mutate ...func(*config.Review)) *fixture {
 	f := &fixture{rt: &container.Fake{}, locks: &tracker.Locks{}, dir: t.TempDir()}
 	f.tr = tracker.Tracked{PRRef: refA, URL: "https://github.com/ethyca/a/pull/1", HeadRef: "feature/x",
 		HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), Worktree: clone, CreatedWorktree: true}
-	cfg := config.Review{Model: "opus", MaxTurns: 10, Timeout: config.Duration{Duration: time.Minute},
+	cfg := config.Review{Agent: config.Agent{Vendor: "claude", Model: "opus"}, MaxTurns: 10, Timeout: config.Duration{Duration: time.Minute},
 		MaxConcurrent: 1, Cleanup: true,
 		Repos: map[string]config.RepoReview{"ethyca/a": {Image: "img:1"}, "ethyca/b": {Image: "img:1"}}}
 	for _, m := range mutate {
@@ -877,8 +877,8 @@ func setupOutput(t *testing.T, setup string, limit time.Duration) (string, error
 	if _, err := exec.LookPath("timeout"); err != nil {
 		t.Skip("needs GNU timeout")
 	}
-	r := &Reviewer{cfg: config.Review{Model: "opus", MaxTurns: 1, StepTimeout: config.Duration{Duration: limit}}}
-	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil), "echo '── sisyphus: claude ──'")
+	r := &Reviewer{cfg: config.Review{Agent: config.Agent{Vendor: "claude", Model: "opus"}, MaxTurns: 1, StepTimeout: config.Duration{Duration: limit}}}
+	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil, r.cfg.Agent), "echo '── sisyphus: claude ──'")
 	out, err := exec.Command("bash", "-c", script).CombinedOutput()
 	return string(out), err
 }

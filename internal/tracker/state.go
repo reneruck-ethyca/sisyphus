@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/jsonfile"
 )
@@ -26,9 +27,10 @@ type Tracked struct {
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	ConflictHeadSHA string    `json:"conflict_head_sha,omitempty"` // on_conflict already exhausted for this head
 	// What Events has been told: the head last announced, and replies seen since.
-	AnnouncedSHA       string `json:"announced_sha,omitempty"`
-	UnannouncedReplies int    `json:"unannounced_replies,omitempty"`
-	LastError          string `json:"last_error,omitempty"`
+	AnnouncedSHA       string        `json:"announced_sha,omitempty"`
+	UnannouncedReplies int           `json:"unannounced_replies,omitempty"`
+	LastError          string        `json:"last_error,omitempty"`
+	Agent              *config.Agent `json:"agent,omitempty"` // nil inherits review.agent
 }
 
 type State struct {

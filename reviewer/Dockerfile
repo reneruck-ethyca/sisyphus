@@ -15,7 +15,8 @@ ENV DISABLE_AUTOUPDATER=1 \
 # server talos skills call (mcp.json).
 USER root
 RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
-    sh -c 'uv tool install semgrep==1.182.1 && uv tool install mcp-atlassian==0.23.1'
+    sh -c 'uv tool install semgrep==1.182.1 && uv tool install mcp-atlassian==0.23.1' \
+    && npm install -g @openai/codex
 
 # sisyphus loads every plugin under /opt/sisyphus/plugins and the MCP servers in
 # /opt/sisyphus/mcp.json (see claudeScript). staged/ is `make reviewer-plugins`.

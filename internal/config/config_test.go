@@ -24,7 +24,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
 	r := cfg.Review
-	if r.Disabled || !r.Post || r.Model != "opus" || r.MaxTurns != 200 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
+	if r.Disabled || !r.Post || r.Agent != (Agent{Vendor: "claude", Model: "opus", Effort: "medium"}) || r.MaxTurns != 200 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
 		r.EnvFile != home+"/.config/sisyphus/review.env" {
 		t.Errorf("bad review defaults: %+v", r)
 	}
@@ -42,14 +42,14 @@ func TestLoadConfigReview(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	p := filepath.Join(home, "c.json")
-	os.WriteFile(p, []byte(`{"review": {"model": "sonnet", "cleanup": false, "env_file": "~/.sisyphus.env",
+	os.WriteFile(p, []byte(`{"review": {"agent": {"vendor": "claude", "model": "sonnet", "effort": "high"}, "cleanup": false, "env_file": "~/.sisyphus.env",
 		"repos": {"ethyca/fides": {"image": "me/fides-reviewer:1", "prompt_file": "~/fides.md"}}}}`), 0o644)
 	cfg, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := cfg.Review
-	if r.Model != "sonnet" || r.Cleanup || r.MaxConcurrent != 1 || r.EnvFile != home+"/.sisyphus.env" {
+	if r.Agent != (Agent{Vendor: "claude", Model: "sonnet", Effort: "high"}) || r.Cleanup || r.MaxConcurrent != 1 || r.EnvFile != home+"/.sisyphus.env" {
 		t.Errorf("review = %+v", r)
 	}
 	if r.Repos["ethyca/fides"].PromptFile != home+"/fides.md" || r.Repos["ethyca/fidesplus"].Image == "" {
@@ -96,7 +96,7 @@ func TestSettings(t *testing.T) {
 	t.Setenv("HOME", home)
 	p := filepath.Join(home, "c.json")
 	os.WriteFile(p, []byte(`{"org": "acme", "hooks": {"on_conflict": "echo hi"},
-		"review": {"model": "sonnet", "repos": {"x/y": {"image": "i"}}}}`), 0o644)
+		"review": {"agent": {"vendor": "claude", "model": "sonnet", "effort": "medium"}, "repos": {"x/y": {"image": "i"}}}}`), 0o644)
 	value := func(fs []Field, key string) any {
 		for _, f := range fs {
 			if f.Key == key {
@@ -110,7 +110,7 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value(fs, "org") != "acme" || value(fs, "interval") != "10m" || value(fs, "review.timeout") != "1h" || value(fs, "hook_timeout") != "30m" || value(fs, "review.model") != "sonnet" ||
+	if value(fs, "org") != "acme" || value(fs, "interval") != "10m" || value(fs, "review.timeout") != "1h" || value(fs, "hook_timeout") != "30m" || value(fs, "review.agent.model") != "sonnet" ||
 		value(fs, "review.max_turns") != 200.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/sisyphus/review.env" {
 		t.Fatalf("settings = %+v", fs)
 	}
@@ -123,7 +123,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Interval.Duration != 5*time.Minute || cfg.Review.MaxTurns != 7 || !cfg.IncludeDrafts ||
-		cfg.Org != "acme" || cfg.Review.Model != "sonnet" || cfg.Hooks["on_conflict"] != "echo hi" || cfg.Review.Repos["x/y"].Image != "i" {
+		cfg.Org != "acme" || cfg.Review.Agent.Model != "sonnet" || cfg.Hooks["on_conflict"] != "echo hi" || cfg.Review.Repos["x/y"].Image != "i" {
 		t.Fatalf("saved config = %+v (the rest of the file must survive)", cfg)
 	}
 

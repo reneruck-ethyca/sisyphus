@@ -73,10 +73,12 @@ type PRView struct {
 	ReviewNote string          `json:"review_note"` // why a review is or isn't happening, in a line
 	UpToDate   bool            `json:"up_to_date"`  // the latest review covered the head; nothing pending
 	// Where the PR stands for its reader: see verdict.
-	Verdict   string    `json:"verdict"`
-	Tone      string    `json:"tone"`
-	Group     string    `json:"group"`
-	VerdictAt time.Time `json:"verdict_at"`
+	Verdict        string       `json:"verdict"`
+	Tone           string       `json:"tone"`
+	Group          string       `json:"group"`
+	VerdictAt      time.Time    `json:"verdict_at"`
+	Agent          config.Agent `json:"agent"` // effective review agent
+	OverridesAgent bool         `json:"overrides_agent"`
 }
 
 // budgetNotes says in a line how much of the 5-hour budget reviews used, and
@@ -260,6 +262,12 @@ func (s *Service) ReviewNow(id string) error {
 		}
 		return s.rev.Trigger(tr)
 	})
+}
+
+// SetAgent stores a complete profile override for one PR. Passing nil makes the
+// PR inherit the app-wide review.agent profile.
+func (s *Service) SetAgent(id string, agent *config.Agent) error {
+	return s.tracker.SetAgent(id, agent)
 }
 
 // Stack is what's on Docker for a PR's local stack (nil = its repo has none).
@@ -451,7 +459,11 @@ func (s *Service) publish() {
 		if why == "" && rs.State == review.StateQueued && wait != "" {
 			why = "the 5-hour budget, until " + budget.ResetsAt.Local().Format("15:04")
 		}
-		v := PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs, UpToDate: upToDate(tr, rs),
+		agent := s.cfg.Review.Agent
+		if tr.Agent != nil {
+			agent = *tr.Agent
+		}
+		v := PRView{Tracked: tr, ID: tr.Key(), Health: health(tr), Review: rs, UpToDate: upToDate(tr, rs), Agent: agent, OverridesAgent: tr.Agent != nil,
 			ReviewNote: reviewNote(tr, rs, s.rev != nil, why, runtimeErr)}
 		v.Verdict, v.Tone, v.Group, v.VerdictAt = verdict(tr, v.Health, rs)
 		prs = append(prs, v)

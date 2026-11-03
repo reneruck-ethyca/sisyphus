@@ -29,6 +29,7 @@ import (
 // Job is one review to run, with the PR as the tracker announced it.
 type Job struct {
 	PR        tracker.Tracked `json:"pr"`
+	Agent     config.Agent    `json:"agent"`
 	Reason    string          `json:"reason"`              // Reason*
 	Attempt   int             `json:"attempt,omitempty"`   // retries so far; 0 = first try
 	NotBefore time.Time       `json:"not_before,omitzero"` // a retry waits until then
@@ -182,7 +183,7 @@ func (r *Reviewer) storePath() string { return filepath.Join(r.dir, "reviews.jso
 
 func (r *Reviewer) Tracked(tr tracker.Tracked) {
 	if r.reviewable(tr) {
-		r.enqueue(Job{PR: tr, Reason: ReasonNew})
+		r.enqueue(r.newJob(tr, ReasonNew))
 	}
 }
 
@@ -195,7 +196,7 @@ func (r *Reviewer) Updated(tr tracker.Tracked, newCommits bool, _ int) {
 		reason = ReasonCommits
 		r.cancel(tr.Key(), errSuperseded)
 	}
-	r.enqueue(Job{PR: tr, Reason: reason})
+	r.enqueue(r.newJob(tr, reason))
 }
 
 func (r *Reviewer) Reclaim(tr tracker.Tracked) { r.cancel(tr.Key(), errReclaimed) }
@@ -221,6 +222,16 @@ func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
 		return false
 	}
 	return true
+}
+
+// newJob snapshots the effective profile so a queued review is reproducible
+// even if the app-wide default or the PR override changes before it starts.
+func (r *Reviewer) newJob(tr tracker.Tracked, reason string) Job {
+	agent := r.cfg.Agent
+	if tr.Agent != nil {
+		agent = *tr.Agent
+	}
+	return Job{PR: tr, Agent: agent, Reason: reason}
 }
 
 // Blocked says why repo's reviews can't run now ("" = they can): no review
@@ -265,7 +276,7 @@ func (r *Reviewer) Ensure(prs []tracker.Tracked) {
 			!slices.ContainsFunc(r.st.Queue, func(j Job) bool { return j.PR.Key() == id })
 		r.mu.Unlock()
 		if none {
-			r.enqueue(Job{PR: tr, Reason: ReasonNew})
+			r.enqueue(r.newJob(tr, ReasonNew))
 		}
 	}
 }
@@ -332,7 +343,7 @@ func (r *Reviewer) Trigger(tr tracker.Tracked) error {
 		return fmt.Errorf("%s isn't synced to its head %.12s yet; try after the next sync", tr.Key(), tr.HeadSHA)
 	}
 	slog.Info("review requested", "pr", tr.Key())
-	r.enqueue(Job{PR: tr, Reason: ReasonManual})
+	r.enqueue(r.newJob(tr, ReasonManual))
 	return nil
 }
 
@@ -755,6 +766,7 @@ func (r *Reviewer) removeContainer(ctx context.Context, runID, id string) {
 
 func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	tr := run.Job.PR
+	agent := r.agentFor(run.Job)
 	repo, ok := r.cfg.Repos[tr.Repo]
 	if !ok {
 		return container.Spec{}, fmt.Errorf("no review.repos entry for %s", tr.Repo)
@@ -789,6 +801,11 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 			return container.Spec{}, fmt.Errorf("claude_settings: %w", err)
 		}
 		if err := os.WriteFile(filepath.Join(run.Dir, "claude", "settings.json"), b, 0o644); err != nil {
+			return container.Spec{}, err
+		}
+	}
+	if agent.Vendor == "codex" {
+		if err := prepareCodexHome(r.cfg.CodexHome); err != nil {
 			return container.Spec{}, err
 		}
 	}
@@ -829,6 +846,9 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 		container.Mount{Source: filepath.Join(run.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
 		container.Mount{Source: filepath.Join(run.Dir, "claude"), Target: claudeDir}, // fresh per run
 	)
+	if agent.Vendor == "codex" {
+		mounts = append(mounts, container.Mount{Source: r.cfg.CodexHome, Target: "/sisyphus/codex"})
+	}
 	if r.GitHub != nil {
 		mounts = append(mounts, container.Mount{Source: filepath.Join(run.Dir, "context"), Target: "/sisyphus/context", ReadOnly: true})
 	}
@@ -847,6 +867,9 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": "*",
 	}
 	maps.Copy(env, repo.Env)
+	if agent.Vendor == "codex" {
+		env["CODEX_HOME"] = "/sisyphus/codex"
+	}
 	for _, k := range r.cfg.Env {
 		if v, ok := os.LookupEnv(k); ok {
 			env[k] = v
@@ -865,7 +888,7 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	return container.Spec{
 		Network: network,
 		Name:    "sisyphus-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
-		Image:   repo.Image, Command: []string{"bash", "-c", r.script(repo, owned)}, Env: env, EnvFiles: envFiles,
+		Image:   repo.Image, Command: []string{"bash", "-c", r.script(repo, owned, agent)}, Env: env, EnvFiles: envFiles,
 		Mounts: mounts, Workdir: workdir,
 		Labels: map[string]string{"sisyphus": "1", "sisyphus.run": run.ID, "sisyphus.pr": tr.Key()},
 	}, nil
@@ -876,8 +899,78 @@ const claudeDir = "/sisyphus/claude"
 
 // script is the container's command: own the volumes, run the repo's setup,
 // then Claude headless on the rendered prompt.
-func (r *Reviewer) script(repo config.RepoReview, owned []string) string {
-	return r.setupScript(repo, owned) + r.claudeScript()
+func (r *Reviewer) script(repo config.RepoReview, owned []string, agent config.Agent) string {
+	return r.setupScript(repo, owned) + r.agentScript(agent)
+}
+
+func (r *Reviewer) agentScript(agent config.Agent) string {
+	if agent.Vendor == "codex" {
+		return r.codexScript(agent)
+	}
+	return r.claudeScript(agent)
+}
+
+func (r *Reviewer) agentFor(job Job) config.Agent {
+	if job.Agent.Vendor == "" {
+		return r.cfg.Agent // compatibility with review jobs saved before profiles
+	}
+	return job.Agent
+}
+
+func (r *Reviewer) codexScript(agent config.Agent) string {
+	var sb strings.Builder
+	sb.WriteString("sudo -n chown -R \"$(id -u):$(id -g)\" /sisyphus/codex 2>/dev/null || true\nsudo -n chmod 700 /sisyphus/codex 2>/dev/null || true\n")
+	sb.WriteString("echo '── sisyphus: codex ──'\n")
+	args := []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--model", agent.Model}
+	if agent.Effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+agent.Effort)
+	}
+	args = append(args, "-")
+	for i := range args {
+		args[i] = shellQuote(args[i])
+	}
+	sb.WriteString("exec " + strings.Join(args, " ") + " < /sisyphus/prompt.md\n")
+	return sb.String()
+}
+
+// prepareCodexHome keeps Codex credentials in a dedicated directory rather
+// than exposing the user's entire ~/.codex to a review container. Existing CLI
+// sign-ins are copied once; Codex maintains its refreshed auth there afterward.
+func prepareCodexHome(home string) error {
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		home = filepath.Join(userHome, ".config", "sisyphus", "codex")
+	}
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return fmt.Errorf("codex_home: %w", err)
+	}
+	if err := os.Chmod(home, 0o700); err != nil {
+		return fmt.Errorf("codex_home: %w", err)
+	}
+	auth := filepath.Join(home, "auth.json")
+	if _, err := os.Stat(auth); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(filepath.Join(userHome, ".codex", "auth.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil // OPENAI_API_KEY or a first-run CLI login can still be used
+	}
+	if err != nil {
+		return fmt.Errorf("reading Codex CLI sign-in: %w", err)
+	}
+	if err := os.WriteFile(auth, b, 0o600); err != nil {
+		return fmt.Errorf("copying Codex CLI sign-in: %w", err)
+	}
+	return nil
 }
 
 func (r *Reviewer) setupScript(repo config.RepoReview, owned []string) string {
@@ -903,11 +996,14 @@ echo "── sisyphus: took $((SECONDS-t))s"
 	return sb.String()
 }
 
-func (r *Reviewer) claudeScript() string {
+func (r *Reviewer) claudeScript(agent config.Agent) string {
 	var sb strings.Builder
 	sb.WriteString("echo '── sisyphus: claude ──'\n")
 	args := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
-		"--model", r.cfg.Model, "--max-turns", strconv.Itoa(r.cfg.MaxTurns)}
+		"--model", agent.Model, "--max-turns", strconv.Itoa(r.cfg.MaxTurns)}
+	if agent.Effort != "" {
+		args = append(args, "--effort", agent.Effort)
+	}
 	if r.cfg.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(r.cfg.MaxBudgetUSD, 'f', -1, 64))
 	}
@@ -1065,7 +1161,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	if status == Succeeded {
 		switch {
 		case result != nil && result.IsError:
-			status, why = Failed, fmt.Errorf("claude: %s", cmp.Or(result.Error, result.Subtype))
+			status, why = Failed, fmt.Errorf("%s: %s", r.agentFor(run.Job).Vendor, cmp.Or(result.Error, result.Subtype))
 		case code != 0 && result == nil:
 			status, why = Failed, retryable{fmt.Errorf("exited %d before Claude finished (setup failed?)", code)}
 		case code != 0:

@@ -19,12 +19,13 @@ import (
 // scratch dir: it records the stack, which must not touch the app's reviews.json.
 // stop stops the stack again (keeping its volumes, as after a review).
 func (r *Reviewer) Shell(ctx context.Context, tr tracker.Tracked) (spec container.Spec, stop func(), err error) {
-	run, spec, stop, err := r.prepare(ctx, Job{PR: tr, Reason: ReasonNew}, "shell-"+time.Now().UTC().Format("20060102-150405"))
+	run, spec, stop, err := r.prepare(ctx, r.newJob(tr, ReasonNew), "shell-"+time.Now().UTC().Format("20060102-150405"))
 	if err != nil {
 		return spec, stop, err
 	}
 	review := spec.Command[2]
-	for name, script := range map[string]string{"setup.sh": strings.TrimSuffix(review, r.claudeScript()), "review.sh": review} {
+	agent := r.agentFor(run.Job)
+	for name, script := range map[string]string{"setup.sh": strings.TrimSuffix(review, r.agentScript(agent)), "review.sh": review} {
 		path := filepath.Join(run.Dir, name)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return spec, stop, err
@@ -86,8 +87,8 @@ func (r *Reviewer) Eval(ctx context.Context, job Job, runID string) (run Run, sp
 	if err != nil {
 		return run, spec, stop, err
 	}
-	claude := r.claudeScript()
-	spec.Command[2] = strings.TrimSuffix(spec.Command[2], claude) + "unset GH_TOKEN GITHUB_TOKEN\n" + claude
+	agent := r.agentScript(r.agentFor(run.Job))
+	spec.Command[2] = strings.TrimSuffix(spec.Command[2], agent) + "unset GH_TOKEN GITHUB_TOKEN\n" + agent
 	spec.Labels = map[string]string{"sisyphus.eval": job.PR.Key()} // not "sisyphus", as with Shell
 	return run, spec, stop, nil
 }

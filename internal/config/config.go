@@ -53,11 +53,31 @@ type Config struct {
 	Path          string            `json:"-"` // the file this was loaded from
 }
 
-// Review configures the Claude Code review runs.
+// Agent selects the CLI and its model settings for one review.
+type Agent struct {
+	Vendor string `json:"vendor"`
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
+}
+
+// UnmarshalJSON accepts the pre-profile string form ("claude" or "codex")
+// so existing configs continue to load and can be saved through the new UI.
+func (a *Agent) UnmarshalJSON(b []byte) error {
+	var vendor string
+	if json.Unmarshal(b, &vendor) == nil {
+		a.Vendor = vendor
+		return nil
+	}
+	type plain Agent
+	return json.Unmarshal(b, (*plain)(a))
+}
+
+// Review configures the agent review runs.
 type Review struct {
 	Disabled       bool                  `json:"disabled"`
-	Post           bool                  `json:"post"` // post the agent's review to GitHub (false = dry run)
-	Model          string                `json:"model"`
+	Agent          Agent                 `json:"agent"`
+	Post           bool                  `json:"post"`       // post the agent's review to GitHub (false = dry run)
+	CodexHome      string                `json:"codex_home"` // private CODEX_HOME seeded from the local Codex sign-in
 	MaxTurns       int                   `json:"max_turns"`
 	MaxBudgetUSD   float64               `json:"max_budget_usd"`  // 0 = no limit (only enforced with API-key auth)
 	PromptFile     string                `json:"prompt_file"`     // Go text/template; "" = built-in prompt
@@ -180,6 +200,7 @@ func Load(path string) (Config, error) {
 	cfg.ReposRoot = expandHome(cfg.ReposRoot)
 	r := &cfg.Review
 	r.EnvFile, r.PromptFile, r.ClaudeSettings = expandHome(r.EnvFile), expandHome(r.PromptFile), expandHome(r.ClaudeSettings)
+	r.CodexHome = expandHome(cmp.Or(r.CodexHome, "~/.config/sisyphus/codex"))
 	for name, repo := range r.Repos {
 		repo.EnvFile, repo.PromptFile = expandHome(repo.EnvFile), expandHome(repo.PromptFile)
 		if repo.Stack != nil {
@@ -214,6 +235,21 @@ func parse(path string, b []byte) (Config, error) {
 		if err := json.Unmarshal(b, &cfg); err != nil {
 			return cfg, fmt.Errorf("config %s: %w", path, err)
 		}
+		// model and codex_model were the pre-profile settings. Preserve a
+		// configured value while migrating it to review.agent.model.
+		var raw struct {
+			Review struct {
+				Model      string `json:"model"`
+				CodexModel string `json:"codex_model"`
+			} `json:"review"`
+		}
+		_ = json.Unmarshal(b, &raw)
+		if raw.Review.Model != "" && cfg.Review.Agent.Vendor == "claude" {
+			cfg.Review.Agent.Model = raw.Review.Model
+		}
+		if raw.Review.CodexModel != "" && cfg.Review.Agent.Vendor == "codex" {
+			cfg.Review.Agent.Model = raw.Review.CodexModel
+		}
 	}
 	if cfg.Interval.Duration <= 0 {
 		return cfg, fmt.Errorf("config %s: interval must be positive", path)
@@ -233,8 +269,9 @@ func defaults() Config {
 		HookTimeout: Duration{30 * time.Minute},
 		HTTPAddr:    "127.0.0.1:7465",
 		Review: Review{
+			Agent:         Agent{Vendor: "claude", Model: "opus", Effort: "medium"},
 			Post:          true,
-			Model:         "opus",
+			CodexHome:     "~/.config/sisyphus/codex",
 			MaxTurns:      200,
 			EnvFile:       "~/.config/sisyphus/review.env",
 			PluginsVolume: "sisyphus-claude-plugins",
@@ -251,6 +288,9 @@ func defaults() Config {
 }
 
 func (r Review) check() error {
+	if err := r.Agent.Check(); err != nil {
+		return err
+	}
 	if r.Disabled {
 		return nil
 	}
@@ -263,8 +303,8 @@ func (r Review) check() error {
 	if r.StepTimeout.Duration <= 0 || r.Retries < 0 || r.RetryBackoff.Duration <= 0 {
 		return errors.New("needs a positive setup_step_timeout and retry_backoff, and retries >= 0")
 	}
-	if r.Model == "" || r.MaxTurns < 1 || r.Timeout.Duration <= 0 || r.MaxConcurrent < 1 {
-		return errors.New("needs a model, max_turns >= 1, a positive timeout and max_concurrent >= 1")
+	if r.MaxTurns < 1 || r.Timeout.Duration <= 0 || r.MaxConcurrent < 1 {
+		return errors.New("needs max_turns >= 1, a positive timeout and max_concurrent >= 1")
 	}
 	for name, repo := range r.Repos {
 		if repo.Image == "" {
@@ -286,6 +326,17 @@ func (r Review) check() error {
 				return fmt.Errorf("repos[%q].cache %q must be a path inside the worktree or an absolute container path", name, c)
 			}
 		}
+	}
+	return nil
+}
+
+// Check verifies the agent vendors currently available in review containers.
+func (a Agent) Check() error {
+	if a.Vendor != "claude" && a.Vendor != "codex" {
+		return fmt.Errorf("agent.vendor must be %q or %q", "claude", "codex")
+	}
+	if a.Model == "" {
+		return errors.New("agent.model is required")
 	}
 	return nil
 }

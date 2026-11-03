@@ -73,6 +73,34 @@ func TestHTTPPR(t *testing.T) {
 	}
 }
 
+func TestHTTPPRAgentOverride(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	put := func(body string) int {
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/prs/ethyca/a/1/agent", strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := put(`{"agent":{"vendor":"codex","model":"gpt-5-codex","effort":"high"}}`); got != http.StatusNoContent {
+		t.Fatalf("set override = %d", got)
+	}
+	_, body := get(t, srv.URL+"/api/prs/ethyca/a/1")
+	var pr app.PRView
+	if err := json.Unmarshal([]byte(body), &pr); err != nil || !pr.OverridesAgent || pr.Agent.Vendor != "codex" || pr.Agent.Effort != "high" {
+		t.Fatalf("override = %+v, err=%v", pr, err)
+	}
+	if got := put(`{"inherit":true}`); got != http.StatusNoContent {
+		t.Fatalf("inherit = %d", got)
+	}
+	_, body = get(t, srv.URL+"/api/prs/ethyca/a/1")
+	if err := json.Unmarshal([]byte(body), &pr); err != nil || pr.OverridesAgent || pr.Agent.Vendor != "claude" {
+		t.Fatalf("inherit = %+v, err=%v", pr, err)
+	}
+}
+
 func TestHTTPRun(t *testing.T) {
 	srv, svc, _ := newTestServer(t)
 	resp, err := http.Post(srv.URL+"/api/run", "", nil)
@@ -87,7 +115,7 @@ func TestHTTPRun(t *testing.T) {
 func TestHTTPSettings(t *testing.T) {
 	srv, svc, _ := newTestServer(t)
 	code, body := get(t, srv.URL+"/settings")
-	if code != 200 || !strings.Contains(body, `name="review.model" value="opus"`) || strings.Contains(body, `http-equiv="refresh"`) {
+	if code != 200 || !strings.Contains(body, `name="review.agent.model"><option selected>opus</option>`) || strings.Contains(body, `http-equiv="refresh"`) {
 		t.Fatalf("/settings = %d: %s", code, body)
 	}
 	put := func(body string) int {
@@ -258,7 +286,7 @@ func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, re
 		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: head, RequestedReviewers: []string{"me"}}}}
 	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: head, SyncedSHA: head, Worktree: clone})
 	rt := &container.Fake{}
-	rev, err := review.New(config.Review{Model: "opus", MaxTurns: 5, Timeout: config.Duration{Duration: time.Minute}, MaxConcurrent: 1,
+	rev, err := review.New(config.Review{Agent: config.Agent{Vendor: "claude", Model: "opus"}, MaxTurns: 5, Timeout: config.Duration{Duration: time.Minute}, MaxConcurrent: 1,
 		Repos: map[string]config.RepoReview{testkit.RefA.Repo: {Image: "img"}}},
 		rt, tr.Locks, t.TempDir())
 	if err != nil {

@@ -33,7 +33,10 @@ var fields = []Field{
 	{Key: "include_drafts", Type: "bool", Group: "GitHub", Label: "Include draft PRs", Help: "Also track PRs still in draft."},
 	{Key: "review.disabled", Type: "bool", Group: "Reviews", Label: "Run reviews", Invert: true, Help: "Off keeps worktrees in sync without reviewing."},
 	{Key: "review.post", Type: "bool", Group: "Reviews", Label: "Post reviews to GitHub", Help: "Off is a dry run: reviews stay local."},
-	{Key: "review.model", Type: "text", Group: "Reviews", Label: "Model", Options: []string{"opus", "sonnet", "haiku"}, Suggest: true, Help: "Claude model used for reviews."},
+	{Key: "review.agent.vendor", Type: "text", Group: "Reviews", Label: "Agent vendor", Options: []string{"claude", "codex"}, Help: "CLI used for reviews."},
+	{Key: "review.agent.model", Type: "text", Group: "Reviews", Label: "Agent model", Options: []string{"opus", "sonnet", "haiku", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-codex"}, Help: "Model used by the selected agent."},
+	{Key: "review.agent.effort", Type: "text", Group: "Reviews", Label: "Reasoning effort", Options: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Help: "Reasoning effort used by the selected agent."},
+	{Key: "review.codex_home", Type: "text", Group: "Advanced", Label: "Codex home", Help: "Private Codex CLI state directory. Seeded from ~/.codex/auth.json when needed."},
 	{Key: "review.max_turns", Type: "number", Group: "Reviews", Label: "Turn limit", Help: "Hitting it fails the run."},
 	{Key: "review.max_budget_usd", Type: "number", Group: "Reviews", Label: "Spend limit (USD)", Help: "0 means no limit. Only enforced with API-key auth."},
 	{Key: "review.timeout", Type: "text", Group: "Reviews", Label: "Flag runs after", Help: "Longer runs are flagged, never stopped. E.g. 1h."},
@@ -101,17 +104,16 @@ func SaveSettings(path string, values map[string]any) error {
 	return jsonfile.Save(path, m)
 }
 
-// section returns the object holding key: "review.model" → m["review"], "model".
-// ponytail: one level of nesting, as deep as fields go.
+// section returns the object holding a dotted key, creating intermediate objects.
 func section(m map[string]any, key string) (map[string]any, string) {
-	sec, name, ok := strings.Cut(key, ".")
-	if !ok {
-		return m, key
+	parts := strings.Split(key, ".")
+	for _, part := range parts[:len(parts)-1] {
+		sub, _ := m[part].(map[string]any)
+		if sub == nil {
+			sub = map[string]any{}
+			m[part] = sub
+		}
+		m = sub
 	}
-	sub, _ := m[sec].(map[string]any)
-	if sub == nil {
-		sub = map[string]any{}
-		m[sec] = sub
-	}
-	return sub, name
+	return m, parts[len(parts)-1]
 }

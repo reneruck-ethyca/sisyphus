@@ -74,5 +74,24 @@
     };
     setTimeout(back, 1500);
   };
+
+  // A vendor selects its supported model family and reasoning choices. Keep a
+  // saved custom value visible too, so an existing config is never silently changed.
+  const profiles = {
+    claude: {models: ["opus", "sonnet", "haiku"], efforts: ["low", "medium", "high"]},
+    codex: {models: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-codex"], efforts: ["low", "medium", "high", "xhigh", "max", "ultra"]}
+  };
+  const setOptions = (select, values) => {
+    if (!select) return;
+    const selected = select.value;
+    if (selected && !values.includes(selected)) values = [selected, ...values];
+    select.replaceChildren(...values.map(value => new Option(value, value, false, value === selected)));
+  };
+  const vendor = form.elements["review.agent.vendor"], model = form.elements["review.agent.model"], effort = form.elements["review.agent.effort"];
+  const syncAgentProfile = () => {
+    const profile = profiles[vendor?.value] ?? {models: [], efforts: []};
+    setOptions(model, profile.models); setOptions(effort, profile.efforts);
+  };
+  vendor?.addEventListener("change", () => { model.value = ""; effort.value = ""; syncAgentProfile(); }); syncAgentProfile();
 </script>
 {{template "foot"}}

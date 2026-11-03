@@ -22,8 +22,10 @@ Requires `gh` (authenticated), `git` and `wtp` on PATH, Docker, and for fidesplu
 on the host. `make install-agent` bakes your current shell's PATH into the LaunchAgent.
 
 1. Put the reviewer's secrets in `~/.config/sisyphus/review.env` (`chmod 600`):
-   `CLAUDE_CODE_OAUTH_TOKEN` and a read-only fine-grained `GH_TOKEN` (the agent uses it for
+   `CLAUDE_CODE_OAUTH_TOKEN` (or `OPENAI_API_KEY` for API-billed Codex) and a read-only fine-grained `GH_TOKEN` (the agent uses it for
    `gh pr diff`; posting uses your host `gh` login). Until the file exists, reviews wait and say so.
+   For ChatGPT plan usage, sign in once with `codex` on the host. Sisyphus seeds the dedicated
+   `review.codex_home` from `~/.codex/auth.json` on the first Codex run and keeps refreshed credentials there.
    For Jira and Confluence (read-only), add `JIRA_USERNAME` (your Atlassian email) and an Atlassian
    API token as `JIRA_API_TOKEN`; without them the reviewer has no Atlassian tools.
 2. Build the review image: `make reviewer-image` builds `sisyphus-reviewer:fidesplus` from the
@@ -79,11 +81,12 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; only loopback `Host`s and same-origin POSTs are accepted |
 | `review.disabled` | `false` | don't run reviews |
 | `review.post` | `true` | post the agent's review to GitHub; `false` = dry run (review stays in `out/review.json`) |
-| `review.model` | `opus` | Claude model |
+| `review.agent` | `{"vendor":"claude","model":"opus","effort":"medium"}` | app-wide default review profile; a tracked PR can override it in the dashboard |
 | `review.max_turns` | `200` | Claude turn limit; hitting it fails the run |
 | `review.max_budget_usd` | `0` (none) | spend limit (only enforced with API-key auth) |
 | `review.prompt_file` | built-in | Go `text/template` prompt (see `internal/review/prompt.md`) |
-| `review.env_file` | `~/.config/sisyphus/review.env` | `CLAUDE_CODE_OAUTH_TOKEN`, and a read-only `GH_TOKEN` for `gh pr diff` (sisyphus posts with your host `gh` login) |
+| `review.env_file` | `~/.config/sisyphus/review.env` | `CLAUDE_CODE_OAUTH_TOKEN` or optional `OPENAI_API_KEY`, and a read-only `GH_TOKEN` for `gh pr diff` (sisyphus posts with your host `gh` login) |
+| `review.codex_home` | `~/.config/sisyphus/codex` | private persistent Codex CLI state and ChatGPT sign-in for review containers |
 | `review.env` | `[]` | names of variables copied from sisyphus's environment |
 | `review.claude_settings` | — | a `settings.json` given to Claude in each run |
 | `review.plugins_volume` | `sisyphus-claude-plugins` | Docker volume mounted as Claude's `plugins/` |
@@ -135,7 +138,7 @@ Every tick logs one `PR` line per tracked PR: its head, sync state, and where it
 why (`queued, waiting: env file missing: …`, `up to date: reviewed 4f0b24f8 at …; next one on new
 commits or replies`, …). The UIs show the same line on the PR page and as the review cell's tooltip.
 
-Each run is Claude Code headless in the repo's image (`make reviewer-image` builds
+Each run uses the selected CLI headlessly in the repo's image (`make reviewer-image` builds
 `sisyphus-reviewer:fidesplus` from the fidesplus devcontainer in `$(FIDESPLUS)`, default
 `~/Dev/fidesplus`, with Claude Code pinned; fides-qa reviews reuse it):
 
@@ -144,11 +147,13 @@ Each run is Claude Code headless in the repo's image (`make reviewer-image` buil
    `/sisyphus/cache/`). Then its `setup` runs, each line a step announced and timed in the run log
    (`uv sync`, `npm install`, …; a trailing `\` continues a line), each in its own shell under
    `setup_step_timeout`; a failing or timed-out step fails the run;
-2. `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`
-   gets the rendered prompt (`prompt.md` in the run dir), reads the PR's discussion from
+2. The selected CLI gets the rendered prompt (`prompt.md` in the run dir): Claude uses
+   `claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model … --max-turns …`;
+   Codex uses `codex exec --json --dangerously-bypass-approvals-and-sandbox --model … -` (the container is the sandbox; Codex's own can't start inside Docker). The selected profile also supplies its
+   reasoning effort. It reads the PR's discussion from
    `/sisyphus/context/` (fetched on the host: PR, reviews, inline comments with ids, issue comments),
-   reviews, runs tests, and writes its review to `/out/review.json`. A fresh session each run; its
-   transcript stays in the run's `claude/` dir;
+   reviews, runs tests, and writes its review to `/out/review.json`. Claude has a fresh config
+   directory per run; Codex keeps its dedicated sign-in state in `review.codex_home`;
 3. sisyphus posts that review from the host with your `gh` login (`review.post`, default on; off is a
    dry run): the verdict, body (plus a "🤖 Reviewed by sisyphus" footer) and inline comments, pinned to
    the reviewed head, and replies in inline threads. If GitHub refuses the review (an inline comment

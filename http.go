@@ -217,6 +217,25 @@ func newHandler(svc *app.Service) http.Handler {
 		}
 		w.WriteHeader(http.StatusAccepted)
 	})
+	mux.HandleFunc("PUT /api/prs/{owner}/{repo}/{number}/agent", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Inherit bool         `json:"inherit"`
+			Agent   config.Agent `json:"agent"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var agent *config.Agent
+		if !body.Inherit {
+			agent = &body.Agent
+		}
+		if err := svc.SetAgent(prID(r), agent); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
