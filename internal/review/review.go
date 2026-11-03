@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/config"
@@ -947,11 +948,18 @@ func prepareCodexHome(home string) error {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return fmt.Errorf("codex_home: %w", err)
 	}
+	// Review containers write into home, so never follow a link they left there.
+	if fi, err := os.Lstat(home); err != nil || !fi.IsDir() {
+		return fmt.Errorf("codex_home %s must be a real directory", home)
+	}
 	if err := os.Chmod(home, 0o700); err != nil {
 		return fmt.Errorf("codex_home: %w", err)
 	}
 	auth := filepath.Join(home, "auth.json")
-	if _, err := os.Stat(auth); err == nil {
+	if fi, err := os.Lstat(auth); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("codex_home: %s is not a regular file", auth)
+		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -967,7 +975,15 @@ func prepareCodexHome(home string) error {
 	if err != nil {
 		return fmt.Errorf("reading Codex CLI sign-in: %w", err)
 	}
-	if err := os.WriteFile(auth, b, 0o600); err != nil {
+	f, err := os.OpenFile(auth, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return fmt.Errorf("copying Codex CLI sign-in: %w", err)
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return fmt.Errorf("copying Codex CLI sign-in: %w", err)
+	}
+	if err := f.Close(); err != nil {
 		return fmt.Errorf("copying Codex CLI sign-in: %w", err)
 	}
 	return nil

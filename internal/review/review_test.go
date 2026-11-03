@@ -1076,3 +1076,50 @@ func TestRunRefreshesHeadFirst(t *testing.T) {
 	f.r.Tracked(f.tr)
 	waitFor(t, "start at an unchanged head", f.started(1))
 }
+
+func TestPrepareCodexHomeRefusesNonRegularAuth(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	if err := os.MkdirAll(filepath.Join(userHome, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userHome, ".codex", "auth.json"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(t.TempDir(), "codex")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A run left a dangling link where auth.json belongs.
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.Symlink(victim, filepath.Join(home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareCodexHome(home); err == nil {
+		t.Fatal("want an error for a symlinked auth.json")
+	}
+	if _, err := os.Lstat(victim); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sign-in was written through the link: %v", err)
+	}
+}
+
+func TestPrepareCodexHomeSeedsAuth(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	if err := os.MkdirAll(filepath.Join(userHome, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userHome, ".codex", "auth.json"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(t.TempDir(), "codex")
+	for range 2 { // the second call keeps what is there
+		if err := prepareCodexHome(home); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil || string(b) != "secret" {
+		t.Fatalf("auth.json = %q, %v", b, err)
+	}
+}
