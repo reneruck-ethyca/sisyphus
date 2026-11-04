@@ -1123,3 +1123,20 @@ func TestPrepareCodexHomeSeedsAuth(t *testing.T) {
 		t.Fatalf("auth.json = %q, %v", b, err)
 	}
 }
+
+// Design reviews run only when asked for: never on tracking, commits, replies or Ensure.
+func TestDesignReviewOnlyOnRequest(t *testing.T) {
+	f := newFixture(t)
+	tr := f.tr
+	tr.AnnouncedSHA, tr.DesignReview = tr.HeadSHA, true
+	f.r.Tracked(tr)
+	f.r.Updated(tr, true, 0)
+	f.r.Updated(tr, false, 2)
+	f.r.Ensure([]tracker.Tracked{tr})
+	if len(f.r.st.Queue) != 0 {
+		t.Fatalf("queue = %+v", f.r.st.Queue)
+	}
+	if err := f.r.Trigger(tr); err != nil || len(f.r.st.Queue) != 1 || f.r.st.Queue[0].Reason != ReasonManual {
+		t.Fatalf("trigger: %v, queue = %+v", err, f.r.st.Queue)
+	}
+}

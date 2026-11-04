@@ -100,3 +100,29 @@ func TestNewRepliesIgnoresSisyphussOwnPosts(t *testing.T) {
 		t.Fatalf("replies = %d, latest %v", n, latest)
 	}
 }
+
+func TestDesignReview(t *testing.T) {
+	for _, c := range []struct {
+		title string
+		files []string
+		want  bool
+	}{
+		// The fidesplus design reviews this was written for.
+		{"ENG-7181: Add the migration runtime safety ADR", []string{"changelog/6963-x.yaml", "docs/ADRs/2026-11-02-migration-runtime-safety.md"}, true},
+		{"Data subject correspondence: design for the beta (design review)", []string{"docs/designs/privacy-requests/dsc-2026-04.md", "docs/designs/privacy-requests/dsc.md"}, true},
+		{"Design review:  datastore sampling", []string{"docs/designs/discovery/datastore-sampling.md", "docs/plans/datastore-sampling-implementation-plan.md"}, true},
+		{"ENG-4480: Event Publisher design for consent events", []string{"docs/designs/consent/event-publisher-design.md"}, true},
+		{"ENG-1: an RFC", []string{"README.md"}, true},                        // the title says so
+		{"ENG-1: write things down", []string{"docs/plans/rollout.md"}, true}, // the path says so
+		{"ENG-1: fix a typo", []string{"docs/setup.md", "changelog/1.yaml"}, false},
+		{"ENG-1: design tokens for buttons", []string{"clients/admin-ui/src/theme.ts"}, false},
+		{"ENG-1: design + prototype", []string{"docs/designs/x.md", "src/fides/x.py"}, false},
+		{"ENG-1: design changelog", []string{"changelog/1.yaml"}, false},
+		{"ENG-1: designer", []string{"docs/x.md"}, false},
+		{"ENG-1: design", nil, false},
+	} {
+		if got := designReview(c.title, c.files); got != c.want {
+			t.Errorf("designReview(%q, %q) = %v, want %v", c.title, c.files, got, c.want)
+		}
+	}
+}

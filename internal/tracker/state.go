@@ -27,10 +27,13 @@ type Tracked struct {
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	ConflictHeadSHA string    `json:"conflict_head_sha,omitempty"` // on_conflict already exhausted for this head
 	// What Events has been told: the head last announced, and replies seen since.
-	AnnouncedSHA       string        `json:"announced_sha,omitempty"`
-	UnannouncedReplies int           `json:"unannounced_replies,omitempty"`
-	LastError          string        `json:"last_error,omitempty"`
-	Agent              *config.Agent `json:"agent,omitempty"` // nil inherits review.agent
+	AnnouncedSHA       string `json:"announced_sha,omitempty"`
+	UnannouncedReplies int    `json:"unannounced_replies,omitempty"`
+	LastError          string `json:"last_error,omitempty"`
+	// A design review is tracked, but reviewed only when the user asks (designReview).
+	DesignReview  bool          `json:"design_review,omitempty"`
+	ClassifiedSHA string        `json:"classified_sha,omitempty"` // head DesignReview was decided for
+	Agent         *config.Agent `json:"agent,omitempty"`          // nil inherits review.agent
 }
 
 type State struct {

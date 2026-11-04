@@ -56,6 +56,8 @@ type Client interface {
 	// Teams returns the slugs of user's teams in org.
 	Teams(ctx context.Context, org string) ([]string, error)
 	PR(ctx context.Context, ref PRRef) (PR, error)
+	// Files lists the paths a PR changes.
+	Files(ctx context.Context, ref PRRef) ([]string, error)
 }
 
 // CLI implements Client by shelling out to an authenticated `gh`.
@@ -95,6 +97,15 @@ func (c CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
 		return PR{}, err
 	}
 	return parsePR(d[0].Body, d[1].Body, d[2].Body, d[3].Body)
+}
+
+func (CLI) Files(ctx context.Context, ref PRRef) ([]string, error) {
+	out, err := proc.Run(ctx, "", "gh", "api", "--paginate",
+		fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", ref.Repo, ref.Number), "--jq", ".[].filename")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
 }
 
 // OpenPR is an open PR a search found.

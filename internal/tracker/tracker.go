@@ -161,6 +161,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 	if tr.SyncedSHA != pr.HeadSHA {
 		t.sync(ctx, tr)
 	}
+	t.classify(ctx, tr)
 	t.announce(tr)
 	t.save()
 	return true
@@ -222,7 +223,28 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 		t.sync(ctx, tr)
 		unlock()
 	}
+	t.classify(ctx, tr)
 	t.announce(tr)
+}
+
+// classify decides, once per head, whether tr is a design review. Until it
+// has, announce holds the PR back, so a design review is never auto-reviewed
+// for want of its file list.
+func (t *Tracker) classify(ctx context.Context, tr *Tracked) {
+	if tr.ClassifiedSHA == tr.HeadSHA {
+		return
+	}
+	files, err := t.gh.Files(ctx, tr.PRRef)
+	if err != nil {
+		tr.LastError = err.Error()
+		slog.Warn("listing PR files", "pr", tr.Key(), "err", err)
+		return
+	}
+	if d := designReview(tr.Title, files); d != tr.DesignReview || tr.ClassifiedSHA == "" {
+		slog.Info("classified PR", "pr", tr.Key(), "design_review", d)
+		tr.DesignReview = d
+	}
+	tr.ClassifiedSHA = tr.HeadSHA
 }
 
 // Refresh re-reads one PR from GitHub and syncs its worktree to a new head, as a
@@ -276,8 +298,8 @@ func (t *Tracker) lock(tr *Tracked) (unlock func(), ok bool) {
 // time, new commits, or replies that arrived since the last announcement.
 func (t *Tracker) announce(tr *Tracked) {
 	switch {
-	case tr.SyncedSHA != tr.HeadSHA:
-		return // not ready; a conflict or busy worktree defers this to a later tick
+	case tr.SyncedSHA != tr.HeadSHA, tr.ClassifiedSHA != tr.HeadSHA:
+		return // not ready; a conflict, busy worktree or failed file listing defers this to a later tick
 	case tr.AnnouncedSHA == "":
 		t.Events.Tracked(*tr)
 	case tr.AnnouncedSHA != tr.HeadSHA || tr.UnannouncedReplies > 0:

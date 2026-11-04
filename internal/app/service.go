@@ -128,18 +128,26 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 		return "queued"
 	}
 	last := rs.Latest()
+	next := "next one on new commits or replies"
+	if tr.DesignReview {
+		next = "design review: next one when you start it"
+	}
 	switch {
 	case last == nil && blocked != "":
 		return "not reviewed: " + blocked
+	case tr.DesignReview && last == nil:
+		return "design review: not reviewed until you start one"
 	case last == nil:
 		return "not reviewed yet: waits for the head to be synced"
 	case last.Status != review.Succeeded:
-		return fmt.Sprintf("last review %s: %s; next one on new commits or replies", last.Status, cmp.Or(last.Error, "no details"))
+		return fmt.Sprintf("last review %s: %s; %s", last.Status, cmp.Or(last.Error, "no details"), next)
+	case last.Job.PR.HeadSHA != tr.HeadSHA && tr.DesignReview:
+		return fmt.Sprintf("reviewed %s, head is now %s; %s", short(last.Job.PR.HeadSHA), short(tr.HeadSHA), next)
 	case last.Job.PR.HeadSHA != tr.HeadSHA:
 		return fmt.Sprintf("reviewed %s; head %s not synced yet", short(last.Job.PR.HeadSHA), short(tr.HeadSHA))
 	}
-	return fmt.Sprintf("up to date: reviewed %s at %s, %s; next one on new commits or replies",
-		short(last.Job.PR.HeadSHA), last.Finished.Local().Format("Jan 2 15:04"), cmp.Or(last.PostNote, "not posted"))
+	return fmt.Sprintf("up to date: reviewed %s at %s, %s; %s",
+		short(last.Job.PR.HeadSHA), last.Finished.Local().Format("Jan 2 15:04"), cmp.Or(last.PostNote, "not posted"), next)
 }
 
 func health(tr tracker.Tracked) string {

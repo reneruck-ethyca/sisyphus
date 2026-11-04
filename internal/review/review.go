@@ -183,13 +183,13 @@ func (r *Reviewer) storePath() string { return filepath.Join(r.dir, "reviews.jso
 // --- tracker.Events (called on the ticking goroutine; never block) ---
 
 func (r *Reviewer) Tracked(tr tracker.Tracked) {
-	if r.reviewable(tr) {
+	if r.reviewable(tr) && r.automatic(tr) {
 		r.enqueue(r.newJob(tr, ReasonNew))
 	}
 }
 
 func (r *Reviewer) Updated(tr tracker.Tracked, newCommits bool, _ int) {
-	if !r.reviewable(tr) {
+	if !r.reviewable(tr) || !r.automatic(tr) {
 		return
 	}
 	reason := ReasonReplies // replies don't interrupt a running review; they queue behind it
@@ -223,6 +223,14 @@ func (r *Reviewer) reviewable(tr tracker.Tracked) bool {
 		return false
 	}
 	return true
+}
+
+// automatic: design reviews are reviewed only on request (Trigger).
+func (r *Reviewer) automatic(tr tracker.Tracked) bool {
+	if tr.DesignReview && r.once("design:"+tr.Key()+"@"+tr.HeadSHA) {
+		slog.Info("not reviewing: design review, review it by hand", "pr", tr.Key(), "head", tr.HeadSHA)
+	}
+	return !tr.DesignReview
 }
 
 // newJob snapshots the effective profile so a queued review is reproducible
@@ -268,8 +276,8 @@ func (r *Reviewer) envFilesMissing(name string, repo config.RepoReview) string {
 // while their repo wasn't reviewable, or before a crash). Call after each tick.
 func (r *Reviewer) Ensure(prs []tracker.Tracked) {
 	for _, tr := range prs {
-		if _, ok := r.cfg.Repos[tr.Repo]; !ok || tr.AnnouncedSHA == "" || tr.AnnouncedSHA != tr.HeadSHA {
-			continue // not reviewed here, or not synced to its head yet
+		if _, ok := r.cfg.Repos[tr.Repo]; !ok || tr.DesignReview || tr.AnnouncedSHA == "" || tr.AnnouncedSHA != tr.HeadSHA {
+			continue // not reviewed here, reviewed only by hand, or not synced to its head yet
 		}
 		id := tr.Key()
 		r.mu.Lock()

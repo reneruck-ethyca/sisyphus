@@ -121,7 +121,13 @@ If your teams can't be fetched, the tick does nothing rather than drop team-requ
 
 ## Reviews
 
-A run is started when a PR is first tracked (`new`), after new commits (`commits`, which also stops a
+Design reviews are tracked but never reviewed on their own: no first review, no follow-ups. Start
+one from the PR page when you want it. A PR counts as a design review when every file it changes is
+prose (under `docs/`, or `.md`/`.mdx`/`.rst`, ignoring `changelog/` fragments) and its title says
+design, ADR or RFC, or a doc sits under a `designs/`, `adrs/`, `rfcs/` or `plans/` directory. This is
+decided again for each new head, so a design PR that gains code gets automatic reviews from then on.
+
+Otherwise, a run is started when a PR is first tracked (`new`), after new commits (`commits`, which also stops a
 run still going on the old head) and after new replies (`replies`, queued behind a running one). Each
 PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and one running container,
 which holds the PR's worktree lock: the tracker doesn't sync or remove that worktree meanwhile, asks

@@ -11,6 +11,8 @@ type Fake struct {
 	PRCalls  int
 	MyTeams  []string // returned by Teams
 	TeamsErr error
+	PRFiles  map[string][]string // keyed by PRRef.Key()
+	FilesErr error
 }
 
 func (f *Fake) CurrentUser(context.Context) (string, error) { return "me", nil }
@@ -21,4 +23,7 @@ func (f *Fake) Teams(context.Context, string) ([]string, error) { return f.MyTea
 func (f *Fake) PR(_ context.Context, ref PRRef) (PR, error) {
 	f.PRCalls++
 	return f.PRs[ref.Key()], f.PRErr
+}
+func (f *Fake) Files(_ context.Context, ref PRRef) ([]string, error) {
+	return f.PRFiles[ref.Key()], f.FilesErr
 }

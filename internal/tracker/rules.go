@@ -2,6 +2,8 @@ package tracker
 
 import (
 	"maps"
+	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -87,4 +89,28 @@ func newReplies(pr github.PR, me string, since time.Time) (count int, latest tim
 		consider(r.User, r.Bot, r.Body, r.SubmittedAt, r.Body != "")
 	}
 	return count, latest
+}
+
+var (
+	designTitle = regexp.MustCompile(`(?i)\b(design|adrs?|rfcs?)\b`)
+	designDir   = regexp.MustCompile(`(?i)(^|/)(designs?|adrs?|rfcs?|plans)/`)
+)
+
+// designReview says whether a PR asks for a review of a design, not of code:
+// it changes only prose, and its title or a doc's path says design (ADR, RFC).
+// ponytail: path and title heuristic; a design PR with a code spike in it still gets automatic reviews.
+func designReview(title string, files []string) bool {
+	signal := designTitle.MatchString(title)
+	docs := 0
+	for _, f := range files {
+		switch {
+		case strings.HasPrefix(f, "changelog/"): // the fragment every fidesplus PR carries
+		case strings.HasPrefix(f, "docs/") || slices.Contains([]string{".md", ".mdx", ".rst"}, strings.ToLower(path.Ext(f))):
+			docs++
+			signal = signal || designDir.MatchString(f)
+		default:
+			return false
+		}
+	}
+	return docs > 0 && signal
 }

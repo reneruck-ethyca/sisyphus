@@ -151,6 +151,21 @@ func TestReviewNote(t *testing.T) {
 			t.Errorf("%s: got %q\nwant %q", c.name, got, c.want)
 		}
 	}
+	design := tracker.Tracked{HeadSHA: "4f0b24f88e35", DesignReview: true}
+	for _, c := range []struct {
+		name string
+		rs   review.PRStatus
+		want string
+	}{
+		{"never", review.PRStatus{}, "design review: not reviewed until you start one"},
+		{"failed", done(review.Failed, "4f0b24f88e35", "boom"), "last review failed: boom; design review: next one when you start it"},
+		{"old head", done(review.Succeeded, "aaaaaaaaaaaa", ""), "reviewed aaaaaaaa, head is now 4f0b24f8; design review: next one when you start it"},
+		{"up to date", done(review.Succeeded, "4f0b24f88e35", ""), "up to date: reviewed 4f0b24f8 at Oct 23 12:00, not posted; design review: next one when you start it"},
+	} {
+		if got := reviewNote(design, c.rs, true, "", ""); got != c.want {
+			t.Errorf("%s: got %q\nwant %q", c.name, got, c.want)
+		}
+	}
 }
 
 // Actions finish while the loop is running.

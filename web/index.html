@@ -17,7 +17,7 @@
   {{range .Groups}}
     <h2><span>{{.Label}}</span><span>{{len .PRs}}</span></h2>
     {{range .PRs}}<a class="pr" href="/prs/{{.Repo}}/{{.Number}}"{{if eq .ID $sel}} aria-current="page"{{end}}>
-      <span class="row"><span class="chip {{.Tone}}">{{.Verdict}}</span>{{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</span>
+      <span class="row"><span class="chip {{.Tone}}">{{.Verdict}}</span>{{if .DesignReview}}<span class="chip" title="Reviewed only when you start one">Design</span>{{end}}{{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</span>
       <span class="title">{{.Title}}</span>
       <span class="meta">{{base .Repo}} #{{.Number}}{{with .Author}} · {{.}}{{end}}</span>
     </a>{{end}}
@@ -112,7 +112,7 @@
   {{with .Error}}<div class="card-b err">{{.}}</div>{{end}}
   {{with $.ReviewFile}}{{if .Body}}<div class="card-b"><div class="review-body clamp">{{md .Body}}</div>
     <a href="{{runPath $.PR.ID $.PR.Review.Latest.ID}}">Read the full review →</a></div>{{end}}{{end}}
-  <div class="card-f">{{if $.PR.UpToDate}}Up to date with <code>{{short $.PR.HeadSHA}}</code>. The next review starts on new commits or replies.{{else}}{{$.PR.ReviewNote}}{{end}}</div>
+  <div class="card-f">{{if and $.PR.UpToDate (not $.PR.DesignReview)}}Up to date with <code>{{short $.PR.HeadSHA}}</code>. The next review starts on new commits or replies.{{else}}{{$.PR.ReviewNote}}{{end}}</div>
 </div>
 {{else}}<div class="card"><div class="card-b muted">{{.ReviewNote}}</div></div>{{end}}
 </section>

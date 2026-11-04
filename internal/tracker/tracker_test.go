@@ -435,3 +435,26 @@ func TestUntrackIgnoresUntilRetracked(t *testing.T) {
 		t.Fatal("re-tracked PR not looked at again")
 	}
 }
+
+// A PR is announced only once it's classified for its head, so a design
+// review isn't auto-reviewed because its file list failed to load.
+func TestTickClassifiesBeforeAnnouncing(t *testing.T) {
+	pr := openPR("a")
+	pr.Title = "ENG-1: design for X"
+	gh := &github.Fake{Cands: []github.PRRef{refA}, PRs: map[string]github.PR{refA.Key(): pr}, FilesErr: errors.New("502")}
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, Title: pr.Title, HeadSHA: "a", SyncedSHA: "a"})
+	rec := record(tr)
+	ctx := context.Background()
+	tr.Tick(ctx)
+	if got := tr.state.PRs[refA.Key()]; got.LastError == "" || got.ClassifiedSHA != "" {
+		t.Fatalf("got %+v", got)
+	}
+	rec.want(t)
+
+	gh.FilesErr, gh.PRFiles = nil, map[string][]string{refA.Key(): {"docs/designs/x.md"}}
+	tr.Tick(ctx)
+	if got := tr.state.PRs[refA.Key()]; !got.DesignReview || got.ClassifiedSHA != "a" {
+		t.Fatalf("got %+v", got)
+	}
+	rec.want(t, "tracked a")
+}
