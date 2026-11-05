@@ -31,7 +31,8 @@ h3 { font-size: 14px; margin: 4px 0 0; }
 .checked::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .checked.running::before { background: var(--live); animation: pulse 1.4s ease-in-out infinite; }
 .checked.failed::before { background: var(--bad); }
-.top nav { margin-left: auto; display: flex; gap: 4px; }
+.top nav { display: flex; gap: 4px; }
+.top-status { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
 .top nav a { display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border-radius: 8px; color: var(--fg); text-decoration: none; font-size: 13px; }
 .top nav a:hover, .top nav a[aria-current] { background: var(--hover); }
 .top nav a[aria-current] { font-weight: 600; }
