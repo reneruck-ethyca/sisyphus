@@ -240,6 +240,10 @@ func newHandler(svc *app.Service) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/handoffs", func(w http.ResponseWriter, r *http.Request) {
+		if !svc.HandoffAuthorized(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) {
+			http.Error(w, "missing or wrong token: send lastmile.token from sisyphus's state dir as a Bearer token (tlm does)", http.StatusUnauthorized)
+			return
+		}
 		var req lastmile.Request
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()

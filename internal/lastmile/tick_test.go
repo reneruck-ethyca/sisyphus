@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/gittest"
 )
 
 var prRef = github.PRRef{Repo: "ethyca/fidesplus", Number: 7}
@@ -64,6 +65,8 @@ func TestOpenPR(t *testing.T) {
 	}
 	os.MkdirAll(filepath.Join(clone, ".github"), 0o755)
 	os.WriteFile(filepath.Join(clone, ".github", "pull_request_template.md"), []byte("## Steps\n"), 0o644)
+	gittest.Git(t, clone, "add", ".github")
+	gittest.Git(t, clone, "commit", "-qm", "template")
 	h, err := m.Handoff(context.Background(), Request{Worktree: clone, Base: "main", Jira: "ENG-12", Title: "Do it", Labels: []string{"a"},
 		Draft: true, Notify: "true", NotifyOn: []string{EventPROpened}})
 	if err != nil {
@@ -75,10 +78,10 @@ func TestOpenPR(t *testing.T) {
 		t.Fatalf("created %d PRs", len(gh.Created))
 	}
 	c := gh.Created[0]
-	if c.Title != "ENG-12: Do it" || c.Body != "## Steps\n" || !c.Draft || c.Head != "feature/x" || c.Base != "main" || !reflect.DeepEqual(c.Labels, []string{"a"}) {
+	if c.Title != "ENG-12: Do it" || c.Body != "## Steps" || !c.Draft || c.Head != "feature/x" || c.Base != "main" || !reflect.DeepEqual(c.Labels, []string{"a"}) {
 		t.Errorf("created = %+v", c)
 	}
-	if got.State != StatePROpen || got.PRNumber != 7 || got.PRURL != "https://github.com/ethyca/fidesplus/pull/7" || got.LastBodyWritten != "## Steps\n" ||
+	if got.State != StatePROpen || got.PRNumber != 7 || got.PRURL != "https://github.com/ethyca/fidesplus/pull/7" || got.LastBodyWritten != "## Steps" ||
 		!reflect.DeepEqual(events, []string{EventPROpened}) {
 		t.Errorf("handoff = %+v events = %v", got, events)
 	}

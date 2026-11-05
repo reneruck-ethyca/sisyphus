@@ -588,17 +588,40 @@ func handoffServer(t *testing.T) (*httptest.Server, string) {
 	cfg.Review.Repos = map[string]config.RepoReview{"ethyca/fidesplus": {Image: "i"}}
 	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
 	var err error
-	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, t.TempDir()); err != nil {
+	dir := t.TempDir()
+	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir); err != nil {
 		t.Fatal(err)
 	}
+	b, err := os.ReadFile(lastmile.TokenFile(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiTokenForTests = strings.TrimSpace(string(b))
+	t.Cleanup(func() { apiTokenForTests = "" })
 	srv := httptest.NewServer(newHandler(svc))
 	t.Cleanup(srv.Close)
 	return srv, clone
 }
 
+// apiTokenForTests is what post sends as the handoff API token.
+var apiTokenForTests string
+
 func post(t *testing.T, url, body string) (int, string) {
 	t.Helper()
-	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	return postToken(t, url, body, apiTokenForTests)
+}
+
+func postToken(t *testing.T, url, body, token string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,6 +657,11 @@ func TestHTTPHandoffs(t *testing.T) {
 	} {
 		if code, body := post(t, srv.URL+"/api/handoffs", c.body); code != 400 || !strings.Contains(body, c.want) {
 			t.Errorf("%s = %d %s, want 400 containing %q", name, code, body, c.want)
+		}
+	}
+	for _, tok := range []string{"", "wrong"} {
+		if code, _ := postToken(t, srv.URL+"/api/handoffs", `{"worktree": "/x", "base": "main"}`, tok); code != 401 {
+			t.Errorf("token %q = %d, want 401", tok, code)
 		}
 	}
 	for _, bad := range []string{`nope`, `{"worktree": "/x", "base": "main", "surprise": 1}`} {

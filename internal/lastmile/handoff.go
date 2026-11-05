@@ -212,11 +212,18 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff) error {
 
 // ParseRepo reads "owner/name" from a GitHub remote URL (https, ssh or scp-style).
 func ParseRepo(remote string) (string, error) {
-	path := remote
+	// Only github.com: the repo name picks the image, setup and secrets, so a local path
+	// or another host must not pass for a configured repo.
+	var path string
 	if u, err := url.Parse(remote); err == nil && u.Host != "" {
+		if u.Hostname() != "github.com" {
+			return "", invalid("remote %q isn't on github.com", remote)
+		}
 		path = u.Path
-	} else if _, after, ok := strings.Cut(remote, ":"); ok { // git@github.com:owner/name.git
-		path = after
+	} else if host, after, ok := strings.Cut(remote, ":"); ok && (host == "github.com" || strings.HasSuffix(host, "@github.com")) {
+		path = after // git@github.com:owner/name.git
+	} else {
+		return "", invalid("remote %q isn't on github.com", remote)
 	}
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 	if owner, name, ok := strings.Cut(path, "/"); ok && owner != "" && name != "" && !strings.Contains(name, "/") {

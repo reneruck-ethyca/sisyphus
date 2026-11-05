@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -83,15 +81,17 @@ func prTitle(title, jira string) string {
 }
 
 // prBody is the body the handoff gave, else the repo's PR template, else nothing.
-func prBody(h Handoff) string {
+// The template comes from git, not the file system: git shows a symlink as its
+// target path, where reading the file would publish whatever host file it points at.
+func prBody(ctx context.Context, h Handoff) string {
 	if h.Body != "" {
 		return h.Body
 	}
-	b, err := os.ReadFile(filepath.Join(h.Worktree, ".github", "pull_request_template.md"))
-	if err != nil {
+	b, err := proc.Run(ctx, h.Worktree, "git", "show", "HEAD:.github/pull_request_template.md")
+	if err != nil || len(b) > 64<<10 {
 		return ""
 	}
-	return string(b)
+	return b
 }
 
 // openPR pushes the branch and opens the PR, or adopts the one already open
@@ -105,7 +105,7 @@ func (m *Manager) openPR(ctx context.Context, h *Handoff) error {
 		return err
 	}
 	if !found {
-		body := prBody(*h)
+		body := prBody(ctx, *h)
 		if ref, err = m.GH.CreatePR(ctx, h.Repo, github.NewPR{Base: h.Base, Head: h.Branch, Title: prTitle(h.Title, h.Jira),
 			Body: body, Draft: h.Draft, Labels: h.Labels}); err != nil {
 			return err

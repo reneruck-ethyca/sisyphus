@@ -23,6 +23,8 @@ func tlm(t *testing.T, args ...string) (int, string, string) {
 func TestTLMHandoffStatusWait(t *testing.T) {
 	waitPoll = 10 * time.Millisecond
 	srv, clone := handoffServer(t)
+	defer func(f func() string) { apiToken = f }(apiToken)
+	apiToken = func() string { return apiTokenForTests }
 	u, _ := url.Parse(srv.URL)
 	addr := "--addr=" + u.Host
 	body := filepath.Join(t.TempDir(), "pr.md")

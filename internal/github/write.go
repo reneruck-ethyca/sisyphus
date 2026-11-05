@@ -125,7 +125,7 @@ func (CLI) RerunFailed(ctx context.Context, repo string, runID int64) error {
 // FindPR returns the open PR whose head is branch, if there is one: how a
 // handoff adopts a PR it opened before a crash.
 func (CLI) FindPR(ctx context.Context, repo, branch string) (PRRef, bool, error) {
-	out, err := proc.Run(ctx, "", "gh", "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number", "--limit", "1")
+	out, err := proc.Run(ctx, "", "gh", "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number,isCrossRepository", "--limit", "20")
 	if err != nil {
 		return PRRef{}, false, err
 	}
@@ -134,13 +134,17 @@ func (CLI) FindPR(ctx context.Context, repo, branch string) (PRRef, bool, error)
 
 func parsePRList(repo, out string) (PRRef, bool, error) {
 	var prs []struct {
-		Number int `json:"number"`
+		Number int  `json:"number"`
+		Fork   bool `json:"isCrossRepository"`
 	}
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return PRRef{}, false, fmt.Errorf("parse pr list: %w", err)
 	}
-	if len(prs) == 0 {
-		return PRRef{}, false, nil
+	// --head matches a fork's branch of the same name too; only our own branch's PR is ours to adopt.
+	for _, p := range prs {
+		if !p.Fork {
+			return PRRef{Repo: repo, Number: p.Number}, true, nil
+		}
 	}
-	return PRRef{Repo: repo, Number: prs[0].Number}, true, nil
+	return PRRef{}, false, nil
 }

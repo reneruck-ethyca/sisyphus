@@ -23,6 +23,7 @@ type Manager struct {
 	runHook func(ctx context.Context, command string, timeout time.Duration, dir string, env map[string]string) error
 	kick    chan struct{}
 	now     func() time.Time
+	token   string // required to create handoffs (Authorized)
 
 	// OnChange is called after a handoff changed; the app uses it to refresh the dashboard.
 	OnChange func()
@@ -46,6 +47,10 @@ func New(cfg config.Config, gh GitHub, locks *tracker.Locks, stateDir string) (*
 		return nil, err
 	}
 	m.handoffs, m.cursors = f.Handoffs, f.Cursors
+	var err error
+	if m.token, err = loadToken(stateDir); err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 

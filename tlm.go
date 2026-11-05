@@ -67,6 +67,17 @@ func tlmFlags(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 	return fs, addr
 }
 
+// apiToken is the handoff API's token, from the state dir of the config
+// (lastmile.TokenFile); "" if it can't be read, and the API says so. A var for tests.
+var apiToken = func() string {
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return ""
+	}
+	b, _ := os.ReadFile(lastmile.TokenFile(filepath.Dir(cfg.StateFile)))
+	return strings.TrimSpace(string(b))
+}
+
 func apiBase(addr string) string {
 	if addr == "" {
 		addr = "127.0.0.1:7465" // the default http_addr, if the config can't be read
@@ -216,6 +227,9 @@ func call(method, url string, body []byte, out any) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if tok := apiToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

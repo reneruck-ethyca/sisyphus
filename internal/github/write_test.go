@@ -81,6 +81,12 @@ func TestParsePRList(t *testing.T) {
 	if ref, ok, err := parsePRList("o/r", `[{"number":7}]`); err != nil || !ok || ref != (PRRef{Repo: "o/r", Number: 7}) {
 		t.Errorf("one = %+v %v %v", ref, ok, err)
 	}
+	if ref, ok, err := parsePRList("o/r", `[{"number":3,"isCrossRepository":true},{"number":7}]`); err != nil || !ok || ref.Number != 7 {
+		t.Errorf("fork PR adopted: %v %v %v", ref, ok, err)
+	}
+	if _, ok, err := parsePRList("o/r", `[{"number":3,"isCrossRepository":true}]`); err != nil || ok {
+		t.Errorf("only a fork's PR: found = %v, %v", ok, err)
+	}
 	if _, ok, err := parsePRList("o/r", `[]`); err != nil || ok {
 		t.Errorf("none = %v %v", ok, err)
 	}

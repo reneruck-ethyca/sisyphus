@@ -21,6 +21,7 @@ func fixture(t *testing.T) (*Manager, string, string) {
 	upstream, clone := gittest.Setup(t)
 	gittest.Git(t, clone, "config", "url."+upstream+".insteadOf", "https://github.com/ethyca/fidesplus.git")
 	gittest.Git(t, clone, "remote", "set-url", "origin", "https://github.com/ethyca/fidesplus.git")
+	gittest.Git(t, upstream, "config", "receive.denyCurrentBranch", "ignore") // handoffs push the branch it has checked out
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	cfg, err := config.Load(filepath.Join(home, "none.json"))
@@ -150,7 +151,8 @@ func TestParseRepo(t *testing.T) {
 			t.Errorf("ParseRepo(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "github.com", "https://github.com/onlyowner", "https://github.com/a/b/c"} {
+	for _, bad := range []string{"", "github.com", "https://github.com/onlyowner", "https://github.com/a/b/c",
+		"/Users/x/ethyca/fidesplus", "https://evil.example/ethyca/fidesplus.git", "git@evil.example:ethyca/fidesplus.git", "file:///tmp/ethyca/fidesplus"} {
 		if _, err := ParseRepo(bad); err == nil {
 			t.Errorf("ParseRepo(%q) should fail", bad)
 		}

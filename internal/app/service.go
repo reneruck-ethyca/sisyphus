@@ -552,6 +552,12 @@ func (s *Service) SaveSettings(values map[string]any) error {
 var ErrLastMileDisabled = errors.New("the last mile is disabled (lastmile.disabled)")
 
 // Handoff takes a branch over for TLM (see lastmile.Manager.Handoff).
+// HandoffAuthorized says whether tok may create handoffs; with the last mile
+// disabled any token passes, so the caller gets ErrLastMileDisabled instead.
+func (s *Service) HandoffAuthorized(tok string) bool {
+	return s.LastMile == nil || s.LastMile.Authorized(tok)
+}
+
 func (s *Service) Handoff(ctx context.Context, req lastmile.Request) (lastmile.Handoff, error) {
 	if s.LastMile == nil {
 		return lastmile.Handoff{}, ErrLastMileDisabled
