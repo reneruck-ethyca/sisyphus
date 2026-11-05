@@ -307,7 +307,7 @@ when someone closes it. CI is green when every check completed without failure (
 Red CI puts the handoff in `needs-human` (the `lastmile.needs_human_label` on the PR, the `needs-human`
 event, a banner on the Last mile page) unless `fix-ci` is on, where the fix agent takes over (below).
 `needs-human` stays until a person deals with the PR; merged and closed are still noticed.
-`tlm resume <id>` (or the button on the Last mile page, `POST /api/handoffs/{id}/resume`) takes it back:
+`tlm resume <id>` (or the button on the Last mile page, `POST /api/handoffs/{id}/resume`) hands it back to TLM:
 the label goes, the round counter of the trigger that escalated starts again, and the handoff is re-read from
 `pr-open`. `tlm cancel <id>` (`POST /api/handoffs/{id}/cancel`) ends the handoff as `cancelled`, freeing the
 branch and leaving GitHub as it is.

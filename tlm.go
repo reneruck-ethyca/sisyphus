@@ -26,8 +26,8 @@ const tlmUsage = `usage: tlm handoff --base <branch> [--worktree dir] [--title t
                    [--max-fix-rounds n] [--stack-parent id|branch] [--requester who]
        tlm status <id> [--json]
        tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
-       tlm resume <id>   take a needs-human handoff back
-       tlm cancel <id>   stop managing a handoff (GitHub is left as it is)`
+       tlm resume <id>   hand a needs-human handoff back to TLM once a person dealt with it
+       tlm cancel <id>   TLM stops managing the handoff (GitHub is left as it is)`
 
 // waitPoll is how often `tlm wait` asks; a var for tests.
 var waitPoll = 15 * time.Second
