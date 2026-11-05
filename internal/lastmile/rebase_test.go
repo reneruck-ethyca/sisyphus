@@ -487,3 +487,17 @@ func TestForceWithLeaseRefusesWhenOriginMoved(t *testing.T) {
 		t.Errorf("origin's branch was overwritten: %s", got)
 	}
 }
+
+func TestStackParentHeadKeepsForkPointAfterParentRewrite(t *testing.T) {
+	ctx := context.Background()
+	m, gh, parent, child, _ := stackFixture(t, Request{})
+	fork := child.ParentHead
+	// The parent rewrites its history (as its own rebase would) and force-pushes.
+	gittest.Git(t, parent.Worktree, "commit", "-q", "--amend", "-m", "rewritten")
+	gittest.Git(t, parent.Worktree, "push", "-q", "-f", "origin", "feature/x")
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, parent.Worktree, "rev-parse", "HEAD"), BaseRef: "main"}
+	m.tick(ctx)
+	if got := m.must(t, child.ID).ParentHead; got != fork {
+		t.Errorf("parent head = %.12s, want the fork point %.12s: the child isn't built on the rewritten head", got, fork)
+	}
+}

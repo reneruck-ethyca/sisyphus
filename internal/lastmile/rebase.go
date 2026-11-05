@@ -151,8 +151,12 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		return true, nil
 	case StateMerged:
 	default:
+		// Only a parent head the branch is built on: after the parent rewrote its history
+		// (its own rebase) the old head is still where this branch forked off.
 		if sha, err := m.lockedGit(ctx, *h, "rev-parse", "origin/"+h.Base); err == nil && sha != "" {
-			h.ParentHead = sha
+			if _, err := m.lockedGit(ctx, *h, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
+				h.ParentHead = sha
+			}
 		}
 		return false, nil
 	}
