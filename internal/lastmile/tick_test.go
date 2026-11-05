@@ -125,7 +125,7 @@ func TestStateMachine(t *testing.T) {
 	}{
 		{"pending", "", github.PRSnapshot{Checks: append([]github.Check{chk("p", "IN_PROGRESS", "")}, green...)}, StateCIRunning, "", false, nil},
 		{"red outranks pending", "", github.PRSnapshot{Checks: []github.Check{chk("p", "IN_PROGRESS", ""), chk("lint", "COMPLETED", "FAILURE")}}, StateNeedsHuman, "CI failed: lint", true, []string{EventNeedsHuman}},
-		{"red with fix-ci", "fix-ci", github.PRSnapshot{Checks: []github.Check{chk("lint", "COMPLETED", "TIMED_OUT")}}, StateCIRed, "fix agent arrives in M1", false, nil},
+		{"red with fix-ci", "fix-ci", github.PRSnapshot{Checks: []github.Check{chk("lint", "COMPLETED", "TIMED_OUT")}}, StateNeedsHuman, "agents need reviews enabled", true, []string{EventNeedsHuman}},
 		{"green", "", github.PRSnapshot{Checks: green}, StateCIGreen, "", false, nil},
 		{"approved", "", github.PRSnapshot{Checks: green, ReviewDecision: "APPROVED"}, StateApproved, "", false, nil},
 		{"merged", "", github.PRSnapshot{State: "MERGED", Checks: green}, StateMerged, "", false, []string{EventMerged}},

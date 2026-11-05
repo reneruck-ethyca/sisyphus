@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -64,6 +65,11 @@ type LastMile struct {
 	RepoReviewers   map[string]Reviewers `json:"repo_reviewers"`    // per "owner/name"; replaces Reviewers for that repo
 	MaxFixRounds    int                  `json:"max_fix_rounds"`    // default of a handoff's --max-fix-rounds
 	NeedsHumanLabel string               `json:"needs_human_label"` // put on a PR that waits for a human
+	Flakes          []string             `json:"flakes"`            // regexes: a failed check whose log matches is a flake, rerun not fixed
+	FlakeReruns     int                  `json:"flake_reruns"`      // reruns per head SHA
+	MaxDiffLines    int                  `json:"max_diff_lines"`    // an agent's change above this is thrown away
+	AllowPaths      []string             `json:"allow_paths"`       // globs an agent may change although the denylist names them
+	RepoChecks      map[string]string    `json:"repo_checks"`       // per "owner/name": shell run on the host over an agent's change
 }
 
 // Reviewers is a roster TLM picks human reviewers from, round-robin.
@@ -90,6 +96,19 @@ func (l LastMile) check() error {
 	}
 	if l.Interval.Duration <= 0 || l.MaxFixRounds < 1 || l.NeedsHumanLabel == "" {
 		return errors.New("needs a positive interval, max_fix_rounds >= 1 and a needs_human_label")
+	}
+	if l.FlakeReruns < 0 || l.MaxDiffLines < 1 {
+		return errors.New("needs flake_reruns >= 0 and max_diff_lines >= 1")
+	}
+	for _, f := range l.Flakes {
+		if _, err := regexp.Compile(f); err != nil {
+			return fmt.Errorf("flakes: %w", err)
+		}
+	}
+	for repo := range l.RepoChecks {
+		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("repo_checks key %q must be owner/name", repo)
+		}
 	}
 	check := func(where string, r Reviewers) error {
 		if r.Count < 0 || slices.Contains(r.Roster, "") {
@@ -351,6 +370,8 @@ func defaults() Config {
 			Reviewers:       Reviewers{Count: 1},
 			MaxFixRounds:    3,
 			NeedsHumanLabel: "tlm:needs-human",
+			FlakeReruns:     2,
+			MaxDiffLines:    400,
 		},
 	}
 }

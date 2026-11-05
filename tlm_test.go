@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -64,5 +65,24 @@ func TestTLMHandoffStatusWait(t *testing.T) {
 	}
 	if code, _, _ := tlm(t, "frobnicate"); code != 2 {
 		t.Errorf("unknown command = %d, want 2", code)
+	}
+}
+
+func TestSendsTokenOnlyToLoopbackOnMutations(t *testing.T) {
+	for _, c := range []struct {
+		method, url string
+		want        bool
+	}{
+		{"POST", "http://127.0.0.1:7465/api/handoffs", true},
+		{"PUT", "http://localhost:7465/x", true},
+		{"POST", "http://[::1]:7465/x", true},
+		{"GET", "http://127.0.0.1:7465/x", false},
+		{"POST", "http://example.com:7465/x", false},
+		{"POST", "http://10.0.0.5:7465/x", false},
+	} {
+		req, _ := http.NewRequest(c.method, c.url, nil)
+		if got := sendsToken(req); got != c.want {
+			t.Errorf("%s %s = %v, want %v", c.method, c.url, got, c.want)
+		}
 	}
 }

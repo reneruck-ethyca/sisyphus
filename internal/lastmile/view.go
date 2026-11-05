@@ -22,6 +22,7 @@ func Tone(state string) string {
 type View struct {
 	Handoff
 	Tone      string   `json:"tone"`
+	Over      bool     `json:"over"`      // the handoff is over: merged, closed or cancelled
 	Reviewing []string `json:"reviewing"` // asked to review now; before the PR is read, the planned humans
 }
 
@@ -31,7 +32,7 @@ func (m *Manager) Views() []View {
 	out := make([]View, 0, len(hs))
 	for i := len(hs) - 1; i >= 0; i-- {
 		h := hs[i]
-		v := View{Handoff: h, Tone: Tone(h.State), Reviewing: h.Reviewers}
+		v := View{Handoff: h, Tone: Tone(h.State), Over: Terminal(h.State), Reviewing: h.Reviewers}
 		if h.Snapshot != nil {
 			v.Reviewing = h.Snapshot.Requested
 		}

@@ -306,6 +306,29 @@ func newHandler(svc *app.Service) http.Handler {
 			writeJSON(w, http.StatusOK, h)
 		}
 	})
+	// The dashboard's buttons call these, so no token (as with the reviewers edit); the API is loopback.
+	for _, verb := range []string{"resume", "cancel"} {
+		mux.HandleFunc("POST /api/handoffs/{id}/"+verb, func(w http.ResponseWriter, r *http.Request) {
+			var h lastmile.Handoff
+			var err error
+			if verb == "resume" {
+				h, err = svc.ResumeHandoff(r.Context(), r.PathValue("id"))
+			} else {
+				h, err = svc.CancelHandoff(r.PathValue("id"))
+			}
+			var invalid lastmile.InvalidError
+			switch {
+			case errors.Is(err, lastmile.ErrNotFound), errors.Is(err, app.ErrLastMileDisabled):
+				http.NotFound(w, r)
+			case errors.As(err, &invalid):
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			case err != nil:
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			default:
+				writeJSON(w, http.StatusOK, h)
+			}
+		})
+	}
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)

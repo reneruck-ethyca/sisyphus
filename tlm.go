@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +25,9 @@ const tlmUsage = `usage: tlm handoff --base <branch> [--worktree dir] [--title t
                    [--notify 'cmd template'] [--notify-on merged,needs-human,closed] [--agent vendor:model:effort]
                    [--max-fix-rounds n] [--stack-parent id|branch] [--requester who]
        tlm status <id> [--json]
-       tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]`
+       tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
+       tlm resume <id>   take a needs-human handoff back
+       tlm cancel <id>   stop managing a handoff (GitHub is left as it is)`
 
 // waitPoll is how often `tlm wait` asks; a var for tests.
 var waitPoll = 15 * time.Second
@@ -44,6 +47,8 @@ func runTLM(args []string, stdout, stderr io.Writer) int {
 		err = tlmStatus(args[1:], stdout, stderr)
 	case "wait":
 		err = tlmWait(args[1:], stdout, stderr)
+	case "resume", "cancel":
+		err = tlmAct(args[0], args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintln(stderr, tlmUsage)
 		return 2
@@ -194,6 +199,21 @@ func tlmStatus(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// tlmAct is `tlm resume|cancel <id>`: a POST that prints the handoff's new state.
+func tlmAct(verb string, args []string, stdout, stderr io.Writer) error {
+	fs, addr := tlmFlags(verb, stderr)
+	id, err := idArg(fs, args)
+	if err != nil {
+		return err
+	}
+	var h lastmile.Handoff
+	if err := call(http.MethodPost, apiBase(*addr)+"/api/handoffs/"+id+"/"+verb, nil, &h); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(stdout, cmp.Or(h.State, "?"))
+	return nil
+}
+
 // tlmWait polls until the handoff is in one of the --until states or over
 // (merged, closed), and prints that state. Stopping on any end state is the
 // point: a script waiting for "merged" must not hang on a closed PR.
@@ -218,6 +238,20 @@ func tlmWait(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// sendsToken says whether req may carry the API token: only mutating requests,
+// and only to a loopback host, so a mistyped or hostile --addr never receives it.
+func sendsToken(req *http.Request) bool {
+	if req.Method != http.MethodPost && req.Method != http.MethodPut {
+		return false
+	}
+	host := req.URL.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // call sends one API request and decodes a 2xx answer into out; anything else
 // is an error carrying the server's reason.
 func call(method, url string, body []byte, out any) error {
@@ -228,8 +262,10 @@ func call(method, url string, body []byte, out any) error {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if tok := apiToken(); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+	if sendsToken(req) {
+		if tok := apiToken(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

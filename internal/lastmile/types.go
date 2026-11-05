@@ -24,10 +24,18 @@ const (
 	StateMerged         = "merged"
 	StateNeedsHuman     = "needs-human"
 	StateClosed         = "closed"
+	StateCancelled      = "cancelled" // a person stopped TLM managing it; GitHub is as it was
 )
 
 // Terminal says the handoff is over: its branch may be handed off again.
-func Terminal(state string) bool { return state == StateMerged || state == StateClosed }
+func Terminal(state string) bool {
+	return state == StateMerged || state == StateClosed || state == StateCancelled
+}
+
+// Triggers an agent round can answer; FixRounds is counted per trigger.
+const (
+	TriggerCI = "ci"
+)
 
 // Notify events.
 const (
@@ -110,8 +118,13 @@ type Handoff struct {
 	PRNumber  int    `json:"pr_number,omitempty"`
 	PRURL     string `json:"pr_url,omitempty"`
 	// LastBodyWritten is the PR body TLM last wrote, to tell a human's edit from its own (M2).
-	LastBodyWritten string `json:"last_body_written,omitempty"`
-	FixRounds       int    `json:"fix_rounds"` // used so far; the fix agents of later phases count here
+	LastBodyWritten string         `json:"last_body_written,omitempty"`
+	FixRounds       map[string]int `json:"fix_rounds,omitempty"`     // agent rounds used so far, by trigger (Trigger*)
+	EscalatedBy     string         `json:"escalated_by,omitempty"`   // the trigger of the last needs-human, for Resume
+	FixedFailures   []string       `json:"fixed_failures,omitempty"` // fingerprints a fix round was spent on
+	FlakeHead       string         `json:"flake_head,omitempty"`     // the head SHA FlakeReruns counts for
+	FlakeReruns     int            `json:"flake_reruns,omitempty"`   // flake reruns on FlakeHead
+	Gen             int            `json:"gen,omitempty"`            // bumped by edits from outside the tick, which discard a tick in progress
 
 	// Reviewer bookkeeping (design §6): GitHub is the source of truth after the first request.
 	BotRequested     bool     `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once

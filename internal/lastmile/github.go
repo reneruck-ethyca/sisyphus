@@ -15,6 +15,8 @@ type GitHub interface {
 	Comment(ctx context.Context, ref github.PRRef, body string) error
 	CreateLabel(ctx context.Context, repo, name, color, description string) error
 	FindPR(ctx context.Context, repo, branch string) (github.PRRef, bool, error)
+	RunLog(ctx context.Context, repo string, runID, jobID int64) (string, error)
+	RerunFailed(ctx context.Context, repo string, runID int64) error
 }
 
 var _ GitHub = github.CLI{}
@@ -28,8 +30,10 @@ type FakeGitHub struct {
 	Ready     []github.PRRef
 	Comments  []string
 	Labels    []string
-	Existing  github.PRRef // the open PR FindPR reports; zero = none
-	Err       error        // returned by every call
+	Existing  github.PRRef     // the open PR FindPR reports; zero = none
+	Logs      map[int64]string // RunLog by job id
+	Reruns    []int64          // runs RerunFailed was asked for
+	Err       error            // returned by every call
 }
 
 func (f *FakeGitHub) PRView(_ context.Context, ref github.PRRef) (github.PRSnapshot, error) {
@@ -63,4 +67,13 @@ func (f *FakeGitHub) CreateLabel(_ context.Context, _, name, _, _ string) error 
 
 func (f *FakeGitHub) FindPR(context.Context, string, string) (github.PRRef, bool, error) {
 	return f.Existing, f.Existing.Number != 0, f.Err
+}
+
+func (f *FakeGitHub) RunLog(_ context.Context, _ string, _, jobID int64) (string, error) {
+	return f.Logs[jobID], f.Err
+}
+
+func (f *FakeGitHub) RerunFailed(_ context.Context, _ string, runID int64) error {
+	f.Reruns = append(f.Reruns, runID)
+	return f.Err
 }

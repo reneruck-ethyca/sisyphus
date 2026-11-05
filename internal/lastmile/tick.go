@@ -49,8 +49,9 @@ func (m *Manager) tick(ctx context.Context) {
 		if reflect.DeepEqual(h, next) {
 			continue
 		}
-		m.commit(h, next)
-		m.afterCommit(ctx, h, next)
+		if m.commit(h, next) {
+			m.afterCommit(ctx, h, next)
+		}
 	}
 }
 
@@ -58,6 +59,15 @@ func (m *Manager) tick(ctx context.Context) {
 func (m *Manager) advance(ctx context.Context, h *Handoff) error {
 	if h.PRNumber == 0 {
 		return m.openPR(ctx, h)
+	}
+	if a, ok := m.running.get(h.ID); ok {
+		if !a.done {
+			return nil // the agent holds the worktree; the handoff shows "fix agent running"
+		}
+		// A run just ended. Don't read the PR in the same tick: right after a push GitHub
+		// may still show the old head's red checks. The next tick reads the new head.
+		m.agentFinished(ctx, h)
+		return nil
 	}
 	return m.follow(ctx, h)
 }
@@ -150,12 +160,28 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 		s.Draft = false
 	}
 	state, reason := nextState(*h, s)
+	if s.CI == CIRed {
+		s.Failures = m.failures(ctx, *h, s.Checks)
+		if h.Autonomy.FixCI {
+			var err error
+			if state, reason, err = m.redState(ctx, h, s); err != nil {
+				return err
+			}
+		} else if rerun, err := m.rerunFlakes(ctx, h, s); err != nil {
+			return err
+		} else if rerun {
+			state, reason = StateCIRunning, ""
+		}
+	}
 	// Requests follow the state computed before them: humans are asked at the first green,
 	// and the handoff shows ci-green until the next tick.
 	if err := m.requestReviewers(ctx, h, ref, s); err != nil {
 		return err
 	}
 	if state == StateNeedsHuman {
+		if s.CI == CIRed {
+			h.EscalatedBy = TriggerCI
+		}
 		m.escalate(ctx, h, reason)
 		return nil
 	}
@@ -232,12 +258,12 @@ func (m *Manager) afterCommit(ctx context.Context, before, after Handoff) {
 
 // commit stores what a tick did to h. A reviewer edit that arrived while the
 // tick ran wins over the tick's copy of the list.
-func (m *Manager) commit(before, after Handoff) {
+func (m *Manager) commit(before, after Handoff) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	i := slices.IndexFunc(m.handoffs, func(o Handoff) bool { return o.ID == after.ID })
-	if i < 0 {
-		return
+	if i < 0 || m.handoffs[i].Gen != before.Gen {
+		return false // gone, or resumed or cancelled while the tick ran: its view is stale
 	}
 	if cur := m.handoffs[i]; !slices.Equal(cur.Reviewers, before.Reviewers) || cur.ReviewersSet != before.ReviewersSet {
 		after.Reviewers, after.ReviewersSet, after.ReviewersPending = cur.Reviewers, cur.ReviewersSet, cur.ReviewersPending
@@ -247,4 +273,5 @@ func (m *Manager) commit(before, after Handoff) {
 	if err := m.saveLocked(); err != nil {
 		slog.Error("lastmile save failed", "err", err)
 	}
+	return true
 }

@@ -69,6 +69,8 @@ func TestWriteArgs(t *testing.T) {
 			[]string{"pr", "create", "--repo", "o/r", "--base", "dev", "--head", "b", "--title", "t", "--body", "x", "--draft", "--label", "l1", "--label", "l2"}},
 		{"edit", editArgs(ref, PREdit{AddReviewers: []string{"a", "b"}, RemoveReviewers: []string{"c"}, AddLabels: []string{"l"}, Base: "main", Body: &body}),
 			[]string{"pr", "edit", "3", "--repo", "o/r", "--base", "main", "--body", "new", "--add-reviewer", "a,b", "--remove-reviewer", "c", "--add-label", "l"}},
+		{"edit remove label", editArgs(ref, PREdit{RemoveLabels: []string{"x", "y"}}),
+			[]string{"pr", "edit", "3", "--repo", "o/r", "--remove-label", "x,y"}},
 		{"edit nothing", editArgs(ref, PREdit{}), nil},
 	} {
 		if !reflect.DeepEqual(c.got, c.want) {

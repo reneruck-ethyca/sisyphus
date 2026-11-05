@@ -20,9 +20,9 @@ type NewPR struct {
 
 // PREdit is a change to an open PR; zero fields change nothing.
 type PREdit struct {
-	AddReviewers, RemoveReviewers, AddLabels []string
-	Base                                     string
-	Body                                     *string
+	AddReviewers, RemoveReviewers, AddLabels, RemoveLabels []string
+	Base                                                   string
+	Body                                                   *string
 }
 
 // CreatePR opens a PR and returns its ref.
@@ -93,7 +93,7 @@ func editArgs(ref PRRef, e PREdit) []string {
 	for _, f := range []struct {
 		flag string
 		vals []string
-	}{{"--add-reviewer", e.AddReviewers}, {"--remove-reviewer", e.RemoveReviewers}, {"--add-label", e.AddLabels}} {
+	}{{"--add-reviewer", e.AddReviewers}, {"--remove-reviewer", e.RemoveReviewers}, {"--add-label", e.AddLabels}, {"--remove-label", e.RemoveLabels}} {
 		if len(f.vals) > 0 {
 			args = append(args, f.flag, strings.Join(f.vals, ","))
 		}
@@ -147,4 +147,9 @@ func parsePRList(repo, out string) (PRRef, bool, error) {
 		}
 	}
 	return PRRef{}, false, nil
+}
+
+// RunLog returns the log of a job's failed steps (`gh run view --log-failed`).
+func (CLI) RunLog(ctx context.Context, repo string, runID, jobID int64) (string, error) {
+	return proc.Run(ctx, "", "gh", "run", "view", strconv.FormatInt(runID, 10), "--job", strconv.FormatInt(jobID, 10), "--repo", repo, "--log-failed")
 }

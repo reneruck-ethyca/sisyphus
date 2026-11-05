@@ -596,6 +596,29 @@ func (s *Service) SetReviewers(id string, logins []string) (lastmile.Handoff, er
 	return h, err
 }
 
+// ResumeHandoff and CancelHandoff are lastmile.Manager.Resume and Cancel.
+func (s *Service) ResumeHandoff(ctx context.Context, id string) (lastmile.Handoff, error) {
+	if s.LastMile == nil {
+		return lastmile.Handoff{}, ErrLastMileDisabled
+	}
+	h, err := s.LastMile.Resume(ctx, id)
+	if err == nil {
+		s.publish()
+	}
+	return h, err
+}
+
+func (s *Service) CancelHandoff(id string) (lastmile.Handoff, error) {
+	if s.LastMile == nil {
+		return lastmile.Handoff{}, ErrLastMileDisabled
+	}
+	h, err := s.LastMile.Cancel(id)
+	if err == nil {
+		s.publish()
+	}
+	return h, err
+}
+
 // HandoffByID returns one handoff.
 func (s *Service) HandoffByID(id string) (lastmile.Handoff, bool) {
 	if s.LastMile == nil {

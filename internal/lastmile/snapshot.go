@@ -45,6 +45,7 @@ type Snapshot struct {
 	Behind         int            `json:"behind"` // commits of origin/<base> the branch lacks
 	Additions      int            `json:"additions"`
 	Deletions      int            `json:"deletions"`
+	Failures       []Failure      `json:"failures,omitempty"` // the failed checks, when CI is red
 }
 
 // Ready says the PR is out of draft.
@@ -133,7 +134,7 @@ func nextState(h Handoff, s Snapshot) (state, reason string) {
 	case s.CI == CIPending:
 		return StateCIRunning, ""
 	case s.CI == CIRed && h.Autonomy.FixCI:
-		return StateCIRed, "fix agent arrives in M1"
+		return StateCIRed, "fixing CI"
 	case s.CI == CIRed:
 		return StateNeedsHuman, "CI failed: " + failedChecks(s.Checks)
 	case s.Approved():

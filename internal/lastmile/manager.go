@@ -15,7 +15,8 @@ import (
 // Manager owns the handoffs: accepts them, keeps them in lastmile.json, and
 // drives each through its lifecycle.
 type Manager struct {
-	GH GitHub
+	GH    GitHub
+	Tasks TaskRunner // runs the agents; nil when reviews are disabled
 
 	cfg     config.Config
 	locks   *tracker.Locks // shared with the tracker and reviews; "lastmile:<id>" guards a handoff's worktree
@@ -27,6 +28,9 @@ type Manager struct {
 
 	// OnChange is called after a handoff changed; the app uses it to refresh the dashboard.
 	OnChange func()
+
+	running runs           // agent runs in flight, by handoff id
+	wg      sync.WaitGroup // their goroutines
 
 	mu       sync.Mutex     // guards handoffs, cursors and the file
 	handoffs []Handoff      // oldest first

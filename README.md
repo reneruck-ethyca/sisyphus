@@ -302,8 +302,12 @@ prefixed `ENG-1234: ` when `--jira` is given, body from `--body-file`, else the 
 `handed-off → pr-open → ci-running → ci-red | ci-green → awaiting-review → approved → merged`, or `closed`
 when someone closes it. CI is green when every check completed without failure (skipped and neutral pass).
 Red CI puts the handoff in `needs-human` (the `lastmile.needs_human_label` on the PR, the `needs-human`
-event, a banner on the Last mile page) unless `fix-ci` is on, where it waits in `ci-red` for the fix agent
-of a later phase. `needs-human` stays until a person deals with the PR; merged and closed are still noticed.
+event, a banner on the Last mile page) unless `fix-ci` is on, where the fix agent takes over (below).
+`needs-human` stays until a person deals with the PR; merged and closed are still noticed.
+`tlm resume <id>` (or the button on the Last mile page, `POST /api/handoffs/{id}/resume`) takes it back:
+the label goes, the round counter of the trigger that escalated starts again, and the handoff is re-read from
+`pr-open`. `tlm cancel <id>` (`POST /api/handoffs/{id}/cancel`) ends the handoff as `cancelled`, freeing the
+branch and leaving GitHub as it is.
 A restart after a crash between push and PR creation adopts the open PR instead of opening a second.
 
 Reviewers: the bot (`lastmile.bot_reviewer`) is requested once the PR is ready (a PR the handoff didn't ask
@@ -314,6 +318,25 @@ never re-added, reviewers a human adds are left alone. `PUT /api/handoffs/{id}/r
 `{"reviewers": [...]}`) replaces the human list: before the request it changes the plan, afterwards the
 next tick applies the difference (naming someone anew re-adds them).
 
+CI fixing: on red CI the snapshot gets each failed check with the tail (150 lines) of its failed job log
+(`gh run view --job`; checks that aren't Actions jobs get none) and a failure fingerprint (job name plus a hash
+of the error lines with timestamps, SHAs, numbers and temp paths removed). A failure whose log matches a
+`lastmile.flakes` regex is rerun (`gh run rerun --failed`) up to `lastmile.flake_reruns` times per head SHA.
+Otherwise, with `fix-ci` on, the fix agent runs in a container as a one-shot task of the review runtime: it
+shares `review.max_concurrent` and the 5-hour budget with reviews, has no GitHub token, and is not run when
+reviews are disabled (the handoff goes to `needs-human`). It runs beside the tick loop; the handoff shows
+`ci-red` "fix agent running" meanwhile, and a restart loses a run in flight (the next tick may start another).
+The agent gets the snapshot, failed log excerpts, the diff against `origin/<base>`, the title and body, and
+is told: edit files only, no git, no gh, write `/out/result.json`:
+`{"summary": str, "confidence": "low|medium|high", "escalate": bool, "escalate_reason": str, "body": str?, "body_reason": str?}`
+(`body` is not acted on yet). Its edits then go through the host write path: `escalate` or no change →
+`needs-human`; a change to `.github/workflows/**`, `**/migrations/**` or a lockfile (`uv.lock`, `poetry.lock`,
+`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `go.sum`; exempt with `lastmile.allow_paths`), or more than
+`lastmile.max_diff_lines` changed lines, or a failing `lastmile.repo_checks[repo]` shell → the worktree is reset
+and `needs-human`; otherwise `git add -A`, commit `TLM: <summary>`, `git push`, back to `ci-running`. Rounds are
+counted per trigger and capped by `max_fix_rounds`; a failure whose fingerprint already had a fix round →
+`needs-human` ("same failure twice").
+
 ```
 tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
   --labels a,b --reviewers alice,bob --draft \
@@ -322,6 +345,8 @@ tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira E
   --agent claude:opus:medium --max-fix-rounds 3 --stack-parent <id|branch> --requester <who>
 tlm status <id> [--json]
 tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
+tlm resume <id>
+tlm cancel <id>
 ```
 
 `tlm` is `sisyphus tlm` (`make build` links `bin/tlm`); it talks to the running app at `http_addr`
@@ -337,7 +362,9 @@ states or when the handoff is merged or closed.
 in the environment as `TLM_ID`, `TLM_EVENT`, …. A failing command is logged, never fatal.
 
 API: `POST /api/handoffs` (JSON body with the flags' names in snake_case; 201 with the handoff),
-`GET /api/handoffs`, `GET /api/handoffs/{id}`, `PUT /api/handoffs/{id}/reviewers`. The dashboard lists the
+`GET /api/handoffs`, `GET /api/handoffs/{id}`, `PUT /api/handoffs/{id}/reviewers`,
+`POST /api/handoffs/{id}/resume`, `POST /api/handoffs/{id}/cancel`. `tlm` sends the API token only on
+POST/PUT requests to a loopback address. The dashboard lists the
 handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.json` next to the state file.
 
 | Field | Default | |
@@ -349,6 +376,11 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.repo_reviewers` | `{}` | per `owner/name`: replaces `reviewers` for that repo |
 | `lastmile.max_fix_rounds` | `3` | default of `--max-fix-rounds` |
 | `lastmile.needs_human_label` | `tlm:needs-human` | label of a PR that waits for a human |
+| `lastmile.flakes` | `[]` | regexes: a failed job whose log tail matches is rerun, not fixed |
+| `lastmile.flake_reruns` | `2` | flake reruns per head SHA |
+| `lastmile.max_diff_lines` | `400` | an agent change over this many lines is discarded |
+| `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
+| `lastmile.repo_checks` | `{}` | per `owner/name`: shell run on the host over an agent's change (`hook_timeout`) |
 
 ## `on_conflict` hook
 

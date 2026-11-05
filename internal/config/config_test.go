@@ -189,7 +189,7 @@ func TestLoadConfigLastMile(t *testing.T) {
 	}
 	l := cfg.LastMile
 	if l.Disabled || l.Interval.Duration != 2*time.Minute || l.BotReviewer != "EthycaBot" || l.Reviewers.Count != 1 ||
-		l.MaxFixRounds != 3 || l.NeedsHumanLabel != "tlm:needs-human" {
+		l.MaxFixRounds != 3 || l.NeedsHumanLabel != "tlm:needs-human" || l.FlakeReruns != 2 || l.MaxDiffLines != 400 || len(l.Flakes) != 0 {
 		t.Errorf("bad lastmile defaults: %+v", l)
 	}
 
@@ -212,6 +212,10 @@ func TestLoadConfigLastMile(t *testing.T) {
 	for _, bad := range []string{
 		`{"lastmile": {"interval": "0s"}}`,
 		`{"lastmile": {"max_fix_rounds": 0}}`,
+		`{"lastmile": {"flakes": ["("]}}`,
+		`{"lastmile": {"max_diff_lines": 0}}`,
+		`{"lastmile": {"flake_reruns": -1}}`,
+		`{"lastmile": {"repo_checks": {"nope": "true"}}}`,
 		`{"lastmile": {"needs_human_label": ""}}`,
 		`{"lastmile": {"reviewers": {"roster": [""]}}}`,
 		`{"lastmile": {"reviewers": {"count": -1}}}`,

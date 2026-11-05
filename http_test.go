@@ -724,3 +724,25 @@ func TestHTTPHandoffReviewers(t *testing.T) {
 		t.Errorf("status = %d", code)
 	}
 }
+
+func TestHTTPHandoffResumeCancel(t *testing.T) {
+	srv, clone := handoffServer(t)
+	_, body := post(t, srv.URL+"/api/handoffs", `{"worktree": `+strconv.Quote(clone)+`, "base": "main"}`)
+	var h lastmile.Handoff
+	if err := json.Unmarshal([]byte(body), &h); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := post(t, srv.URL+"/api/handoffs/"+h.ID+"/resume", ""); code != 400 || !strings.Contains(body, "not needs-human") {
+		t.Errorf("resume of a handed-off = %d %s", code, body)
+	}
+	if code, _ := post(t, srv.URL+"/api/handoffs/nope/resume", ""); code != 404 {
+		t.Errorf("unknown resume = %d", code)
+	}
+	code, body := post(t, srv.URL+"/api/handoffs/"+h.ID+"/cancel", "")
+	if code != 200 || !strings.Contains(body, `"state":"cancelled"`) {
+		t.Errorf("cancel = %d %s", code, body)
+	}
+	if code, _ := post(t, srv.URL+"/api/handoffs/"+h.ID+"/cancel", ""); code != 400 {
+		t.Errorf("second cancel = %d", code)
+	}
+}

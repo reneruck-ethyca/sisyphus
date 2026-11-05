@@ -426,14 +426,30 @@ func (r *Reviewer) cancel(id string, why error) {
 func (r *Reviewer) Reattach(ctx context.Context) {
 	r.mu.Lock()
 	var left []Run
-	for _, runs := range r.st.Runs {
+	var tasks []struct {
+		key string
+		run Run
+	}
+	for key, runs := range r.st.Runs {
 		for _, run := range runs {
-			if run.Status == Running {
+			switch {
+			case run.Status != Running:
+			case strings.HasPrefix(key, taskPrefix):
+				tasks = append(tasks, struct {
+					key string
+					run Run
+				}{key, run}) // its caller is gone too: the next tick asks again
+			default:
 				left = append(left, run)
 			}
 		}
 	}
 	r.mu.Unlock()
+	for _, t := range tasks {
+		r.record(t.key, t.run.ID, func(x *Run) {
+			x.Status, x.Error, x.Finished = Lost, "lost in a restart", time.Now()
+		})
+	}
 	for _, run := range left {
 		id := run.Job.PR.Key()
 		unlock, ok := r.locks.TryLock(id)
@@ -804,12 +820,50 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 			return container.Spec{}, err
 		}
 	}
+	network := ""
+	if run.Stack != nil {
+		network = run.Stack.Network()
+	}
+	return r.buildSpec(ctx, specReq{
+		Repo: tr.Repo, Worktree: tr.Worktree, Dir: run.Dir, RunID: run.ID, Agent: agent, Network: network,
+		Name: "sisyphus-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
+		Env: map[string]string{
+			"SISYPHUS_REASON": run.Job.Reason, "SISYPHUS_PR_URL": tr.URL, "SISYPHUS_PR_NUMBER": strconv.Itoa(tr.Number),
+			"SISYPHUS_BRANCH": tr.HeadRef, "SISYPHUS_HEAD_SHA": tr.HeadSHA,
+		},
+		Labels:  map[string]string{"sisyphus": "1", "sisyphus.run": run.ID, "sisyphus.pr": tr.Key()},
+		Related: repo.Related, RelatedDir: relatedDir(run),
+		WithContext: r.GitHub != nil,
+	})
+}
+
+// specReq is what differs between a review and a task in building a container
+// spec: the rest (image, caches, plugins, env files, git mounts) is shared.
+// The caller has made Dir/out and Dir/claude and written Dir/prompt.md.
+type specReq struct {
+	Repo, Worktree, Dir, RunID, Name, Network string
+	Agent                                     config.Agent
+	Env                                       map[string]string // on top of the common variables, under the repo's and config's
+	Override                                  map[string]string // wins over everything
+	Labels                                    map[string]string
+	Related                                   *config.Related
+	RelatedDir                                string
+	WithContext                               bool // mount Dir/context at /sisyphus/context
+}
+
+func (r *Reviewer) buildSpec(ctx context.Context, q specReq) (container.Spec, error) {
+	agent := q.Agent
+	repo, ok := r.cfg.Repos[q.Repo]
+	if !ok {
+		return container.Spec{}, fmt.Errorf("no review.repos entry for %s", q.Repo)
+	}
+	workdir := cmp.Or(repo.Workdir, q.Worktree)
 	if r.cfg.ClaudeSettings != "" {
 		b, err := os.ReadFile(r.cfg.ClaudeSettings)
 		if err != nil {
 			return container.Spec{}, fmt.Errorf("claude_settings: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(run.Dir, "claude", "settings.json"), b, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(q.Dir, "claude", "settings.json"), b, 0o644); err != nil {
 			return container.Spec{}, err
 		}
 	}
@@ -824,20 +878,20 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	// config (core.fsmonitor, …), or re-point the worktree's .git file, could run
 	// commands on the host. The worktree's .git points into the clone's .git,
 	// which is mounted at its own host path so the pointer resolves.
-	dotGit := filepath.Join(tr.Worktree, ".git")
+	dotGit := filepath.Join(q.Worktree, ".git")
 	mounts := []container.Mount{
-		{Source: tr.Worktree, Target: workdir},
+		{Source: q.Worktree, Target: workdir},
 		{Source: dotGit, Target: filepath.Join(workdir, ".git"), ReadOnly: true},
 	}
-	gitDir, err := worktree.CommonDir(ctx, tr.Worktree)
+	gitDir, err := worktree.CommonDir(ctx, q.Worktree)
 	if err != nil {
 		return container.Spec{}, err
 	}
 	if real, _ := filepath.EvalSymlinks(dotGit); gitDir != real {
 		mounts = append(mounts, container.Mount{Source: gitDir, Target: gitDir, ReadOnly: true})
 	}
-	if rel := repo.Related; rel != nil {
-		mounts = append(mounts, container.Mount{Source: relatedDir(run), Target: rel.Target, ReadOnly: true})
+	if q.Related != nil {
+		mounts = append(mounts, container.Mount{Source: q.RelatedDir, Target: q.Related.Target, ReadOnly: true})
 	}
 	// Dependency caches: per-repo volumes over the worktree, so the host's macOS
 	// builds stay out and installs survive between runs. Volumes start root-owned.
@@ -847,19 +901,19 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 		if !filepath.IsAbs(c) {
 			target = filepath.Join(workdir, c)
 		}
-		mounts = append(mounts, container.Mount{Source: volumeName(tr.Repo, c), Target: target})
+		mounts = append(mounts, container.Mount{Source: volumeName(q.Repo, c), Target: target})
 		owned = append(owned, target)
 	}
 	mounts = append(mounts,
-		container.Mount{Source: filepath.Join(run.Dir, "out"), Target: "/out"},
-		container.Mount{Source: filepath.Join(run.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
-		container.Mount{Source: filepath.Join(run.Dir, "claude"), Target: claudeDir}, // fresh per run
+		container.Mount{Source: filepath.Join(q.Dir, "out"), Target: "/out"},
+		container.Mount{Source: filepath.Join(q.Dir, "prompt.md"), Target: "/sisyphus/prompt.md", ReadOnly: true},
+		container.Mount{Source: filepath.Join(q.Dir, "claude"), Target: claudeDir}, // fresh per run
 	)
 	if agent.Vendor == "codex" {
 		mounts = append(mounts, container.Mount{Source: r.cfg.CodexHome, Target: "/sisyphus/codex"})
 	}
-	if r.GitHub != nil {
-		mounts = append(mounts, container.Mount{Source: filepath.Join(run.Dir, "context"), Target: "/sisyphus/context", ReadOnly: true})
+	if q.WithContext {
+		mounts = append(mounts, container.Mount{Source: filepath.Join(q.Dir, "context"), Target: "/sisyphus/context", ReadOnly: true})
 	}
 	if r.cfg.PluginsVolume != "" {
 		mounts = append(mounts, container.Mount{Source: r.cfg.PluginsVolume, Target: claudeDir + "/plugins"})
@@ -867,14 +921,13 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 	}
 
 	env := map[string]string{
-		"SISYPHUS_RUN_ID": run.ID, "SISYPHUS_REASON": run.Job.Reason,
-		"SISYPHUS_PR_URL": tr.URL, "SISYPHUS_REPO": tr.Repo, "SISYPHUS_PR_NUMBER": strconv.Itoa(tr.Number),
-		"SISYPHUS_BRANCH": tr.HeadRef, "SISYPHUS_HEAD_SHA": tr.HeadSHA, "SISYPHUS_WORKTREE": workdir,
+		"SISYPHUS_RUN_ID": q.RunID, "SISYPHUS_REPO": q.Repo, "SISYPHUS_WORKTREE": workdir,
 		"SISYPHUS_OUT":      "/out",
 		"CLAUDE_CONFIG_DIR": claudeDir,
 		// The container's user doesn't own the mounted files; let git work anyway.
 		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": "*",
 	}
+	maps.Copy(env, q.Env)
 	maps.Copy(env, repo.Env)
 	if agent.Vendor == "codex" {
 		env["CODEX_HOME"] = "/sisyphus/codex"
@@ -884,22 +937,17 @@ func (r *Reviewer) spec(ctx context.Context, run Run) (container.Spec, error) {
 			env[k] = v
 		}
 	}
+	maps.Copy(env, q.Override)
 	var envFiles []string
 	for _, f := range []string{repo.EnvFile, r.cfg.EnvFile} { // later files win: secrets last
 		if f != "" {
 			envFiles = append(envFiles, f)
 		}
 	}
-	network := ""
-	if run.Stack != nil {
-		network = run.Stack.Network()
-	}
 	return container.Spec{
-		Network: network,
-		Name:    "sisyphus-" + strings.NewReplacer("/", "-", "#", "-").Replace(tr.Key()) + "-" + run.ID,
-		Image:   repo.Image, Command: []string{"bash", "-c", r.script(repo, owned, agent)}, Env: env, EnvFiles: envFiles,
-		Mounts: mounts, Workdir: workdir,
-		Labels: map[string]string{"sisyphus": "1", "sisyphus.run": run.ID, "sisyphus.pr": tr.Key()},
+		Network: q.Network, Name: q.Name,
+		Image: repo.Image, Command: []string{"bash", "-c", r.script(repo, owned, agent)}, Env: env, EnvFiles: envFiles,
+		Mounts: mounts, Workdir: workdir, Labels: q.Labels,
 	}, nil
 }
 
@@ -1431,6 +1479,9 @@ func (r *Reviewer) Status() map[string]PRStatus {
 	defer r.mu.Unlock()
 	out := map[string]PRStatus{}
 	for id, runs := range r.st.Runs {
+		if strings.HasPrefix(id, taskPrefix) {
+			continue
+		}
 		rs := slices.Clone(runs)
 		slices.Reverse(rs)
 		out[id] = PRStatus{Runs: rs}

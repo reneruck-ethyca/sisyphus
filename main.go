@@ -116,6 +116,9 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
+		if rev != nil { // a nil *Reviewer in the interface would not be nil
+			lm.Tasks = rev
+		}
 		svc.UseLastMile(lm)
 	}
 	slog.Info("sisyphus starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
