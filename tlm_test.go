@@ -86,3 +86,29 @@ func TestSendsTokenOnlyToLoopbackOnMutations(t *testing.T) {
 		}
 	}
 }
+
+func TestTLMInstallSkill(t *testing.T) {
+	claude, codex := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("CODEX_HOME", codex)
+	path := func(dir string) string { return filepath.Join(dir, "skills", skillName, "SKILL.md") }
+
+	if code, out, stderr := tlm(t, "install-skill"); code != 0 || strings.Count(out, "installed") != 2 {
+		t.Fatalf("first install = %d %q %q", code, out, stderr)
+	}
+	for _, dir := range []string{claude, codex} {
+		if b, err := os.ReadFile(path(dir)); err != nil || !bytes.Equal(b, handoffSkill) {
+			t.Errorf("%s: %v", path(dir), err)
+		}
+	}
+	os.WriteFile(path(codex), []byte("old"), 0o644)
+	if code, out, _ := tlm(t, "install-skill"); code != 0 || !strings.Contains(out, "claude: up to date") || !strings.Contains(out, "codex: updated") {
+		t.Errorf("second install = %d %q", code, out)
+	}
+	if code, _, stderr := tlm(t, "install-skill", "--for", "gemini"); code != 1 || !strings.Contains(stderr, `unknown agent "gemini"`) {
+		t.Errorf("unknown agent = %d %q", code, stderr)
+	}
+	if !bytes.HasPrefix(handoffSkill, []byte("---\nname: "+skillName+"\n")) {
+		t.Error("embedded skill lost its frontmatter")
+	}
+}
