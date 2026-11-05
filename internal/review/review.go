@@ -572,6 +572,13 @@ func (r *Reviewer) RuntimeError() string {
 	return r.unavailable
 }
 
+// Slots says how many of the review.max_concurrent run slots are taken, by reviews and agent tasks alike.
+func (r *Reviewer) Slots() (used, max int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.active), r.cfg.MaxConcurrent
+}
+
 // checkRuntime keeps jobs queued while the runtime is down and retries in a minute.
 func (r *Reviewer) checkRuntime(ctx context.Context) bool {
 	err := r.rt.Available(ctx)

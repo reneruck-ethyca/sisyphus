@@ -188,9 +188,23 @@ func TestFixAgentDoesNotBlockTick(t *testing.T) {
 	if _, ok := m.locks.TryLock("lastmile:" + id); ok {
 		t.Error("worktree not locked during the run")
 	}
+	var running []View
+	for _, v := range m.Views() {
+		if v.AgentRunning != "" {
+			running = append(running, v)
+		}
+	}
+	if len(running) != 1 || running[0].ID != id || running[0].AgentRunning != TriggerCI || running[0].AgentStarted.IsZero() {
+		t.Errorf("views with an agent in flight = %+v", running)
+	}
 	close(tasks.release)
 	m.Wait()
 	m.tick(context.Background())
+	for _, v := range m.Views() {
+		if v.AgentRunning != "" {
+			t.Errorf("%s still shows an agent after the run was applied", v.ID)
+		}
+	}
 	if h := m.must(t, id); h.State != StateNeedsHuman || h.Reason != "agent made no changes" {
 		t.Errorf("handoff = %+v", h)
 	}

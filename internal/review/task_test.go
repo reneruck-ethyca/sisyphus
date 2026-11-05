@@ -124,3 +124,17 @@ func TestRunTaskWaitsForSlotUntilCancelled(t *testing.T) {
 		t.Fatalf("err = %v, started %d", err, len(f.rt.Started()))
 	}
 }
+
+func TestSlots(t *testing.T) {
+	f := newFixture(t) // max_concurrent 1
+	if used, max := f.r.Slots(); used != 0 || max != 1 {
+		t.Fatalf("idle slots = %d of %d", used, max)
+	}
+	f.r.mu.Lock()
+	f.r.active["ethyca/a#9"] = func(error) {}
+	f.r.active["task:h1"] = func(error) {}
+	f.r.mu.Unlock()
+	if used, max := f.r.Slots(); used != 2 || max != 1 {
+		t.Errorf("slots = %d of %d, want a review and a task counted", used, max)
+	}
+}

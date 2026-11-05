@@ -1,0 +1,102 @@
+{{template "head" .Title}}
+{{template "top" .Top}}
+<main class="home">
+<div class="meta-line"><h1>Home</h1><span>{{len .PRs}} tracked PR{{if ne (len .PRs) 1}}s{{end}} · {{len .Handoffs}} handoff{{if ne (len .Handoffs) 1}}s{{end}}</span></div>
+
+<section aria-labelledby="needs"><div class="sh"><h2 id="needs">Needs you</h2><span class="muted">{{.NeedsCount}} item{{if ne .NeedsCount 1}}s{{end}}</span></div>
+  {{with .LastError}}<p class="notice">The last check failed: {{.}}</p>{{end}}
+  {{template "notices" $}}
+  {{if .NeedsCount}}<ol class="list hl card">
+  {{range .NeedsHuman}}<li><span class="chip bad">needs-human</span><span class="src">Last mile</span>
+    <span class="grow"><a href="/lastmile/{{.ID}}">{{.Title}}</a><span class="facts">{{.ID}}{{if .PRNumber}} · {{base .Repo}} #{{.PRNumber}}{{end}}{{with .PrevState}} · was {{.}}{{end}} · {{.Reason}}{{if gh .PRURL}} · <a href="{{gh .PRURL}}" target="_blank" rel="noopener">PR ↗</a>{{end}}</span></span>
+    <span class="t">{{ago .Updated}}</span></li>{{end}}
+  {{range .Failing}}<li><span class="chip {{.Tone}}">{{.Verdict}}</span><span class="src">Review</span>
+    <span class="grow"><a href="/prs/{{.Repo}}/{{.Number}}">{{.Title}}</a><span class="facts">{{base .Repo}} #{{.Number}} · {{or .LastError .ReviewNote}}</span></span>
+    <span class="t">{{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</span></li>{{end}}
+  {{range .AwaitingYou}}<li><span class="chip {{.Tone}}">{{.Verdict}}</span><span class="src">Your review</span>
+    <span class="grow"><a href="/prs/{{.Repo}}/{{.Number}}">{{.Title}}</a><span class="facts">{{base .Repo}} #{{.Number}}{{with .Author}} · {{.}}{{end}} · sisyphus reviewed · waiting for yours{{if gh .URL}} · <a href="{{gh .URL}}" target="_blank" rel="noopener">PR ↗</a>{{end}}</span></span>
+    <span class="t">{{ago .VerdictAt}}</span></li>{{end}}
+  </ol>
+  {{else if and (not .LastError) (not .RuntimeError) .Reviews}}<div class="card empty"><div><b>Nothing needs you right now</b>
+    <div class="muted">Handoffs that need a person, failed reviews and reviews waiting for yours show up here.</div></div></div>{{end}}
+</section>
+
+<div class="two">
+<section aria-labelledby="rv"><div class="sh"><h2 id="rv">Reviews</h2><a class="end" href="/reviews">All reviews →</a></div>
+  <div class="card">
+    <div class="counts">
+      <a class="count bad" href="/reviews"><b>{{len (.InGroup "attention")}}</b><span>Needs attention</span></a>
+      <a class="count live" href="/reviews"><b>{{len .Reviewing}}</b><span>Reviewing{{with .Queued}} · queued {{.}}{{end}}</span></a>
+      <a class="count ok" href="/reviews"><b>{{len (.InGroup "reviewed")}}</b><span>Reviewed</span></a>
+      <a class="count" href="/reviews"><b>{{len (.InGroup "waiting")}}</b><span>Not reviewed</span></a>
+    </div>
+    <div class="sub">Running now</div>
+    {{with .InGroup "reviewing"}}<ul class="mini">{{range .}}{{$p := .}}<li><span class="chip {{.Tone}}">{{.Verdict}}</span>
+      <a class="grow" href="{{with .Review.Latest}}{{if eq .Status "running"}}{{runPath $p.ID .ID}}{{else}}/prs/{{$p.Repo}}/{{$p.Number}}{{end}}{{else}}/prs/{{.Repo}}/{{.Number}}{{end}}">{{.Title}}</a>
+      <span class="t">{{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{else}}waiting for a slot{{end}}</span></li>{{end}}</ul>
+    {{else}}<p class="empty muted">No review running.</p>{{end}}
+    <div class="sub">Latest activity</div>
+    {{with .Recent}}<ul class="mini">{{range .}}<li><span class="chip {{.Tone}}">{{.Label}}</span><a class="grow" href="{{runPath .PR .Run}}">{{.Title}}</a><span class="t">{{ago .At}}</span></li>{{end}}</ul>
+    {{else}}<p class="empty muted">No reviews yet.</p>{{end}}
+  </div>
+</section>
+
+<section aria-labelledby="lmh"><div class="sh"><h2 id="lmh">Last mile</h2><a class="end" href="/lastmile">All handoffs →</a></div>
+  <div class="card">
+    <div class="counts">
+      <a class="count" href="/lastmile"><b>{{.LMCount}}</b><span>Open</span></a>
+      <a class="count bad" href="/lastmile"><b>{{.LMCount "ci-red" "conflict"}}</b><span>CI red / conflict</span></a>
+      <a class="count changes" href="/lastmile"><b>{{.LMCount "awaiting-review" "feedback"}}</b><span>Awaiting review · feedback</span></a>
+      <a class="count ok" href="/lastmile"><b>{{.LMCount "approved"}}</b><span>Approved</span></a>
+    </div>
+    <div class="sub">Agents in flight</div>
+    {{with .AgentsRunning}}<ul class="mini">{{range .}}<li><span class="chip live">{{.AgentRunning}}</span><a class="grow" href="/lastmile/{{.ID}}">{{.Title}}</a><span class="t">{{ago .AgentStarted}}</span></li>{{end}}</ul>
+    {{else}}<p class="empty muted">No agent running.</p>{{end}}
+    <div class="sub">Recently merged</div>
+    {{with .Merged}}<ul class="mini">{{range .}}<li><span class="chip ok">merged</span><a class="grow" href="/lastmile/{{.ID}}">{{.Title}}{{if .PRNumber}} · {{base .Repo}} #{{.PRNumber}}{{end}}</a><span class="t">{{ago .Updated}}</span></li>{{end}}</ul>
+    {{else}}<p class="empty muted">Nothing merged yet.</p>{{end}}
+  </div>
+</section>
+</div>
+
+<div class="two">
+<section aria-labelledby="cap"><div class="sh"><h2 id="cap">Budget and capacity</h2><a class="end" href="/settings">Settings →</a></div>
+  <div class="card">
+    <div class="card-b stack">
+      {{if .BudgetNote}}{{$b := .Budget}}<div class="meterrow"><span>5-hour window</span>
+        <meter min="0" max="{{$b.Share}}" low="{{$b.Share | warnAt}}" high="{{$b.Share | warnAt}}" optimum="0" value="{{$b.Used}}" aria-label="{{pct $b.Used}} of the {{pct $b.Share}} share used"></meter><b>{{pct $b.Used}} of {{pct $b.Share}}</b></div>
+      <dl><dt>Account</dt><dd>{{pct $b.Account}} of the window used by everyone</dd>
+        {{if not $b.ResetsAt.IsZero}}<dt>Resets</dt><dd>{{$b.ResetsAt.Local.Format "15:04"}}</dd>{{end}}
+        <dt>Held back</dt><dd>{{if .BudgetWait}}yes{{else}}no{{end}}</dd></dl>
+      {{else}}<p class="muted">No 5-hour budget set.</p>{{end}}
+      {{if .SlotsMax}}<div class="meterrow"><span>Run slots</span>
+        <meter min="0" max="{{.SlotsMax}}" value="{{.SlotsUsed}}" aria-label="{{.SlotsUsed}} of {{.SlotsMax}} slots in use"></meter><b>{{.SlotsUsed}} of {{.SlotsMax}}</b></div>
+      <div class="muted">{{len .Reviewing}} review{{if ne (len .Reviewing) 1}}s{{end}} · {{len .AgentsRunning}} last-mile agent{{if ne (len .AgentsRunning) 1}}s{{end}} · {{.Queued}} review{{if ne .Queued 1}}s{{end}} queued</div>{{end}}
+    </div>
+    <div class="card-f">Reviews and last-mile agents share <code>review.max_concurrent</code> and the 5-hour share.</div>
+  </div>
+</section>
+
+{{with .Shadow}}<section aria-labelledby="sm"><div class="sh"><h2 id="sm">Shadow merge</h2><a class="end" href="/lastmile/shadow">Shadow-merge report →</a></div>
+  <div class="card">
+    <table class="matrix">
+      <thead><tr><th>Last verdict</th><th class="n">You merged</th><th class="n">You closed</th><th class="n">Still open</th></tr></thead>
+      <tbody>
+        <tr><td>would merge: yes</td><td class="n agree">{{.Agreement.WouldMergeYes.Merged}}</td><td class="n miss">{{.Agreement.WouldMergeYes.Closed}}</td><td class="n">{{.Agreement.WouldMergeYes.Open}}</td></tr>
+        <tr><td>would merge: no</td><td class="n miss">{{.Agreement.WouldMergeNo.Merged}}</td><td class="n agree">{{.Agreement.WouldMergeNo.Closed}}</td><td class="n">{{.Agreement.WouldMergeNo.Open}}</td></tr>
+      </tbody>
+    </table>
+    <div class="card-f">{{.Totals.Observed}} PR{{if ne .Totals.Observed 1}}s{{end}} observed{{if .Totals.Merged}} · mean time in review {{secs $.MeanSec}} (merged PRs){{end}} · agreement is by each PR's last verdict</div>
+  </div>
+</section>{{end}}
+</div>
+</main>
+<script>
+  // Live updates like the other pages: reload when the status changes, unless the tab is hidden.
+  let seen;
+  stream("/api/status/stream").onmessage = (m) => {
+    seen ??= m.data;
+    if (m.data !== seen && !document.hidden) location.reload();
+  };
+</script>
+{{template "foot"}}

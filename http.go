@@ -472,9 +472,12 @@ func newHandler(svc *app.Service) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		restartSoon()
 	})
-	// ponytail: / shows the reviews until the landing dashboard exists.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "index.html", dashboard{Status: svc.Status()})
+		h := homePage{dashboard: dashboard{Status: svc.Status()}}
+		if rep, err := svc.ShadowReport(lastmile.ShadowQuery{}); err == nil { // disabled or unreadable: the card is left out
+			h.Shadow = &rep
+		}
+		render(w, "home.html", h)
 	})
 	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "index.html", dashboard{Status: svc.Status()})
@@ -552,6 +555,64 @@ func (d dashboard) Top() topbar {
 		return topbar{Status: &d.Status, Page: "history"}
 	}
 	return topbar{Status: &d.Status, Page: "reviews"}
+}
+
+// homePage is the landing dashboard: what needs you, then reviews, the last mile, capacity and the shadow report.
+type homePage struct {
+	dashboard
+	Shadow *lastmile.ShadowReport // nil = the last mile is off or its log unreadable
+}
+
+// Top has no tab current: the brand is the way here.
+func (h homePage) Top() topbar { return topbar{Status: &h.Status} }
+
+func (h homePage) Title() string { return "Home" }
+
+// AwaitingYou lists the PRs sisyphus reviewed that wait for your verdict, newest first.
+func (h homePage) AwaitingYou() []app.PRView {
+	out := slices.DeleteFunc(h.InGroup(app.GroupReviewed), func(p app.PRView) bool {
+		return p.Tone != app.ToneOK && p.Tone != app.ToneChanges
+	})
+	slices.SortFunc(out, func(a, b app.PRView) int { return b.VerdictAt.Compare(a.VerdictAt) })
+	return out
+}
+
+// Failing lists the PRs whose review or sync failed.
+func (h homePage) Failing() []app.PRView { return h.InGroup(app.GroupAttention) }
+
+// NeedsCount is the number of items in the "Needs you" list.
+func (h homePage) NeedsCount() int {
+	return len(h.NeedsHuman()) + len(h.Failing()) + len(h.AwaitingYou())
+}
+
+// Queued counts the PRs waiting for a run slot.
+func (h homePage) Queued() (n int) {
+	for _, p := range h.PRs {
+		if p.Review.State == review.StateQueued {
+			n++
+		}
+	}
+	return n
+}
+
+// Recent is the latest few review runs.
+func (h homePage) Recent() []app.Activity { return h.Activity[:min(len(h.Activity), 3)] }
+
+// LMCount counts the open handoffs in any of the states; none = every open one.
+func (h homePage) LMCount(states ...string) (n int) {
+	for _, v := range h.Handoffs {
+		if len(states) == 0 && !v.Over || slices.Contains(states, v.State) {
+			n++
+		}
+	}
+	return n
+}
+
+// Merged is the last few merged handoffs, newest first.
+func (h homePage) Merged() []lastmile.View {
+	out := slices.DeleteFunc(slices.Clone(h.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateMerged })
+	slices.SortFunc(out, func(a, b lastmile.View) int { return b.Updated.Compare(a.Updated) })
+	return out[:min(len(out), 3)]
 }
 
 type prGroup struct {
@@ -936,3 +997,6 @@ func render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	buf.WriteTo(w)
 }
+
+// MeanSec is the shadow report's mean time in review, for the secs helper.
+func (h homePage) MeanSec() int64 { return int64(h.Shadow.MeanTimeInReviewSec) }

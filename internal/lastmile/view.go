@@ -1,5 +1,7 @@
 package lastmile
 
+import "time"
+
 // Tones colour a state chip; they match the dashboard's chip classes.
 const (
 	ToneBad     = "bad"     // ci-red, conflict, needs-human
@@ -26,6 +28,11 @@ type View struct {
 	Reviewing []string `json:"reviewing"`            // asked to review now; before the PR is read, the planned humans
 	Depth     int      `json:"depth"`                // how far down a stack: 0 for a root or a handoff on its own
 	WaitingOn string   `json:"waiting_on,omitempty"` // the open parent this stacked handoff sits on
+
+	// The agent run in flight for this handoff: its trigger (Trigger*) and start; "" = none.
+	// A finished run waiting for the next tick to apply it doesn't count.
+	AgentRunning string    `json:"agent_running,omitempty"`
+	AgentStarted time.Time `json:"agent_started,omitzero"`
 }
 
 // Views lists the handoffs for the dashboard, newest root first; never nil. A stack
@@ -38,6 +45,9 @@ func (m *Manager) Views() []View {
 		v := View{Handoff: h, Tone: Tone(h.State), Over: Terminal(h.State), Reviewing: h.Reviewers}
 		if h.Snapshot != nil {
 			v.Reviewing = h.Snapshot.Requested
+		}
+		if a, ok := m.running.get(h.ID); ok && !a.done {
+			v.AgentRunning, v.AgentStarted = a.trigger, a.started
 		}
 		byID[h.ID] = v
 	}

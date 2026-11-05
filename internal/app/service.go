@@ -37,6 +37,15 @@ type Status struct {
 	Ignored      []tracker.Ignored `json:"ignored"`               // PRs untracked by hand
 	Activity     []Activity        `json:"activity"`              // latest review runs across PRs, newest first
 	Handoffs     []lastmile.View   `json:"handoffs"`              // the last mile's handoffs, newest first
+	SlotsUsed    int               `json:"slots_used"`            // run slots taken by reviews and last-mile agents
+	SlotsMax     int               `json:"slots_max"`             // review.max_concurrent; 0 when reviews are disabled
+}
+
+// AgentsRunning lists the handoffs with an agent run in flight, oldest run first.
+func (s Status) AgentsRunning() []lastmile.View {
+	out := slices.DeleteFunc(slices.Clone(s.Handoffs), func(v lastmile.View) bool { return v.AgentRunning == "" })
+	slices.SortFunc(out, func(a, b lastmile.View) int { return a.AgentStarted.Compare(b.AgentStarted) })
+	return out
 }
 
 // NeedsHuman lists the handoffs waiting for a person, for the dashboard's banner.
@@ -462,8 +471,10 @@ func (s *Service) publish() {
 	var reviews map[string]review.PRStatus
 	var budget review.Budget
 	runtimeErr := ""
+	slotsUsed, slotsMax := 0, 0
 	if s.rev != nil {
 		reviews, runtimeErr, budget = s.rev.Status(), s.rev.RuntimeError(), s.rev.Budget()
+		slotsUsed, slotsMax = s.rev.Slots()
 	}
 	note, wait := budgetNotes(budget)
 	s.mu.Lock()
@@ -507,6 +518,7 @@ func (s *Service) publish() {
 		st.Handoffs = handoffs
 		st.PRs, st.RuntimeError, st.Reviewing, st.Activity = prs, runtimeErr, active, activity(prs)
 		st.Budget, st.BudgetNote, st.BudgetWait = budget, note, wait
+		st.SlotsUsed, st.SlotsMax = slotsUsed, slotsMax
 	})
 }
 

@@ -81,6 +81,7 @@ type outcome struct {
 type agentRun struct {
 	cancel  context.CancelFunc
 	trigger string // Trigger*
+	started time.Time
 	done    bool
 	outcome
 }
@@ -97,7 +98,7 @@ func (r *runs) get(id string) (agentRun, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if a := r.m[id]; a != nil {
-		return agentRun{done: a.done, trigger: a.trigger, outcome: a.outcome}, true
+		return agentRun{done: a.done, trigger: a.trigger, started: a.started, outcome: a.outcome}, true
 	}
 	return agentRun{}, false
 }
@@ -137,7 +138,7 @@ func (m *Manager) Wait() { m.wg.Wait() }
 // false when a run is already in flight for h.
 func (m *Manager) launch(ctx context.Context, h Handoff, trigger string, work func(context.Context, Handoff) outcome) bool {
 	runCtx, cancel := context.WithCancel(ctx)
-	run := &agentRun{cancel: cancel, trigger: trigger}
+	run := &agentRun{cancel: cancel, trigger: trigger, started: m.now()}
 	if !m.running.put(h.ID, run) {
 		cancel()
 		return false

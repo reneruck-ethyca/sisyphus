@@ -54,7 +54,10 @@ make reviewer-image            # rebuild the fidesplus review image
 make uninstall-agent
 ```
 
-The dashboard (`http_addr`) and the window show the same things: every tracked PR with its sync and
+The dashboard (`http_addr`) and the window show the same things. The landing page (`/`) gathers what
+needs you (handoffs waiting for a person, failed reviews, PRs sisyphus reviewed that wait for yours),
+the reviews and last-mile handoffs in flight, run slots and the 5-hour budget, and the shadow-merge
+report; `/reviews` lists every tracked PR with its sync and
 review state, a PR page with its review runs, its stack and the [PR actions](#pr-actions), each run
 streamed live, a live log viewer and the settings: the window is the dashboard in a webview. If the
 port is taken, sisyphus logs it and serves on a free one (the window and "Open dashboard" use it). If Docker is down, reviews wait in the queue and are retried every minute; at

@@ -163,7 +163,8 @@ func TestHTTPSettings(t *testing.T) {
 func TestHTTPPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	for path, want := range map[string][]string{
-		"/": {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "Starting…", "<h1>Overview</h1>", `class="chip neutral">Not reviewed`},
+		"/reviews": {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "Starting…", "<h1>Overview</h1>", `class="chip neutral">Not reviewed`, `<a href="/reviews" aria-current="page">`},
+		"/":        {"<h1>Home</h1>", `href="/reviews"`, "Needs you", "Budget and capacity", "Reviews are off"},
 		"/prs/ethyca/a/1": {"ethyca/a #1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `aria-current="page"`,
 			`href="https://github.com/octocat" target="_blank" rel="noopener"`, `href="https://github.com/ethyca/a/pull/1" target="_blank" rel="noopener"`},
 	} {
@@ -411,7 +412,7 @@ func TestHTTPShowsRunningContainer(t *testing.T) {
 	if _, reviews := get(t, srv.URL+"/reviews"); !strings.Contains(reviews, `<a href="/reviews" aria-current="page">Reviews</a>`) {
 		t.Error("/reviews doesn't mark the Reviews tab current")
 	}
-	_, body := get(t, srv.URL+"/")
+	_, body := get(t, srv.URL+"/reviews")
 	for _, want := range []string{`class="chip live">Reviewing`, `href="/prs/ethyca/a/1/runs/` + run.ID + `"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview missing %q", want)
@@ -427,7 +428,7 @@ func TestHTTPShowsNoContainerWhenIdle(t *testing.T) {
 	if r := svc.Status().Reviewing; len(r) != 0 {
 		t.Fatalf("reviewing = %+v", r)
 	}
-	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "No review running.") {
+	if _, body := get(t, srv.URL+"/reviews"); !strings.Contains(body, "No review running.") {
 		t.Error("idle overview should say no review is running")
 	}
 }
@@ -498,7 +499,7 @@ func TestHTTPPRActions(t *testing.T) {
 	if st := svc.Status(); len(st.PRs) != 0 || len(st.Ignored) != 1 {
 		t.Fatalf("after untrack: PRs %d, ignored %+v", len(st.PRs), st.Ignored)
 	}
-	_, body := get(t, srv.URL+"/")
+	_, body := get(t, srv.URL+"/reviews")
 	if !strings.Contains(body, `data-action="track"`) {
 		t.Fatal("dashboard doesn't offer to track the PR again")
 	}
@@ -872,5 +873,53 @@ func TestHandoffPageFull(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("page lacks %q", want)
 		}
+	}
+}
+
+// The landing dashboard lists what needs you from handoffs and review verdicts, and escapes what GitHub supplies.
+func TestHTTPHome(t *testing.T) {
+	evil := `<script>alert(1)</script>`
+	now := time.Now()
+	h := homePage{dashboard: dashboard{Status: app.Status{Reviews: true, SlotsUsed: 2, SlotsMax: 3,
+		PRs: []app.PRView{
+			{ID: "o/r#1", Tracked: tracker.Tracked{PRRef: github.PRRef{Repo: "o/r", Number: 1}, Title: evil, URL: "https://github.com/o/r/pull/1", Author: "carol"},
+				Group: app.GroupReviewed, Tone: app.ToneChanges, Verdict: "Changes requested", VerdictAt: now},
+			{ID: "o/r#2", Tracked: tracker.Tracked{PRRef: github.PRRef{Repo: "o/r", Number: 2}, Title: "Broken", URL: "javascript:alert(1)"},
+				Group: app.GroupAttention, Tone: app.ToneBad, Verdict: "Failed", VerdictAt: now}},
+		Handoffs: []lastmile.View{
+			{Handoff: lastmile.Handoff{ID: "h1", Title: evil, State: lastmile.StateNeedsHuman, Reason: evil, PRNumber: 7, Repo: "o/r", PRURL: "https://evil.example/x"}},
+			{Handoff: lastmile.Handoff{ID: "h2", Title: "Fixing", State: lastmile.StateCIRed}, AgentRunning: lastmile.TriggerCI, AgentStarted: now}},
+	}}}
+	rec := httptest.NewRecorder()
+	render(rec, "home.html", h)
+	page := rec.Body.String()
+	if strings.Contains(page, evil) || strings.Contains(page, "javascript:") || strings.Contains(page, "evil.example") {
+		t.Errorf("untrusted text or link rendered:\n%s", page)
+	}
+	for _, want := range []string{"&lt;script&gt;", `href="/lastmile/h1"`, `href="/prs/o/r/1"`, "Changes requested", "needs-human", `chip live">ci<`, `href="/lastmile"`,
+		"2 of 3", "3 items", "Your review"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("home missing %q", want)
+		}
+	}
+}
+
+func TestHomeNeedsYou(t *testing.T) {
+	now := time.Now()
+	pr := func(n int, group, tone string) app.PRView {
+		return app.PRView{ID: "o/r#" + strconv.Itoa(n), Group: group, Tone: tone, Verdict: "v" + strconv.Itoa(n), VerdictAt: now.Add(time.Duration(n) * time.Minute)}
+	}
+	h := homePage{dashboard: dashboard{Status: app.Status{
+		PRs: []app.PRView{pr(1, app.GroupReviewed, app.ToneOK), pr(2, app.GroupReviewed, app.ToneNeutral), pr(3, app.GroupAttention, app.ToneBad), pr(4, app.GroupReviewed, app.ToneChanges)},
+		Handoffs: []lastmile.View{
+			{Handoff: lastmile.Handoff{ID: "a", State: lastmile.StateNeedsHuman}},
+			{Handoff: lastmile.Handoff{ID: "b", State: lastmile.StateCIRed}},
+			{Handoff: lastmile.Handoff{ID: "c", State: lastmile.StateMerged}, Over: true}},
+	}}}
+	if got := h.AwaitingYou(); len(got) != 2 || got[0].ID != "o/r#4" || got[1].ID != "o/r#1" {
+		t.Errorf("awaiting you = %+v, want the approved and changes-requested ones, newest first", got)
+	}
+	if h.NeedsCount() != 4 || h.LMCount() != 2 || h.LMCount(lastmile.StateCIRed, lastmile.StateConflict) != 1 || len(h.Merged()) != 1 {
+		t.Errorf("needs %d, open %d, red %d, merged %d", h.NeedsCount(), h.LMCount(), h.LMCount(lastmile.StateCIRed), len(h.Merged()))
 	}
 }
