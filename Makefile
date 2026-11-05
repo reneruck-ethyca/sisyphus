@@ -1,4 +1,4 @@
-.PHONY: build test lint plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
+.PHONY: help build test lint plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
 
 LABEL := com.reneruck.sisyphus
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -7,20 +7,23 @@ PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
 export CGO_CFLAGS := -O2 -g -mmacosx-version-min=13.0
 export CGO_LDFLAGS := -mmacosx-version-min=13.0
 
+help: ## list the targets (the default)
+	@awk -F':.*## ' '/^[a-z-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
 # production tag: no devtools/inspector in the window.
-build:
+build: ## build bin/sisyphus (and the bin/tlm symlink)
 	go build -tags production -o bin/sisyphus .
 	ln -sf sisyphus bin/tlm
 
-test:
+test: ## run the tests with the race detector
 	go test -race ./...
 
-lint:
+lint: ## run golangci-lint
 	golangci-lint run ./...
 
 # Renders the LaunchAgent. PATH is captured from the installing shell so gh/git/wtp
 # resolve under launchd; plutil sets values literally (no sed escaping pitfalls).
-plist:
+plist: ## render the LaunchAgent plist
 	mkdir -p $(dir $(PLIST)) $(HOME)/Library/Logs
 	cp launchagent.plist $(PLIST)
 	plutil -replace ProgramArguments -json '["$(CURDIR)/bin/sisyphus"]' $(PLIST)
@@ -32,7 +35,7 @@ plist:
 LOG := $(HOME)/Library/Logs/sisyphus.log
 
 # Stops sisyphus however it runs (LaunchAgent or by hand) and waits for it to exit.
-stop:
+stop: ## stop sisyphus, however it runs
 	@launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	@pkill -x sisyphus 2>/dev/null || true
 	@for i in $$(seq 1 50); do pgrep -x sisyphus >/dev/null || exit 0; sleep 0.2; done; \
@@ -41,7 +44,7 @@ stop:
 # Starts this checkout's build (a worktree's too): through the LaunchAgent if it's
 # installed, re-rendered to point here, else in the background. Either way it logs
 # to $(LOG). A running sisyphus is stopped first; launchd only reads the plist on bootstrap.
-start: build stop
+start: build stop ## build and start this checkout's sisyphus
 	@if [ -f $(PLIST) ]; then \
 		$(MAKE) --no-print-directory -s plist && \
 		launchctl bootstrap gui/$$(id -u) $(PLIST) && \
@@ -50,26 +53,25 @@ start: build stop
 			{ echo "sisyphus didn't start; see $(LOG) and: launchctl print gui/$$(id -u)/$(LABEL)" >&2; exit 1; }; \
 	else mkdir -p $(dir $(LOG)) && nohup $(CURDIR)/bin/sisyphus >> $(LOG) 2>&1 & echo "sisyphus started, logging to $(LOG)"; fi
 
-restart: stop start
-
+restart: stop start ## stop, then start
 # Wipes sisyphus's state and starts it again: review containers, review history and
 # run dirs, the worktrees it created, and what it tracks; the restart rediscovers PRs
 # as new. Everything by default; PR='owner/repo#n' for one PR.
-reset: build stop
+reset: build stop ## wipe sisyphus's state and start again (PR='owner/repo#n' for one PR)
 	bin/sisyphus -reset '$(or $(PR),all)'
 	@$(MAKE) --no-print-directory start
 
 # A shell in the container a review of PR='owner/repo#n' would run in, with its
 # stack up; next to the running app.
-shell: build
+shell: build ## shell in a review container (PR='owner/repo#n')
 	@test -n '$(PR)' || { echo "usage: make shell PR='owner/repo#n'" >&2; exit 1; }
 	bin/sisyphus -shell '$(PR)'
 
-install-agent: build plist
+install-agent: build plist ## build and install the LaunchAgent
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	launchctl bootstrap gui/$$(id -u) $(PLIST)
 
-uninstall-agent:
+uninstall-agent: ## remove the LaunchAgent
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	rm -f $(PLIST)
 
@@ -79,7 +81,7 @@ uninstall-agent:
 CLAUDE_CODE_VERSION := 2.1.306
 FIDESPLUS ?= $(HOME)/Dev/fidesplus
 
-reviewer-image: reviewer-plugins
+reviewer-image: reviewer-plugins ## build the fidesplus reviewer image
 	docker build --target devcontainer --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
 		-t sisyphus-base:fidesplus $(FIDESPLUS)
 	docker build -t sisyphus-reviewer:fidesplus reviewer
@@ -93,7 +95,7 @@ STAGE := reviewer/staged
 PLUGINS := ethyca-talos@ethyca-private superpowers@claude-plugins-official
 USER_SKILLS := adversarial-review
 
-reviewer-plugins:
+reviewer-plugins: ## stage this machine's Claude plugins for the reviewer image
 	rm -rf $(STAGE) && mkdir -p $(STAGE)/user-skills/.claude-plugin $(STAGE)/user-skills/skills
 	@for p in $(PLUGINS); do \
 		src=$$(jq -er --arg p $$p '.plugins[$$p][0].installPath' $(HOME)/.claude/plugins/installed_plugins.json) || \
