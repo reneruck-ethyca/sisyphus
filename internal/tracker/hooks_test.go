@@ -47,7 +47,7 @@ func TestSyncWithRetry(t *testing.T) {
 
 func TestRunHookEnvAndDir(t *testing.T) {
 	dir := t.TempDir()
-	err := runHook(context.Background(), `printf %s "$SISYPHUS_PR_URL" > out`, time.Minute, dir,
+	err := RunHook(context.Background(), `printf %s "$SISYPHUS_PR_URL" > out`, time.Minute, dir,
 		map[string]string{"SISYPHUS_PR_URL": "https://x/pull/1"})
 	b, _ := os.ReadFile(filepath.Join(dir, "out"))
 	if err != nil || string(b) != "https://x/pull/1" {
@@ -57,7 +57,7 @@ func TestRunHookEnvAndDir(t *testing.T) {
 
 func TestRunHookTimeout(t *testing.T) {
 	start := time.Now()
-	if err := runHook(context.Background(), "sleep 5", 100*time.Millisecond, t.TempDir(), nil); err == nil {
+	if err := RunHook(context.Background(), "sleep 5", 100*time.Millisecond, t.TempDir(), nil); err == nil {
 		t.Fatal("want timeout error")
 	}
 	if time.Since(start) > 2*time.Second {

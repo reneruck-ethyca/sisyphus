@@ -1,0 +1,234 @@
+package lastmile
+
+import (
+	"cmp"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/proc"
+	"github.com/reneruck/sisyphus/internal/worktree"
+)
+
+// InvalidError is a handoff TLM refuses: the reason is for whoever sent it.
+type InvalidError string
+
+func (e InvalidError) Error() string { return string(e) }
+
+func invalid(format string, args ...any) error { return InvalidError(fmt.Sprintf(format, args...)) }
+
+var (
+	jiraKey   = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+	unsafeID  = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+	reviewer  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$`)
+	labelSafe = regexp.MustCompile(`^[^,\n]+$`) // gh takes labels and reviewers as comma lists
+)
+
+// Handoff validates req, records the handoff and returns it. The worktree
+// must be clean, its branch ahead of origin/<base> and in a configured repo,
+// and not already owned by an open handoff. From here on TLM owns the worktree.
+func (m *Manager) Handoff(ctx context.Context, req Request) (Handoff, error) {
+	h, err := m.parse(req)
+	if err != nil {
+		return Handoff{}, err
+	}
+	if err := m.inspect(ctx, &h); err != nil {
+		return Handoff{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i := slices.IndexFunc(m.handoffs, func(o Handoff) bool {
+		return o.Repo == h.Repo && o.Branch == h.Branch && !Terminal(o.State)
+	}); i >= 0 {
+		return Handoff{}, invalid("branch %s of %s is already owned by handoff %s (%s)", h.Branch, h.Repo, m.handoffs[i].ID, m.handoffs[i].State)
+	}
+	for { // 4 hex digits: a clash is possible, so draw again
+		h.ID = newID(h.Repo, h.Branch)
+		if !slices.ContainsFunc(m.handoffs, func(o Handoff) bool { return o.ID == h.ID }) {
+			break
+		}
+	}
+	m.handoffs = append(m.handoffs, h)
+	if err := m.saveLocked(); err != nil {
+		m.handoffs = m.handoffs[:len(m.handoffs)-1]
+		return Handoff{}, err
+	}
+	m.Kick()
+	return h, nil
+}
+
+// parse checks what req says by itself, without looking at the worktree.
+func (m *Manager) parse(req Request) (Handoff, error) {
+	h := Handoff{Worktree: filepath.Clean(req.Worktree), Base: req.Base, StackParent: req.StackParent, Title: strings.TrimSpace(req.Title),
+		Body: req.Body, Jira: req.Jira, Draft: req.Draft, Notify: req.Notify, Requester: req.Requester,
+		State: StateHandedOff, MaxFixRounds: req.MaxFixRounds}
+	if !filepath.IsAbs(req.Worktree) {
+		return h, invalid("worktree must be an absolute path")
+	}
+	if req.Base == "" || !worktree.ValidBranch(context.Background(), req.Base) {
+		return h, invalid("base %q isn't a branch name", req.Base)
+	}
+	if req.Jira != "" && !jiraKey.MatchString(req.Jira) {
+		return h, invalid("jira %q isn't a ticket key like ENG-1234", req.Jira)
+	}
+	var err error
+	if h.Autonomy, err = ParseAutonomy(req.Autonomy); err != nil {
+		return h, err
+	}
+	if h.Agent, err = m.parseAgent(req.Agent); err != nil {
+		return h, err
+	}
+	if h.MaxFixRounds < 0 {
+		return h, invalid("max_fix_rounds must be >= 0")
+	}
+	h.MaxFixRounds = cmp.Or(h.MaxFixRounds, m.cfg.LastMile.MaxFixRounds)
+	for _, l := range req.Labels {
+		if l = strings.TrimSpace(l); !labelSafe.MatchString(l) {
+			return h, invalid("label %q is empty or has a comma", l)
+		}
+		h.Labels = append(h.Labels, l)
+	}
+	for _, r := range req.Reviewers {
+		if r = strings.TrimSpace(r); !reviewer.MatchString(r) {
+			return h, invalid("reviewer %q isn't a GitHub login", r)
+		}
+		h.Reviewers = append(h.Reviewers, r)
+	}
+	if h.Notify != "" {
+		if _, err := parseNotify(h.Notify); err != nil {
+			return h, invalid("notify template: %v", err)
+		}
+	}
+	for _, e := range req.NotifyOn {
+		if !slices.Contains(events, e) {
+			return h, invalid("notify_on %q isn't one of %s", e, strings.Join(events, ", "))
+		}
+	}
+	if len(req.NotifyOn) > 0 && h.Notify == "" {
+		return h, invalid("notify_on needs a notify command")
+	}
+	h.NotifyOn = req.NotifyOn
+	if h.Notify != "" && len(h.NotifyOn) == 0 {
+		h.NotifyOn = slices.Clone(defaultNotifyOn)
+	}
+	return h, nil
+}
+
+// ParseAutonomy reads "fix-ci,address-reviews,merge=off|shadow"; "" allows nothing.
+func ParseAutonomy(s string) (Autonomy, error) {
+	a := Autonomy{Merge: MergeOff}
+	for _, tok := range strings.Split(s, ",") {
+		switch tok = strings.TrimSpace(tok); tok {
+		case "":
+		case "fix-ci":
+			a.FixCI = true
+		case "address-reviews":
+			a.AddressReviews = true
+		case "merge=" + MergeOff, "merge=" + MergeShadow:
+			a.Merge = strings.TrimPrefix(tok, "merge=")
+		case "merge=" + MergeAuto:
+			return a, invalid("merge=auto is not supported yet")
+		default:
+			return a, invalid("autonomy %q isn't fix-ci, address-reviews or merge=off|shadow", tok)
+		}
+	}
+	return a, nil
+}
+
+// parseAgent reads "vendor:model[:effort]"; "" is the review agent.
+func (m *Manager) parseAgent(s string) (config.Agent, error) {
+	if s == "" {
+		return m.cfg.Review.Agent, nil
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return config.Agent{}, invalid("agent %q isn't vendor:model:effort", s)
+	}
+	a := config.Agent{Vendor: parts[0], Model: parts[1]}
+	if len(parts) == 3 {
+		a.Effort = parts[2]
+	}
+	if err := a.Check(); err != nil {
+		return a, invalid("agent %q: %v", s, err)
+	}
+	return a, nil
+}
+
+// inspect fills h from the worktree and checks it can be handed over.
+func (m *Manager) inspect(ctx context.Context, h *Handoff) error {
+	git := func(args ...string) (string, error) { return proc.Run(ctx, h.Worktree, "git", args...) }
+	branch, err := git("symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return invalid("%s has no branch checked out: %v", h.Worktree, err)
+	}
+	h.Branch = branch
+	// ponytail: the raw remote URL, not `remote get-url`, which expands insteadOf aliases into something we can't read.
+	remote, err := git("config", "--get", "remote.origin.url")
+	if err != nil {
+		return invalid("%s has no origin remote", h.Worktree)
+	}
+	if h.Repo, err = ParseRepo(remote); err != nil {
+		return err
+	}
+	if _, ok := m.cfg.Review.Repos[h.Repo]; !ok {
+		return invalid("%s isn't in review.repos, so it has no image or setup", h.Repo)
+	}
+	if _, err := git("fetch", "--quiet", "origin", fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", h.Base, h.Base)); err != nil {
+		return invalid("fetching base %s: %v", h.Base, err)
+	}
+	// Untracked files don't count: wtp hooks copy untracked config into worktrees.
+	status, err := git("status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return err
+	}
+	if status != "" {
+		return invalid("worktree isn't clean: commit or discard its changes first")
+	}
+	ahead, err := git("rev-list", "--count", "origin/"+h.Base+"..HEAD")
+	if err != nil {
+		return err
+	}
+	if n, _ := strconv.Atoi(ahead); n == 0 {
+		return invalid("branch %s has no commits ahead of origin/%s", h.Branch, h.Base)
+	}
+	if h.Title == "" {
+		if h.Title, err = git("log", "-1", "--format=%s"); err != nil {
+			return err
+		}
+	}
+	now := time.Now()
+	h.Created, h.Updated = now, now
+	return nil
+}
+
+// ParseRepo reads "owner/name" from a GitHub remote URL (https, ssh or scp-style).
+func ParseRepo(remote string) (string, error) {
+	path := remote
+	if u, err := url.Parse(remote); err == nil && u.Host != "" {
+		path = u.Path
+	} else if _, after, ok := strings.Cut(remote, ":"); ok { // git@github.com:owner/name.git
+		path = after
+	}
+	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	if owner, name, ok := strings.Cut(path, "/"); ok && owner != "" && name != "" && !strings.Contains(name, "/") {
+		return path, nil
+	}
+	return "", invalid("can't read owner/name from remote %q", remote)
+}
+
+// newID is "<repo>-<branch>-<4 hex>", safe in paths, labels and shell words.
+func newID(repo, branch string) string {
+	var b [2]byte
+	_, _ = rand.Read(b[:])
+	slug := strings.Trim(unsafeID.ReplaceAllString(branch, "-"), "-.")
+	return fmt.Sprintf("%s-%s-%s", filepath.Base(repo), slug, hex.EncodeToString(b[:]))
+}

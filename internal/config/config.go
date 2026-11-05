@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -50,7 +51,64 @@ type Config struct {
 	HookTimeout   Duration          `json:"hook_timeout"`
 	HTTPAddr      string            `json:"http_addr"` // dashboard + JSON API
 	Review        Review            `json:"review"`
+	LastMile      LastMile          `json:"lastmile"`
 	Path          string            `json:"-"` // the file this was loaded from
+}
+
+// LastMile configures the-last-mile (TLM): PRs handed off by agents, taken to merge.
+type LastMile struct {
+	Disabled        bool                 `json:"disabled"`
+	Interval        Duration             `json:"interval"`          // between ticks over the open handoffs
+	BotReviewer     string               `json:"bot_reviewer"`      // requested on every PR once ready ("" = none)
+	Reviewers       Reviewers            `json:"reviewers"`         // human reviewers when a handoff names none
+	RepoReviewers   map[string]Reviewers `json:"repo_reviewers"`    // per "owner/name"; replaces Reviewers for that repo
+	MaxFixRounds    int                  `json:"max_fix_rounds"`    // default of a handoff's --max-fix-rounds
+	NeedsHumanLabel string               `json:"needs_human_label"` // put on a PR that waits for a human
+}
+
+// Reviewers is a roster TLM picks human reviewers from, round-robin.
+type Reviewers struct {
+	Roster []string `json:"roster"`
+	Count  int      `json:"count"` // how many to request; 0 = the global count (or 1)
+}
+
+// ReviewersFor is the roster for repo: its override, else the global one.
+func (l LastMile) ReviewersFor(repo string) Reviewers {
+	r, ok := l.RepoReviewers[repo]
+	if !ok {
+		r = l.Reviewers
+	}
+	if r.Count == 0 {
+		r.Count = max(l.Reviewers.Count, 1)
+	}
+	return r
+}
+
+func (l LastMile) check() error {
+	if l.Disabled {
+		return nil
+	}
+	if l.Interval.Duration <= 0 || l.MaxFixRounds < 1 || l.NeedsHumanLabel == "" {
+		return errors.New("needs a positive interval, max_fix_rounds >= 1 and a needs_human_label")
+	}
+	check := func(where string, r Reviewers) error {
+		if r.Count < 0 || slices.Contains(r.Roster, "") {
+			return fmt.Errorf("%s: count must be >= 0 and the roster logins non-empty", where)
+		}
+		return nil
+	}
+	if err := check("reviewers", l.Reviewers); err != nil {
+		return err
+	}
+	for repo, r := range l.RepoReviewers {
+		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("repo_reviewers key %q must be owner/name", repo)
+		}
+		if err := check(fmt.Sprintf("repo_reviewers[%q]", repo), r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Agent selects the CLI and its model settings for one review.
@@ -257,6 +315,9 @@ func parse(path string, b []byte) (Config, error) {
 	if err := cfg.Review.check(); err != nil {
 		return cfg, fmt.Errorf("config %s: review: %w", path, err)
 	}
+	if err := cfg.LastMile.check(); err != nil {
+		return cfg, fmt.Errorf("config %s: lastmile: %w", path, err)
+	}
 	return cfg, nil
 }
 
@@ -283,6 +344,13 @@ func defaults() Config {
 			Retries:       3,
 			RetryBackoff:  Duration{2 * time.Minute},
 			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus, "ethyca/fides-qa": fidesQA},
+		},
+		LastMile: LastMile{
+			Interval:        Duration{2 * time.Minute},
+			BotReviewer:     "EthycaBot",
+			Reviewers:       Reviewers{Count: 1},
+			MaxFixRounds:    3,
+			NeedsHumanLabel: "tlm:needs-human",
 		},
 	}
 }

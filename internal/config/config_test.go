@@ -178,3 +178,52 @@ func TestLoadConfigStack(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfigLastMile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	p := filepath.Join(home, "c.json")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := cfg.LastMile
+	if l.Disabled || l.Interval.Duration != 2*time.Minute || l.BotReviewer != "EthycaBot" || l.Reviewers.Count != 1 ||
+		l.MaxFixRounds != 3 || l.NeedsHumanLabel != "tlm:needs-human" {
+		t.Errorf("bad lastmile defaults: %+v", l)
+	}
+
+	os.WriteFile(p, []byte(`{"lastmile": {"interval": "30s", "reviewers": {"roster": ["a", "b"]},
+		"repo_reviewers": {"ethyca/fides-qa": {"roster": ["c"], "count": 2}}}}`), 0o644)
+	if cfg, err = Load(p); err != nil {
+		t.Fatal(err)
+	}
+	l = cfg.LastMile
+	if l.Interval.Duration != 30*time.Second || l.BotReviewer != "EthycaBot" || l.MaxFixRounds != 3 {
+		t.Errorf("lastmile = %+v (unset keys keep their defaults)", l)
+	}
+	if r := l.ReviewersFor("ethyca/fidesplus"); len(r.Roster) != 2 || r.Count != 1 {
+		t.Errorf("global roster = %+v", r)
+	}
+	if r := l.ReviewersFor("ethyca/fides-qa"); len(r.Roster) != 1 || r.Count != 2 {
+		t.Errorf("repo roster = %+v", r)
+	}
+
+	for _, bad := range []string{
+		`{"lastmile": {"interval": "0s"}}`,
+		`{"lastmile": {"max_fix_rounds": 0}}`,
+		`{"lastmile": {"needs_human_label": ""}}`,
+		`{"lastmile": {"reviewers": {"roster": [""]}}}`,
+		`{"lastmile": {"reviewers": {"count": -1}}}`,
+		`{"lastmile": {"repo_reviewers": {"fidesplus": {"roster": ["a"]}}}}`,
+	} {
+		os.WriteFile(p, []byte(bad), 0o644)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s should be rejected", bad)
+		}
+	}
+	os.WriteFile(p, []byte(`{"lastmile": {"disabled": true, "max_fix_rounds": 0}}`), 0o644)
+	if _, err := Load(p); err != nil {
+		t.Errorf("a disabled section isn't checked: %v", err)
+	}
+}

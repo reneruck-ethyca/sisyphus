@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/reneruck/sisyphus/internal/container"
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/gittest"
+	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/reneruck/sisyphus/internal/testkit"
 	"github.com/reneruck/sisyphus/internal/tracker"
@@ -573,5 +575,83 @@ func TestHTTPOpen(t *testing.T) {
 	}
 	if want := []string{"https://github.com/ethyca/a/pull/1", run.Dir}; !slices.Equal(opened, want) {
 		t.Fatalf("opened %v, want %v", opened, want)
+	}
+}
+
+// handoffServer serves an app whose last mile can take a handoff of the returned clone (feature/x, one commit ahead of main).
+func handoffServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	upstream, clone := gittest.Setup(t)
+	gittest.Git(t, clone, "config", "url."+upstream+".insteadOf", "https://github.com/ethyca/fidesplus.git")
+	gittest.Git(t, clone, "remote", "set-url", "origin", "https://github.com/ethyca/fidesplus.git")
+	cfg, tr := testkit.Tracker(t, &github.Fake{})
+	cfg.Review.Repos = map[string]config.RepoReview{"ethyca/fidesplus": {Image: "i"}}
+	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
+	var err error
+	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(newHandler(svc))
+	t.Cleanup(srv.Close)
+	return srv, clone
+}
+
+func post(t *testing.T, url, body string) (int, string) {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestHTTPHandoffs(t *testing.T) {
+	srv, clone := handoffServer(t)
+	if code, body := get(t, srv.URL+"/api/handoffs"); code != 200 || strings.TrimSpace(body) != "[]" {
+		t.Fatalf("empty list = %d %s", code, body)
+	}
+	code, body := post(t, srv.URL+"/api/handoffs", `{"worktree": `+strconv.Quote(clone)+`, "base": "main", "autonomy": "fix-ci", "requester": "orca"}`)
+	var h lastmile.Handoff
+	if err := json.Unmarshal([]byte(body), &h); code != 201 || err != nil || h.ID == "" || h.State != lastmile.StateHandedOff || h.Repo != "ethyca/fidesplus" {
+		t.Fatalf("create = %d %v %s", code, err, body)
+	}
+	if code, body := get(t, srv.URL+"/api/handoffs/"+h.ID); code != 200 || !strings.Contains(body, h.ID) {
+		t.Errorf("get = %d %s", code, body)
+	}
+	if code, body := get(t, srv.URL+"/api/handoffs"); code != 200 || !strings.Contains(body, h.ID) {
+		t.Errorf("list = %d %s", code, body)
+	}
+	if code, _ := get(t, srv.URL+"/api/handoffs/nope"); code != 404 {
+		t.Errorf("unknown id = %d, want 404", code)
+	}
+
+	for name, c := range map[string]struct{ body, want string }{
+		"owned":      {`{"worktree": ` + strconv.Quote(clone) + `, "base": "main"}`, "already owned"},
+		"merge auto": {`{"worktree": ` + strconv.Quote(clone) + `, "base": "main", "autonomy": "merge=auto"}`, "not supported yet"},
+		"no base":    {`{"worktree": ` + strconv.Quote(clone) + `}`, "base"},
+	} {
+		if code, body := post(t, srv.URL+"/api/handoffs", c.body); code != 400 || !strings.Contains(body, c.want) {
+			t.Errorf("%s = %d %s, want 400 containing %q", name, code, body, c.want)
+		}
+	}
+	for _, bad := range []string{`nope`, `{"worktree": "/x", "base": "main", "surprise": 1}`} {
+		if code, _ := post(t, srv.URL+"/api/handoffs", bad); code != 400 {
+			t.Errorf("%s = %d, want 400", bad, code)
+		}
+	}
+}
+
+func TestHTTPHandoffsDisabled(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	if code, body := get(t, srv.URL+"/api/handoffs"); code != 200 || strings.TrimSpace(body) != "[]" {
+		t.Errorf("list = %d %s", code, body)
+	}
+	if code, _ := get(t, srv.URL+"/api/handoffs/x"); code != 404 {
+		t.Errorf("get = %d, want 404", code)
+	}
+	if code, _ := post(t, srv.URL+"/api/handoffs", `{"worktree": "/x", "base": "main"}`); code != 503 {
+		t.Errorf("create = %d, want 503", code)
 	}
 }

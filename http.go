@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/reneruck/sisyphus/internal/app"
 	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
@@ -235,6 +237,38 @@ func newHandler(svc *app.Service) http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/handoffs", func(w http.ResponseWriter, r *http.Request) {
+		var req lastmile.Request
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		h, err := svc.Handoff(r.Context(), req)
+		var invalid lastmile.InvalidError
+		switch {
+		case errors.As(err, &invalid):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, app.ErrLastMileDisabled):
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			writeJSON(w, http.StatusCreated, h)
+		}
+	})
+	mux.HandleFunc("GET /api/handoffs", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, svc.Handoffs())
+	})
+	mux.HandleFunc("GET /api/handoffs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		h, ok := svc.HandoffByID(r.PathValue("id"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, h)
 	})
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()

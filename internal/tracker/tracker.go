@@ -446,7 +446,7 @@ func (t *Tracker) sync(ctx context.Context, tr *Tracked) {
 	// waits for a new push instead of re-running the hook every tick.
 	if hook := t.cfg.Hooks["on_conflict"]; hook != "" && tr.ConflictHeadSHA != tr.HeadSHA {
 		onConflict = func(reason string) error {
-			return runHook(ctx, hook, t.cfg.HookTimeout.Duration, tr.Worktree, map[string]string{
+			return RunHook(ctx, hook, t.cfg.HookTimeout.Duration, tr.Worktree, map[string]string{
 				"SISYPHUS_HOOK": "on_conflict", "SISYPHUS_PR_URL": tr.URL, "SISYPHUS_REPO": tr.Repo,
 				"SISYPHUS_PR_NUMBER": strconv.Itoa(tr.Number), "SISYPHUS_BRANCH": tr.HeadRef,
 				"SISYPHUS_WORKTREE": tr.Worktree, "SISYPHUS_CONFLICT_REASON": reason,

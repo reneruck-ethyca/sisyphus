@@ -10,6 +10,7 @@ export CGO_LDFLAGS := -mmacosx-version-min=13.0
 # production tag: no devtools/inspector in the window.
 build:
 	go build -tags production -o bin/sisyphus .
+	ln -sf sisyphus bin/tlm
 
 test:
 	go test -race ./...

@@ -21,6 +21,7 @@ import (
 	"github.com/reneruck/sisyphus/internal/container"
 	"github.com/reneruck/sisyphus/internal/eval"
 	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
@@ -35,6 +36,12 @@ func checkTools(names ...string) error {
 }
 
 func main() {
+	// `tlm …` (the symlink) and `sisyphus tlm …` talk to the running app's API; no tools, no tray.
+	if filepath.Base(os.Args[0]) == "tlm" {
+		os.Exit(runTLM(os.Args[1:], os.Stdout, os.Stderr))
+	} else if len(os.Args) > 1 && os.Args[1] == "tlm" {
+		os.Exit(runTLM(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	configPath := flag.String("config", config.DefaultPath(), "config file (optional)")
 	once := flag.Bool("once", false, "run a single tick and exit (no tray)")
 	reset := flag.String("reset", "", `wipe state for one PR ("owner/repo#n") or "all", then exit; stop the app first (make reset does)`)
@@ -104,6 +111,11 @@ func main() {
 		return
 	}
 	svc := app.NewService(cfg, tr, rev, logs)
+	if !cfg.LastMile.Disabled {
+		if svc.LastMile, err = lastmile.New(cfg, gh, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
+			fatal(err)
+		}
+	}
 	slog.Info("sisyphus starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
 
 	if *once {

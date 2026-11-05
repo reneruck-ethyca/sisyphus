@@ -15,9 +15,9 @@ import (
 
 const maxHookRuns = 3
 
-// runHook runs a user hook via `sh -c` in dir and waits for it, killing the
+// RunHook runs a user hook via `sh -c` in dir and waits for it, killing the
 // whole process group on timeout. env entries are added to the environment.
-func runHook(ctx context.Context, command string, timeout time.Duration, dir string, env map[string]string) error {
+func RunHook(ctx context.Context, command string, timeout time.Duration, dir string, env map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)

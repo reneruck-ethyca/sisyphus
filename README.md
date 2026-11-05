@@ -293,6 +293,47 @@ is `~/.config/sisyphus/eval/cases/`. A case:
 `sha` is the head the gold review saw and `cutoff` when it was written; `base` overrides the diff base
 (needed when the PR was merged with a merge commit).
 
+## Last mile (TLM)
+
+An agent that finished a branch hands it over instead of babysitting the PR; sisyphus then owns the
+worktree (the agent must not touch it again). So far a handoff is checked and recorded; opening the PR
+and everything after it comes in later phases.
+
+```
+tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
+  --labels a,b --reviewers alice,bob --draft \
+  --autonomy fix-ci,address-reviews,merge=off|shadow \
+  --notify '<command template>' --notify-on merged,needs-human,closed \
+  --agent claude:opus:medium --max-fix-rounds 3 --stack-parent <id|branch> --requester <who>
+tlm status <id> [--json]
+tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
+```
+
+`tlm` is `sisyphus tlm` (`make build` links `bin/tlm`); it talks to the running app at `http_addr`
+(`--addr` overrides it). `handoff` prints the id; everything afterwards is keyed by it. A handoff is
+refused (400, with the reason) unless the worktree is clean (untracked files don't count), its branch
+has commits ahead of `origin/<base>`, its repo is in `review.repos`, and no open handoff owns the
+branch. `merge=auto` isn't supported yet. `wait` polls every 15s and exits 0 at one of the `--until`
+states or when the handoff is merged or closed.
+
+`--notify` is a Go `text/template` run through `sh -c` in the worktree on the `--notify-on` events
+(`pr-opened`, `merged`, `needs-human`, `closed`, `stack-parent-merged`). Fields: `ID`, `Event`, `Repo`,
+`Branch`, `PRURL`, `PRNumber`, `State`, `Reason`, `Requester`; each is shell-quoted when rendered, and also
+in the environment as `TLM_ID`, `TLM_EVENT`, …. A failing command is logged, never fatal.
+
+API: `POST /api/handoffs` (JSON body with the flags' names in snake_case; 201 with the handoff),
+`GET /api/handoffs`, `GET /api/handoffs/{id}`. Handoffs are kept in `lastmile.json` next to the state file.
+
+| Field | Default | |
+|---|---|---|
+| `lastmile.disabled` | `false` | no handoffs |
+| `lastmile.interval` | `2m` | between ticks over the open handoffs |
+| `lastmile.bot_reviewer` | `EthycaBot` | requested on every PR once it's ready |
+| `lastmile.reviewers` | `{"roster":[],"count":1}` | human reviewers when a handoff names none |
+| `lastmile.repo_reviewers` | `{}` | per `owner/name`: replaces `reviewers` for that repo |
+| `lastmile.max_fix_rounds` | `3` | default of `--max-fix-rounds` |
+| `lastmile.needs_human_label` | `tlm:needs-human` | label of a PR that waits for a human |
+
 ## `on_conflict` hook
 
 Runs via `sh -c` with the worktree as cwd, at most 3 times per PR head (sync is retried after
@@ -315,6 +356,7 @@ it: a queue, review containers running Claude Code, local stacks, run records an
 | `internal/container` | `Runtime` interface; `Docker` (docker CLI) and `Fake` |
 | `internal/worktree` | git/wtp operations |
 | `internal/github` | `Client` interface; `CLI` (gh) and `Fake` |
+| `internal/lastmile` | the-last-mile: handoffs, their store, notify |
 | `internal/config` | config file, defaults, the settings the UIs edit |
 | `internal/app` | `Service`: the boundary UIs talk to |
 | `internal/proc`, `internal/jsonfile` | external commands with timeouts; atomic JSON state files |

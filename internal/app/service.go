@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
@@ -164,6 +165,9 @@ func health(tr tracker.Tracked) string {
 // owns the run loop and hands out copies; the tracker locks, so PR actions and
 // a running tick serialise there.
 type Service struct {
+	// LastMile takes handoffs; nil when lastmile.disabled. Set before Run.
+	LastMile *lastmile.Manager
+
 	cfg     config.Config
 	tracker *tracker.Tracker
 	rev     *review.Reviewer // nil when reviews are disabled
@@ -382,6 +386,9 @@ func (s *Service) RunQueued() bool { return len(s.runNow) > 0 }
 // Ticks never overlap. Reviews run alongside; leftover review containers are
 // re-attached before the first tick so it won't sync a worktree still in use.
 func (s *Service) Run(ctx context.Context) {
+	if s.LastMile != nil {
+		go s.LastMile.Run(ctx)
+	}
 	if s.rev != nil {
 		s.rev.Reattach(ctx)
 		go s.rev.Run(ctx)
@@ -528,4 +535,31 @@ func (s *Service) SaveSettings(values map[string]any) error {
 	}
 	slog.Info("settings saved, restart to apply", "file", s.cfg.Path, "changed", slices.Sorted(maps.Keys(values)))
 	return nil
+}
+
+// ErrLastMileDisabled is what handoffs get when lastmile.disabled is set.
+var ErrLastMileDisabled = errors.New("the last mile is disabled (lastmile.disabled)")
+
+// Handoff takes a branch over for TLM (see lastmile.Manager.Handoff).
+func (s *Service) Handoff(ctx context.Context, req lastmile.Request) (lastmile.Handoff, error) {
+	if s.LastMile == nil {
+		return lastmile.Handoff{}, ErrLastMileDisabled
+	}
+	return s.LastMile.Handoff(ctx, req)
+}
+
+// Handoffs lists the handoffs, oldest first; never nil.
+func (s *Service) Handoffs() []lastmile.Handoff {
+	if s.LastMile == nil {
+		return []lastmile.Handoff{}
+	}
+	return s.LastMile.List()
+}
+
+// HandoffByID returns one handoff.
+func (s *Service) HandoffByID(id string) (lastmile.Handoff, bool) {
+	if s.LastMile == nil {
+		return lastmile.Handoff{}, false
+	}
+	return s.LastMile.Get(id)
 }
