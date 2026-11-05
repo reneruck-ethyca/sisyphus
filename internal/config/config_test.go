@@ -215,7 +215,6 @@ func TestLoadConfigLastMile(t *testing.T) {
 		`{"lastmile": {"flakes": ["("]}}`,
 		`{"lastmile": {"max_diff_lines": 0}}`,
 		`{"lastmile": {"flake_reruns": -1}}`,
-		`{"lastmile": {"repo_checks": {"nope": "true"}}}`,
 		`{"lastmile": {"needs_human_label": ""}}`,
 		`{"lastmile": {"reviewers": {"roster": [""]}}}`,
 		`{"lastmile": {"reviewers": {"count": -1}}}`,

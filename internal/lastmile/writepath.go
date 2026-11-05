@@ -9,24 +9,35 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/reneruck/sisyphus/internal/proc"
 	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
-// denied are the paths an agent never changes unless lastmile.allow_paths exempts them.
+// denied are the paths an agent never changes unless lastmile.allow_paths exempts
+// them. Git hook configs are here too: hooks are off for TLM's commits, but the
+// user's next commit in the worktree would run what the agent wrote.
 var denied = []string{
 	".github/workflows/**", "**/migrations/**",
 	"**/uv.lock", "**/poetry.lock", "**/package-lock.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/go.sum",
+	".husky/**", ".pre-commit-config.yaml", ".githooks/**", "lefthook.yml", ".lefthook.yml",
 }
 
-var globs = map[string]*regexp.Regexp{}
+var (
+	globsMu sync.Mutex // handoffs' write paths run concurrently
+	globs   = map[string]*regexp.Regexp{}
+)
 
 // globMatch matches a slash-separated path against a glob: * and ? stay within
 // a segment, ** crosses them, and a leading **/ also matches no directory at all.
 func globMatch(glob, p string) bool {
+	globsMu.Lock()
+	defer globsMu.Unlock()
 	re, ok := globs[glob]
 	if !ok {
 		var sb strings.Builder
@@ -49,7 +60,7 @@ func globMatch(glob, p string) bool {
 		}
 		sb.WriteString("$")
 		re = regexp.MustCompile(sb.String())
-		globs[glob] = re // ponytail: unsynchronised; the write path runs one at a time per handoff but handoffs run concurrently
+		globs[glob] = re
 	}
 	return re.MatchString(p)
 }
@@ -101,25 +112,28 @@ func changedFiles(ctx context.Context, dir string) ([]string, error) {
 	return files, nil
 }
 
-// changedLines counts added plus removed lines of the change, untracked files included.
-func changedLines(ctx context.Context, dir string, files []string) (int, error) {
+// changedLines counts added plus removed lines of the change, untracked files
+// included. A binary file has no line count to cap, so it's refused (binary).
+func changedLines(ctx context.Context, dir string, files []string) (n int, binary string, err error) {
 	out, err := proc.Run(ctx, dir, "git", "diff", "--numstat", "--no-renames", "HEAD")
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	n := 0
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) < 2 {
+		if len(f) < 3 {
 			continue
 		}
-		a, _ := strconv.Atoi(f[0]) // "-" for a binary file: counts 0 lines
+		if f[0] == "-" {
+			return 0, f[2], nil
+		}
+		a, _ := strconv.Atoi(f[0])
 		d, _ := strconv.Atoi(f[1])
 		n += a + d
 	}
 	tracked, err := proc.Run(ctx, dir, "git", "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	for _, f := range strings.Split(tracked, "\x00") {
 		if f == "" {
@@ -129,12 +143,66 @@ func changedLines(ctx context.Context, dir string, files []string) (int, error) 
 		if err != nil {
 			continue
 		}
+		if bytes.IndexByte(b, 0) >= 0 { // git's own binary test
+			return 0, f, nil
+		}
 		n += bytes.Count(b, []byte("\n"))
 		if len(b) > 0 && b[len(b)-1] != '\n' {
 			n++
 		}
 	}
-	return n, nil
+	return n, "", nil
+}
+
+// stamp is what tells a file changed without reading it.
+type stamp struct {
+	size int64
+	mod  time.Time
+	mode os.FileMode
+}
+
+// ignoredFiles stamps the worktree's gitignored files. The write path never
+// commits them, so an agent could otherwise leave something there the host runs
+// later unseen (a .venv binary, an .envrc).
+// ponytail: walks everything ignored on each agent run, node_modules included; fine
+// next to an agent run's minutes. Caches mounted as volumes are never written here.
+func ignoredFiles(ctx context.Context, dir string) (map[string]stamp, error) {
+	out, err := proc.Run(ctx, dir, "git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	files := map[string]stamp{}
+	for _, f := range strings.Split(out, "\x00") {
+		if f == "" {
+			continue
+		}
+		if fi, err := os.Lstat(filepath.Join(dir, f)); err == nil {
+			files[f] = stamp{fi.Size(), fi.ModTime(), fi.Mode()}
+		}
+	}
+	return files, nil
+}
+
+// ignoredChanges removes the ignored files the run created and names every one
+// it created or changed; a changed one can't be put back, so a human looks.
+func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([]string, error) {
+	after, err := ignoredFiles(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for f, st := range after {
+		old, ok := before[f]
+		if ok && old == st {
+			continue
+		}
+		changed = append(changed, f)
+		if !ok {
+			_ = os.Remove(filepath.Join(dir, f))
+		}
+	}
+	slices.Sort(changed)
+	return changed, nil
 }
 
 // commitAgentWork is the one way an agent's edits reach the branch (design §5):
@@ -142,13 +210,20 @@ func changedLines(ctx context.Context, dir string, files []string) (int, error) 
 // else commits it as "TLM: <summary>" and pushes. A non-empty reason means the
 // handoff needs a human, and the worktree is back at its head. The caller holds
 // the worktree lock.
-func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResult) (reason string, err error) {
+func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResult, ignoredBefore map[string]stamp) (reason string, err error) {
 	head, err := worktree.HeadSHA(ctx, h.Worktree)
 	if err != nil {
 		return "", err
 	}
 	reject := func(format string, a ...any) (string, error) {
 		return fmt.Sprintf(format, a...), worktree.Reset(ctx, h.Worktree, head)
+	}
+	ignored, err := ignoredChanges(ctx, h.Worktree, ignoredBefore)
+	if err != nil {
+		return "", err
+	}
+	if len(ignored) > 0 {
+		return reject("agent created or changed gitignored files (new ones removed): %s", strings.Join(ignored, ", "))
 	}
 	if res.Escalate {
 		return "agent escalated: " + res.EscalateReason, worktree.Reset(ctx, h.Worktree, head)
@@ -165,24 +240,24 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 			return reject("agent changed a protected path: %s", f)
 		}
 	}
-	lines, err := changedLines(ctx, h.Worktree, files)
+	lines, binary, err := changedLines(ctx, h.Worktree, files)
 	if err != nil {
 		return "", err
+	}
+	if binary != "" {
+		return reject("agent made a binary change: %s", binary)
 	}
 	if limit := m.cfg.LastMile.MaxDiffLines; lines > limit {
 		return reject("agent's change is %d lines, over max_diff_lines (%d)", lines, limit)
 	}
-	if check := m.cfg.LastMile.RepoChecks[h.Repo]; check != "" {
-		env := map[string]string{"TLM_ID": h.ID, "TLM_REPO": h.Repo, "TLM_BRANCH": h.Branch}
-		if err := m.runHook(ctx, check, m.cfg.HookTimeout.Duration, h.Worktree, env); err != nil {
-			return reject("repo check failed: %v", err)
-		}
-	}
+	// ponytail: no host-side lint/test run over the change: it would execute code the agent
+	// wrote on the host. The agent runs the repo's checks in its container; CI is the gate.
 	if _, err := proc.Run(ctx, h.Worktree, "git", "add", "-A"); err != nil {
 		return reject("git add failed: %v", err)
 	}
-	// The user's own git identity when there is one; never --no-verify.
-	args := []string{}
+	// The user's own git identity when there is one. Hooks are off: husky, pre-commit and
+	// friends read their config from the worktree, i.e. would run what the agent wrote.
+	args := []string{"-c", "core.hooksPath=/dev/null"}
 	for _, k := range []struct{ key, val string }{{"user.name", "TLM"}, {"user.email", "tlm@localhost"}} {
 		if v, err := proc.Run(ctx, h.Worktree, "git", "config", k.key); err != nil || v == "" {
 			args = append(args, "-c", k.key+"="+k.val)
@@ -198,7 +273,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 	if _, err := proc.Run(ctx, h.Worktree, "git", append(args, "commit", "-q", "-m", "TLM: "+summary)...); err != nil {
 		return reject("commit failed: %v", err)
 	}
-	if _, err := proc.Run(ctx, h.Worktree, "git", "push"); err != nil {
+	if _, err := proc.Run(ctx, h.Worktree, "git", "-c", "core.hooksPath=/dev/null", "push"); err != nil { // pre-push hooks too
 		// Unpushed work would pile onto the next round: back to the head.
 		return reject("push failed: %v", err)
 	}

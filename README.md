@@ -332,8 +332,10 @@ is told: edit files only, no git, no gh, write `/out/result.json`:
 (`body` is not acted on yet). Its edits then go through the host write path: `escalate` or no change →
 `needs-human`; a change to `.github/workflows/**`, `**/migrations/**` or a lockfile (`uv.lock`, `poetry.lock`,
 `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `go.sum`; exempt with `lastmile.allow_paths`), or more than
-`lastmile.max_diff_lines` changed lines, or a failing `lastmile.repo_checks[repo]` shell → the worktree is reset
-and `needs-human`; otherwise `git add -A`, commit `TLM: <summary>`, `git push`, back to `ci-running`. Rounds are
+`lastmile.max_diff_lines` changed lines, or a binary file → the worktree is reset and `needs-human`; otherwise
+`git add -A`, commit `TLM: <summary>`, `git push`, back to `ci-running`. Git hook configs (`.husky/**`,
+`.pre-commit-config.yaml`, …) are protected too, and TLM commits and pushes with hooks off: nothing the agent
+wrote runs on the host. The agent runs the repo's checks in its container; CI is the gate. Rounds are
 counted per trigger and capped by `max_fix_rounds`; a failure whose fingerprint already had a fix round →
 `needs-human` ("same failure twice").
 
@@ -380,7 +382,6 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.flake_reruns` | `2` | flake reruns per head SHA |
 | `lastmile.max_diff_lines` | `400` | an agent change over this many lines is discarded |
 | `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
-| `lastmile.repo_checks` | `{}` | per `owner/name`: shell run on the host over an agent's change (`hook_timeout`) |
 
 ## `on_conflict` hook
 

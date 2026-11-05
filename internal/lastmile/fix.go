@@ -172,6 +172,10 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) string {
 	if err != nil {
 		return "fix prompt: " + err.Error()
 	}
+	before, err := ignoredFiles(ctx, h.Worktree)
+	if err != nil {
+		return "listing ignored files: " + err.Error()
+	}
 	res, err := m.Tasks.RunTask(ctx, review.Task{ID: h.ID, Repo: h.Repo, Worktree: h.Worktree, Agent: h.Agent, Prompt: prompt,
 		Context: map[string]string{"snapshot.json": string(snapJSON), "failures.json": string(failJSON)}})
 	if err != nil {
@@ -182,7 +186,7 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) string {
 	if err := json.Unmarshal(res.Result, &out); err != nil {
 		return "fix agent's result.json is not valid: " + err.Error()
 	}
-	reason, err := m.commitAgentWork(ctx, h, out)
+	reason, err := m.commitAgentWork(ctx, h, out, before)
 	if err != nil {
 		slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
 		return "writing the fix failed: " + err.Error()

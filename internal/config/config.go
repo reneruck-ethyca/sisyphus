@@ -69,7 +69,6 @@ type LastMile struct {
 	FlakeReruns     int                  `json:"flake_reruns"`      // reruns per head SHA
 	MaxDiffLines    int                  `json:"max_diff_lines"`    // an agent's change above this is thrown away
 	AllowPaths      []string             `json:"allow_paths"`       // globs an agent may change although the denylist names them
-	RepoChecks      map[string]string    `json:"repo_checks"`       // per "owner/name": shell run on the host over an agent's change
 }
 
 // Reviewers is a roster TLM picks human reviewers from, round-robin.
@@ -103,11 +102,6 @@ func (l LastMile) check() error {
 	for _, f := range l.Flakes {
 		if _, err := regexp.Compile(f); err != nil {
 			return fmt.Errorf("flakes: %w", err)
-		}
-	}
-	for repo := range l.RepoChecks {
-		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-			return fmt.Errorf("repo_checks key %q must be owner/name", repo)
 		}
 	}
 	check := func(where string, r Reviewers) error {

