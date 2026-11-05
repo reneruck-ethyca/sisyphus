@@ -408,6 +408,9 @@ func TestHTTPShowsRunningContainer(t *testing.T) {
 	if a.PR != testkit.RefA.Key() || a.Run != run.ID || a.Container != run.Container || !strings.HasPrefix(a.Name, "sisyphus-ethyca-a-1-") {
 		t.Fatalf("active review = %+v", a)
 	}
+	if _, reviews := get(t, srv.URL+"/reviews"); !strings.Contains(reviews, `<a href="/reviews" aria-current="page">Reviews</a>`) {
+		t.Error("/reviews doesn't mark the Reviews tab current")
+	}
 	_, body := get(t, srv.URL+"/")
 	for _, want := range []string{`class="chip live">Reviewing`, `href="/prs/ethyca/a/1/runs/` + run.ID + `"`} {
 		if !strings.Contains(body, want) {

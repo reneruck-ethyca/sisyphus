@@ -472,7 +472,11 @@ func newHandler(svc *app.Service) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		restartSoon()
 	})
+	// ponytail: / shows the reviews until the landing dashboard exists.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		render(w, "index.html", dashboard{Status: svc.Status()})
+	})
+	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "index.html", dashboard{Status: svc.Status()})
 	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}", func(w http.ResponseWriter, r *http.Request) {
@@ -547,7 +551,7 @@ func (d dashboard) Top() topbar {
 	if d.Archive() {
 		return topbar{Status: &d.Status, Page: "history"}
 	}
-	return topbar{Status: &d.Status}
+	return topbar{Status: &d.Status, Page: "reviews"}
 }
 
 type prGroup struct {
