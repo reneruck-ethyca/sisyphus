@@ -370,7 +370,7 @@ func defaults() Config {
 			NeedsHumanLabel: "tlm:needs-human",
 			FlakeReruns:     2,
 			MaxDiffLines:    400,
-			BotLogins:       []string{"EthycaBot", "sisyphus"},
+			BotLogins:       []string{"EthycaBot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},
 	}
 }

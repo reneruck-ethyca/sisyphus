@@ -190,7 +190,7 @@ func TestLoadConfigLastMile(t *testing.T) {
 	l := cfg.LastMile
 	if l.Disabled || l.Interval.Duration != 2*time.Minute || l.BotReviewer != "EthycaBot" || l.Reviewers.Count != 1 ||
 		l.MaxFixRounds != 3 || l.NeedsHumanLabel != "tlm:needs-human" || l.FlakeReruns != 2 || l.MaxDiffLines != 400 || len(l.Flakes) != 0 ||
-		len(l.BotLogins) != 2 || l.BotLogins[0] != "EthycaBot" || l.BotLogins[1] != "sisyphus" {
+		len(l.BotLogins) != 1 || l.BotLogins[0] != "EthycaBot" {
 		t.Errorf("bad lastmile defaults: %+v", l)
 	}
 

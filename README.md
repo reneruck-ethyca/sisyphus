@@ -341,8 +341,8 @@ counted per trigger and capped by `max_fix_rounds`; a failure whose fingerprint 
 
 Review feedback: every tick reads the PR's review threads (GraphQL), review bodies (`COMMENTED` and
 `CHANGES_REQUESTED` with text) and conversation comments. Each author is marked human or bot: GitHub's
-`Bot` type, a `[bot]` login, or a login in `lastmile.bot_logins` (default `EthycaBot`, `sisyphus`: user
-accounts that act as bots). What TLM itself posted is excluded by comment id (it posts as your login). A
+`Bot` type, a `[bot]` login, or a login in `lastmile.bot_logins` (default `EthycaBot`, a user
+account that acts as a bot). What TLM itself posted is excluded by comment id (it posts as your login). A
 cursor in the handoff (per thread the last comment id, per source the last review and comment id) makes
 only items newer than what an agent was already handed "new"; the snapshot lists the unresolved threads,
 the new items, TLM's reply count per bot thread and whether a human edited the PR body. With `address-reviews`
@@ -412,7 +412,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.flake_reruns` | `2` | flake reruns per head SHA |
 | `lastmile.max_diff_lines` | `400` | an agent change over this many lines is discarded |
 | `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
-| `lastmile.bot_logins` | `["EthycaBot","sisyphus"]` | user accounts whose review feedback counts as bot feedback |
+| `lastmile.bot_logins` | `["EthycaBot"]` | user accounts whose review feedback counts as bot feedback |
 
 ## `on_conflict` hook
 
