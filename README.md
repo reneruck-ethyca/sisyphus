@@ -390,6 +390,23 @@ Whatever an agent leaves behind on any exit (a failed run, an invalid result, an
 gitignored files are removed, changed ones are named in the reason (size, mtime, mode, inode and ctime are
 compared), and the tree goes back to the head it started at. A nested git repository or `.git` entry is refused.
 
+Shadow merge (`merge=shadow`; `merge=off` is the default, `merge=auto` is refused): TLM never merges, but on
+each tick of an open, ready PR it asks the merge policy "would you merge this?" and keeps the verdict on the
+handoff (`shadow`, shown for `merge=off` handoffs too). The policy says yes when there is a current approval from
+a human (not a bot) and GitHub's decision isn't `CHANGES_REQUESTED`/`REVIEW_REQUIRED`, no approval is stale, all
+checks are green on the head, no review thread is unresolved, the base is up to date (not behind, not
+`BEHIND`/`DIRTY`), no changed file matches `lastmile.risky_paths`, additions plus deletions are within
+`lastmile.max_merge_lines`, and now is outside every `lastmile.merge_freeze` window. Each verdict lists its
+blockers and the signals it saw (diff size, risky paths, fix rounds per trigger, who approved and whether they are
+bots, time in review since the PR was first ready, flake reruns, agent commits, unresolved threads, commits
+behind, stale approvals). For `merge=shadow` handoffs a verdict is appended to `lastmile-shadow.jsonl` next to
+`lastmile.json` when it or its blockers changed, else at most once an hour; when a human merges or closes the
+PR an outcome line records what happened next to the last verdict. `GET /api/lastmile/shadow` reads the log:
+totals, an agreement matrix (last verdict yes/no against merged/closed/open), the mean time in review of merged
+PRs and a row per PR; `?pr=owner/repo%23n` or `?handoff=<id>` narrows it to one PR and adds its verdict history.
+A corrupt log line is skipped. A merge freeze window is `{"weekday": "friday", "start": "15:00", "end": "23:00",
+"tz": "Europe/Berlin"}` (`weekday` optional, `end` after `start`: split a window across midnight in two).
+
 ```
 tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
   --labels a,b --reviewers alice,bob --draft \
@@ -415,7 +432,7 @@ states or when the handoff is merged or closed.
 in the environment as `TLM_ID`, `TLM_EVENT`, …. A failing command is logged, never fatal.
 
 API: `POST /api/handoffs` (JSON body with the flags' names in snake_case; 201 with the handoff),
-`GET /api/handoffs`, `GET /api/handoffs/{id}`, `PUT /api/handoffs/{id}/reviewers`,
+`GET /api/handoffs`, `GET /api/handoffs/{id}`, `GET /api/lastmile/shadow`, `PUT /api/handoffs/{id}/reviewers`,
 `POST /api/handoffs/{id}/resume`, `POST /api/handoffs/{id}/cancel`. `tlm` sends the API token only on
 POST/PUT requests to a loopback address. The dashboard lists the
 handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.json` next to the state file.
@@ -434,6 +451,9 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.max_diff_lines` | `400` | an agent change over this many lines is discarded |
 | `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
 | `lastmile.bot_logins` | `["EthycaBot"]` | user accounts whose review feedback counts as bot feedback |
+| `lastmile.risky_paths` | migrations, auth, `.github/**`, Dockerfiles, `infra/**`, `*.tf` | globs: touching one blocks a would-merge verdict |
+| `lastmile.max_merge_lines` | `400` | additions plus deletions above this block a would-merge verdict |
+| `lastmile.merge_freeze` | `[]` | windows `{weekday?, start, end, tz}` in which a PR would not be merged |
 
 ## `on_conflict` hook
 

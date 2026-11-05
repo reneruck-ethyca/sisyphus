@@ -232,3 +232,28 @@ func TestLoadConfigLastMile(t *testing.T) {
 		t.Errorf("a disabled section isn't checked: %v", err)
 	}
 }
+
+func TestLoadMergeFreeze(t *testing.T) {
+	load := func(body string) error {
+		p := filepath.Join(t.TempDir(), "c.json")
+		os.WriteFile(p, []byte(body), 0o644)
+		_, err := Load(p)
+		return err
+	}
+	if err := load(`{"lastmile":{"merge_freeze":[{"weekday":"Friday","start":"15:00","end":"23:00","tz":"Europe/Berlin"}]}}`); err != nil {
+		t.Fatal(err)
+	}
+	for name, w := range map[string]string{
+		"crossing midnight": `{"start":"22:00","end":"06:00"}`,
+		"bad clock":         `{"start":"9am","end":"10:00"}`,
+		"bad weekday":       `{"weekday":"someday","start":"09:00","end":"10:00"}`,
+		"bad tz":            `{"start":"09:00","end":"10:00","tz":"Mars/Base"}`,
+	} {
+		if err := load(`{"lastmile":{"merge_freeze":[` + w + `]}}`); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := load(`{"lastmile":{"max_merge_lines":0}}`); err == nil {
+		t.Error("max_merge_lines 0 accepted")
+	}
+}

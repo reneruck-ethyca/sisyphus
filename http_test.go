@@ -746,3 +746,36 @@ func TestHTTPHandoffResumeCancel(t *testing.T) {
 		t.Errorf("second cancel = %d", code)
 	}
 }
+
+func TestHTTPShadowReport(t *testing.T) {
+	cfg, tr := testkit.Tracker(t, &github.Fake{})
+	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
+	srv := httptest.NewServer(newHandler(svc))
+	t.Cleanup(srv.Close)
+	if code, _ := get(t, srv.URL+"/api/lastmile/shadow"); code != 404 {
+		t.Errorf("disabled = %d", code)
+	}
+	dir := t.TempDir()
+	var err error
+	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := get(t, srv.URL+"/api/lastmile/shadow"); code != 200 || !strings.Contains(body, `"observed":0`) || !strings.Contains(body, `"prs":[]`) {
+		t.Errorf("empty = %d %s", code, body)
+	}
+	log := `{"time":"2026-11-05T10:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"head":"a","would_merge":true,"blockers":[],"signals":{}}
+garbage
+{"time":"2026-11-05T11:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"outcome":"merged","merged_by":"carol","last_verdict":null,"verdict_head_matches":true}
+`
+	os.WriteFile(filepath.Join(dir, "lastmile-shadow.jsonl"), []byte(log), 0o600)
+	code, body := get(t, srv.URL+"/api/lastmile/shadow")
+	if code != 200 || !strings.Contains(body, `"merged":1`) || !strings.Contains(body, `"would_merge_yes":{"merged":1`) || strings.Contains(body, `"history"`) {
+		t.Errorf("report = %d %s", code, body)
+	}
+	if code, body = get(t, srv.URL+"/api/lastmile/shadow?pr=o/r%231"); code != 200 || !strings.Contains(body, `"history":[`) {
+		t.Errorf("by pr = %d %s", code, body)
+	}
+	if code, _ = get(t, srv.URL+"/api/lastmile/shadow?pr=bad"); code != 400 {
+		t.Errorf("bad pr = %d", code)
+	}
+}

@@ -167,6 +167,7 @@ func (m *Manager) rerunFlakes(ctx context.Context, h *Handoff, s Snapshot) (bool
 		}
 	}
 	h.FlakeReruns++
+	h.FlakeTotal++
 	slog.Info("lastmile flake rerun", "id", h.ID, "runs", runs, "n", h.FlakeReruns)
 	return true, nil
 }

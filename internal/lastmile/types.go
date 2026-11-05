@@ -126,6 +126,7 @@ type Handoff struct {
 	FixedFailures   []string       `json:"fixed_failures,omitempty"` // fingerprints a fix round was spent on
 	FlakeHead       string         `json:"flake_head,omitempty"`     // the head SHA FlakeReruns counts for
 	FlakeReruns     int            `json:"flake_reruns,omitempty"`   // flake reruns on FlakeHead
+	FlakeTotal      int            `json:"flake_total,omitempty"`    // flake reruns over all heads, a merge-policy signal
 	Gen             int            `json:"gen,omitempty"`            // bumped by edits from outside the tick, which discard a tick in progress
 
 	// Stack bookkeeping (design §3): while StackParent is set, Base is the parent's branch.
@@ -147,6 +148,8 @@ type Handoff struct {
 	Events []Event `json:"events,omitempty"` // the last maxEvents things that happened, oldest first
 
 	Snapshot *Snapshot `json:"snapshot,omitempty"` // the PR as of the last tick
+	Shadow   *Verdict  `json:"shadow,omitempty"`   // the merge policy's latest verdict (design §7); refreshed when it changes, else hourly
+	ReadyAt  time.Time `json:"ready_at,omitempty"` // the PR was first seen out of draft: where time in review starts
 
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State

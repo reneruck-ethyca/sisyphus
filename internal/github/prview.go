@@ -14,7 +14,7 @@ import (
 
 // prViewFields is what `gh pr view --json` is asked for: one call builds most of a PR snapshot.
 const prViewFields = "number,url,state,isDraft,headRefOid,headRefName,baseRefName,mergeable,mergeStateStatus," +
-	"reviewDecision,reviews,reviewRequests,body,author,statusCheckRollup,mergedAt,closedAt,additions,deletions,files"
+	"reviewDecision,reviews,reviewRequests,body,author,statusCheckRollup,mergedAt,closedAt,mergedBy,additions,deletions,files"
 
 // Check is one CI check on a PR's head: a check run or a commit status.
 type Check struct {
@@ -46,6 +46,7 @@ type PRSnapshot struct {
 	RequestedUsers, RequestedTeams []string
 	Checks                         []Check
 	MergedAt, ClosedAt             time.Time // zero while unset
+	MergedBy                       string    // login; "" while unmerged
 	Additions, Deletions           int
 	Files                          []string
 }
@@ -82,6 +83,7 @@ func parsePRView(b []byte) (PRSnapshot, error) {
 		Author           ghAuthor  `json:"author"`
 		MergedAt         time.Time `json:"mergedAt"`
 		ClosedAt         time.Time `json:"closedAt"`
+		MergedBy         ghAuthor  `json:"mergedBy"`
 		Additions        int       `json:"additions"`
 		Deletions        int       `json:"deletions"`
 		Reviews          []struct {
@@ -120,7 +122,7 @@ func parsePRView(b []byte) (PRSnapshot, error) {
 		PRRef: PRRef{Number: v.Number}, URL: v.URL, Body: v.Body, Author: v.Author.Login, State: v.State, Draft: v.IsDraft,
 		HeadSHA: v.HeadRefOid, HeadRef: v.HeadRefName, BaseRef: v.BaseRefName,
 		Mergeable: v.Mergeable, MergeState: v.MergeStateStatus, ReviewDecision: v.ReviewDecision,
-		MergedAt: v.MergedAt, ClosedAt: v.ClosedAt, Additions: v.Additions, Deletions: v.Deletions,
+		MergedAt: v.MergedAt, ClosedAt: v.ClosedAt, MergedBy: v.MergedBy.Login, Additions: v.Additions, Deletions: v.Deletions,
 	}
 	if u, err := url.Parse(v.URL); err == nil { // https://github.com/owner/name/pull/n
 		if p := strings.Split(strings.Trim(u.Path, "/"), "/"); len(p) >= 2 {

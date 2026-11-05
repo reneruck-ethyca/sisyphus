@@ -24,6 +24,7 @@ type Approval struct {
 	User      string `json:"user"`
 	CommitSHA string `json:"commit"`
 	Stale     bool   `json:"stale"` // the head moved on after it
+	Bot       bool   `json:"bot,omitempty"`
 }
 
 // Snapshot is the PR as TLM sees it, built from one `gh pr view` plus local
@@ -45,6 +46,7 @@ type Snapshot struct {
 	Behind         int            `json:"behind"` // commits of origin/<base> the branch lacks
 	Additions      int            `json:"additions"`
 	Deletions      int            `json:"deletions"`
+	Files          []string       `json:"files,omitempty"`
 	Failures       []Failure      `json:"failures,omitempty"` // the failed checks, when CI is red
 
 	Unresolved  int            `json:"unresolved"`             // review threads not resolved
@@ -64,10 +66,10 @@ func (s Snapshot) Approved() bool {
 }
 
 // buildSnapshot reads gh's view of the PR into a Snapshot; the caller adds Behind.
-func buildSnapshot(p github.PRSnapshot, opened, now time.Time) Snapshot {
+func buildSnapshot(p github.PRSnapshot, opened, now time.Time, botLogins []string) Snapshot {
 	s := Snapshot{Head: p.HeadSHA, Author: p.Author, Draft: p.Draft, Mergeable: p.Mergeable, MergeState: p.MergeState,
 		ReviewDecision: p.ReviewDecision, Requested: p.RequestedUsers, Checks: p.Checks, Base: p.BaseRef,
-		Additions: p.Additions, Deletions: p.Deletions}
+		Additions: p.Additions, Deletions: p.Deletions, Files: p.Files}
 	s.CI = rollup(p.Checks, opened, now)
 
 	// A user's latest approval or change request stands; a plain comment doesn't replace it.
@@ -83,7 +85,7 @@ func buildSnapshot(p github.PRSnapshot, opened, now time.Time) Snapshot {
 	}
 	for _, r := range reviews { // in review order, once per user
 		if l, ok := latest[r.User]; ok && l.State == "APPROVED" && l == r {
-			s.Approvals = append(s.Approvals, Approval{User: r.User, CommitSHA: r.CommitSHA, Stale: r.CommitSHA != p.HeadSHA})
+			s.Approvals = append(s.Approvals, Approval{User: r.User, CommitSHA: r.CommitSHA, Stale: r.CommitSHA != p.HeadSHA, Bot: isBot(r.Bot, r.User, botLogins)})
 		}
 	}
 	return s

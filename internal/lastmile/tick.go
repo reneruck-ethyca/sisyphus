@@ -46,6 +46,7 @@ func (m *Manager) tick(ctx context.Context) {
 			slog.Warn("lastmile tick failed", "id", h.ID, "err", err)
 			next.Error = err.Error()
 		}
+		m.judge(&next)
 		if reflect.DeepEqual(h, next) {
 			continue
 		}
@@ -143,17 +144,22 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	}
 	switch p.State {
 	case "MERGED":
+		m.outcome(*h, p.MergedBy, p.HeadSHA, "merged", p.MergedAt)
 		m.finish(h, StateMerged)
 		return nil
 	case "CLOSED":
+		m.outcome(*h, "", p.HeadSHA, "closed", p.ClosedAt)
 		m.finish(h, StateClosed)
 		return nil
 	}
-	s := buildSnapshot(p, h.PROpened, m.now())
+	s := buildSnapshot(p, h.PROpened, m.now(), m.cfg.LastMile.BotLogins)
 	base := cmp.Or(p.BaseRef, h.Base)
 	s.Behind = m.behind(ctx, *h, base)
 	s.BodyEdited = !sameBody(p.Body, h.LastBodyWritten)
 	h.Snapshot = &s
+	if !s.Draft && h.ReadyAt.IsZero() {
+		h.ReadyAt = m.now()
+	}
 	if h.State == StateNeedsHuman { // a person has it; only merged and closed are watched
 		return nil
 	}

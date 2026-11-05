@@ -70,6 +70,62 @@ type LastMile struct {
 	MaxDiffLines    int                  `json:"max_diff_lines"`    // an agent's change above this is thrown away
 	AllowPaths      []string             `json:"allow_paths"`       // globs an agent may change although the denylist names them
 	BotLogins       []string             `json:"bot_logins"`        // user accounts that act as bots (their feedback counts as bot feedback)
+	RiskyPaths      []string             `json:"risky_paths"`       // globs: a PR touching one would not be merged by TLM
+	MaxMergeLines   int                  `json:"max_merge_lines"`   // additions+deletions above this would not be merged by TLM
+	MergeFreeze     []FreezeWindow       `json:"merge_freeze"`      // windows in which TLM would not merge
+}
+
+// FreezeWindow is a daily (or weekly, with Weekday) span in TZ in which nothing merges.
+// It does not cross midnight: write two windows.
+type FreezeWindow struct {
+	Weekday string `json:"weekday,omitempty"` // "monday".."sunday"; "" = every day
+	Start   string `json:"start"`             // "HH:MM", inclusive
+	End     string `json:"end"`               // "HH:MM", exclusive, after Start
+	TZ      string `json:"tz"`                // IANA name; "" = UTC
+}
+
+func (w FreezeWindow) parse() (day time.Weekday, all bool, start, end int, loc *time.Location, err error) {
+	all = w.Weekday == ""
+	if !all {
+		i := slices.IndexFunc(weekdays, func(d string) bool { return strings.EqualFold(d, w.Weekday) })
+		if i < 0 {
+			return 0, false, 0, 0, nil, fmt.Errorf("weekday %q is not a day name", w.Weekday)
+		}
+		day = time.Weekday(i)
+	}
+	clock := func(v string) (int, error) {
+		t, err := time.Parse("15:04", v)
+		return t.Hour()*60 + t.Minute(), err
+	}
+	if start, err = clock(w.Start); err == nil {
+		end, err = clock(w.End)
+	}
+	if err != nil {
+		return 0, false, 0, 0, nil, fmt.Errorf("start and end must be HH:MM: %w", err)
+	}
+	if end <= start {
+		return 0, false, 0, 0, nil, errors.New("end must be after start (windows do not cross midnight)")
+	}
+	loc = time.UTC
+	if w.TZ != "" {
+		if loc, err = time.LoadLocation(w.TZ); err != nil {
+			return 0, false, 0, 0, nil, err
+		}
+	}
+	return day, all, start, end, loc, nil
+}
+
+var weekdays = []string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"}
+
+// Active says t falls inside the window; an invalid window (rejected at load) never is.
+func (w FreezeWindow) Active(t time.Time) bool {
+	day, all, start, end, loc, err := w.parse()
+	if err != nil {
+		return false
+	}
+	t = t.In(loc)
+	m := t.Hour()*60 + t.Minute()
+	return (all || t.Weekday() == day) && m >= start && m < end
 }
 
 // Reviewers is a roster TLM picks human reviewers from, round-robin.
@@ -97,8 +153,13 @@ func (l LastMile) check() error {
 	if l.Interval.Duration <= 0 || l.MaxFixRounds < 1 || l.NeedsHumanLabel == "" {
 		return errors.New("needs a positive interval, max_fix_rounds >= 1 and a needs_human_label")
 	}
-	if l.FlakeReruns < 0 || l.MaxDiffLines < 1 {
-		return errors.New("needs flake_reruns >= 0 and max_diff_lines >= 1")
+	if l.FlakeReruns < 0 || l.MaxDiffLines < 1 || l.MaxMergeLines < 1 {
+		return errors.New("needs flake_reruns >= 0, max_diff_lines >= 1 and max_merge_lines >= 1")
+	}
+	for i, w := range l.MergeFreeze {
+		if _, _, _, _, _, err := w.parse(); err != nil {
+			return fmt.Errorf("merge_freeze[%d]: %w", i, err)
+		}
 	}
 	for _, f := range l.Flakes {
 		if _, err := regexp.Compile(f); err != nil {
@@ -370,6 +431,8 @@ func defaults() Config {
 			NeedsHumanLabel: "tlm:needs-human",
 			FlakeReruns:     2,
 			MaxDiffLines:    400,
+			MaxMergeLines:   400,
+			RiskyPaths:      []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"},
 			BotLogins:       []string{"EthycaBot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},
 	}

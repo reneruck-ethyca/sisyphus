@@ -577,6 +577,14 @@ func (s *Service) Handoffs() []lastmile.Handoff {
 	return s.LastMile.List()
 }
 
+// ShadowReport summarises the merge=shadow log (see lastmile.Manager.ShadowReport).
+func (s *Service) ShadowReport(q lastmile.ShadowQuery) (lastmile.ShadowReport, error) {
+	if s.LastMile == nil {
+		return lastmile.ShadowReport{}, ErrLastMileDisabled
+	}
+	return s.LastMile.ShadowReport(q)
+}
+
 // UseLastMile sets the manager handoffs go to and refreshes the dashboard when they change.
 func (s *Service) UseLastMile(m *lastmile.Manager) {
 	s.LastMile = m

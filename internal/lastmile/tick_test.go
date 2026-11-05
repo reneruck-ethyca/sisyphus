@@ -221,7 +221,7 @@ func TestSnapshotApprovals(t *testing.T) {
 		{User: "b", State: "CHANGES_REQUESTED", CommitSHA: "new", SubmittedAt: t0.Add(time.Second)},
 		{User: "c", State: "APPROVED", CommitSHA: "new", SubmittedAt: t0},
 		{User: "c", State: "COMMENTED", CommitSHA: "new", SubmittedAt: t0.Add(time.Second)},
-	}}, t0, t0)
+	}}, t0, t0, nil)
 	want := []Approval{{User: "a", CommitSHA: "old", Stale: true}, {User: "c", CommitSHA: "new"}}
 	if !reflect.DeepEqual(s.Approvals, want) || !s.Approved() {
 		t.Errorf("approvals = %+v", s.Approvals)

@@ -306,6 +306,20 @@ func newHandler(svc *app.Service) http.Handler {
 			writeJSON(w, http.StatusOK, h)
 		}
 	})
+	mux.HandleFunc("GET /api/lastmile/shadow", func(w http.ResponseWriter, r *http.Request) {
+		rep, err := svc.ShadowReport(lastmile.ShadowQuery{PR: r.URL.Query().Get("pr"), Handoff: r.URL.Query().Get("handoff")})
+		var invalid lastmile.InvalidError
+		switch {
+		case errors.Is(err, app.ErrLastMileDisabled):
+			http.NotFound(w, r)
+		case errors.As(err, &invalid):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			writeJSON(w, http.StatusOK, rep)
+		}
+	})
 	// The dashboard's buttons call these, so no token (as with the reviewers edit); the API is loopback.
 	for _, verb := range []string{"resume", "cancel"} {
 		mux.HandleFunc("POST /api/handoffs/{id}/"+verb, func(w http.ResponseWriter, r *http.Request) {
