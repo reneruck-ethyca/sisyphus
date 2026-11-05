@@ -34,6 +34,8 @@ type effects struct {
 	handed    []Item   // items the cursor moves over
 	body      *string  // the PR body TLM wrote
 	requested []string // reviewers TLM re-requested
+	rounds    int      // conflict agent runs, counted in FixRounds
+	unstack   bool     // the child now sits on the parent's old base: it is a plain handoff
 }
 
 func (e *effects) log(kind, format string, a ...any) {
@@ -59,6 +61,12 @@ func (e effects) apply(h *Handoff) {
 		h.LastBodyWritten = *e.body
 	}
 	h.Requested = union(h.Requested, e.requested...)
+	for range e.rounds {
+		h.FixRounds = bump(h.FixRounds, TriggerConflict)
+	}
+	if e.unstack {
+		h.StackParent, h.ParentHead = "", ""
+	}
 }
 
 // outcome is what an agent run found: reason "" = the work was pushed (or, for a
@@ -205,6 +213,7 @@ func bump(counts map[string]int, key string) map[string]int {
 type agentJob struct {
 	kind  string // "fix agent", "review agent": names the run in reasons
 	head  string // the head the PR shows; the worktree must be at it ("" = any)
+	held  bool   // the caller holds the worktree lock and has a rebase stopped: no lock, no clean-tree or head check
 	base  string // for the diff against origin/<base>
 	build func(diff string, truncated bool) (prompt string, files map[string]string, err error)
 }
@@ -216,17 +225,18 @@ type agentJob struct {
 // it's done, else why a human is needed. On every other exit after the agent ran
 // the worktree is put back (see cleanup).
 func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply func(raw []byte, before map[string]stamp) string) (reason string) {
-	unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
-	if err != nil {
-		return j.kind + ": " + err.Error()
-	}
-	defer unlock()
-
-	if st, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain"); err != nil || st != "" {
-		return "worktree has uncommitted changes; the " + j.kind + " would mix them in"
+	if !j.held {
+		unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
+		if err != nil {
+			return j.kind + ": " + err.Error()
+		}
+		defer unlock()
+		if st, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain"); err != nil || st != "" {
+			return "worktree has uncommitted changes; the " + j.kind + " would mix them in"
+		}
 	}
 	start, err := worktree.HeadSHA(ctx, h.Worktree)
-	if err != nil || (j.head != "" && start != j.head) {
+	if err != nil || (j.head != "" && !j.held && start != j.head) {
 		return fmt.Sprintf("worktree is at %.12s, the PR at %.12s", start, j.head)
 	}
 	diff, _ := proc.Run(ctx, h.Worktree, "git", "diff", "origin/"+j.base+"...HEAD")

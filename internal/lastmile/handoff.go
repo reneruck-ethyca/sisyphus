@@ -41,7 +41,7 @@ func (m *Manager) Handoff(ctx context.Context, req Request) (Handoff, error) {
 	if err != nil {
 		return Handoff{}, err
 	}
-	if err := m.inspect(ctx, &h); err != nil {
+	if err := m.inspect(ctx, &h, req.StackParent); err != nil {
 		return Handoff{}, err
 	}
 	m.mu.Lock()
@@ -68,7 +68,7 @@ func (m *Manager) Handoff(ctx context.Context, req Request) (Handoff, error) {
 
 // parse checks what req says by itself, without looking at the worktree.
 func (m *Manager) parse(req Request) (Handoff, error) {
-	h := Handoff{Worktree: filepath.Clean(req.Worktree), Base: req.Base, StackParent: req.StackParent, Title: strings.TrimSpace(req.Title),
+	h := Handoff{Worktree: filepath.Clean(req.Worktree), Base: req.Base, Title: strings.TrimSpace(req.Title),
 		Body: req.Body, Jira: req.Jira, Draft: req.Draft, Notify: req.Notify, Requester: req.Requester,
 		State: StateHandedOff, MaxFixRounds: req.MaxFixRounds}
 	if !filepath.IsAbs(req.Worktree) {
@@ -76,6 +76,9 @@ func (m *Manager) parse(req Request) (Handoff, error) {
 	}
 	if req.Base == "" || !worktree.ValidBranch(context.Background(), req.Base) {
 		return h, invalid("base %q isn't a branch name", req.Base)
+	}
+	if sp := req.StackParent; sp != "" && !worktree.ValidBranch(context.Background(), sp) {
+		return h, invalid("stack_parent %q isn't a handoff id or a branch name", sp)
 	}
 	if req.Jira != "" && !jiraKey.MatchString(req.Jira) {
 		return h, invalid("jira %q isn't a ticket key like ENG-1234", req.Jira)
@@ -164,7 +167,7 @@ func (m *Manager) parseAgent(s string) (config.Agent, error) {
 }
 
 // inspect fills h from the worktree and checks it can be handed over.
-func (m *Manager) inspect(ctx context.Context, h *Handoff) error {
+func (m *Manager) inspect(ctx context.Context, h *Handoff, stackParent string) error {
 	git := func(args ...string) (string, error) { return proc.Run(ctx, h.Worktree, "git", args...) }
 	branch, err := git("symbolic-ref", "--short", "HEAD")
 	if err != nil {
@@ -182,8 +185,17 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff) error {
 	if _, ok := m.cfg.Review.Repos[h.Repo]; !ok {
 		return invalid("%s isn't in review.repos, so it has no image or setup", h.Repo)
 	}
+	parent, err := m.resolveParent(h, stackParent)
+	if err != nil {
+		return err
+	}
+	baseRef := "origin/" + h.Base
 	if _, err := git("fetch", "--quiet", "origin", fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", h.Base, h.Base)); err != nil {
-		return invalid("fetching base %s: %v", h.Base, err)
+		// A parent handed off a moment ago may not be pushed yet; its local branch does for the check.
+		if _, lerr := git("rev-parse", "--verify", "--quiet", "refs/heads/"+h.Base); parent == nil || lerr != nil {
+			return invalid("fetching base %s: %v", h.Base, err)
+		}
+		baseRef = "refs/heads/" + h.Base
 	}
 	// Untracked files don't count: wtp hooks copy untracked config into worktrees.
 	status, err := git("status", "--porcelain", "--untracked-files=no")
@@ -193,12 +205,12 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff) error {
 	if status != "" {
 		return invalid("worktree isn't clean: commit or discard its changes first")
 	}
-	ahead, err := git("rev-list", "--count", "origin/"+h.Base+"..HEAD")
+	ahead, err := git("rev-list", "--count", baseRef+"..HEAD")
 	if err != nil {
 		return err
 	}
 	if n, _ := strconv.Atoi(ahead); n == 0 {
-		return invalid("branch %s has no commits ahead of origin/%s", h.Branch, h.Base)
+		return invalid("branch %s has no commits ahead of %s", h.Branch, baseRef)
 	}
 	if h.Title == "" {
 		if h.Title, err = git("log", "-1", "--format=%s"); err != nil {
@@ -238,4 +250,48 @@ func newID(repo, branch string) string {
 	_, _ = rand.Read(b[:])
 	slug := strings.Trim(unsafeID.ReplaceAllString(branch, "-"), "-.")
 	return fmt.Sprintf("%s-%s-%s", filepath.Base(repo), slug, hex.EncodeToString(b[:]))
+}
+
+// resolveParent turns --stack-parent into h's base (design §3): the parent handoff's
+// branch, found by id or by branch among the open handoffs of h's repo, else the
+// name is a plain base branch and nothing is tracked. It returns the parent handoff, if any.
+func (m *Manager) resolveParent(h *Handoff, name string) (*Handoff, error) {
+	if name == "" {
+		return nil, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var parent *Handoff
+	if i := slices.IndexFunc(m.handoffs, func(o Handoff) bool { return o.ID == name }); i >= 0 {
+		parent = &m.handoffs[i]
+		switch {
+		case parent.Repo != h.Repo:
+			return nil, invalid("stack parent %s belongs to %s, not %s", name, parent.Repo, h.Repo)
+		case Terminal(parent.State):
+			return nil, invalid("stack parent %s is %s", name, parent.State)
+		}
+	} else if i := slices.IndexFunc(m.handoffs, func(o Handoff) bool {
+		return o.Repo == h.Repo && o.Branch == name && !Terminal(o.State)
+	}); i >= 0 {
+		parent = &m.handoffs[i]
+	}
+	if parent == nil {
+		h.Base = name // a branch nobody hands off: just the base
+		return nil, nil
+	}
+	// A cycle: the chain above the parent reaches this branch (the new handoff has no id yet,
+	// so only a branch can close it).
+	for p, n := parent, 0; p != nil && n <= len(m.handoffs); n++ {
+		if p.Branch == h.Branch {
+			return nil, invalid("stack parent %s would make a cycle: %s is %s's own branch", name, p.Branch, h.Branch)
+		}
+		i := slices.IndexFunc(m.handoffs, func(o Handoff) bool { return p.StackParent != "" && o.ID == p.StackParent })
+		if i < 0 {
+			break
+		}
+		p = &m.handoffs[i]
+	}
+	h.StackParent, h.Base = parent.ID, parent.Branch
+	cp := *parent
+	return &cp, nil
 }

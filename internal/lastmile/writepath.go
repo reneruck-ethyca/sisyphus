@@ -210,6 +210,33 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([
 	return changed, nil
 }
 
+// pathProblem says why an agent may not leave f behind, or "". An untracked
+// directory is listed as "dir/"; with a nested repo inside, git add -A would commit
+// a gitlink and skip the per-file checks. Any .git entry is refused as well.
+func (m *Manager) pathProblem(f string) string {
+	switch {
+	case strings.HasSuffix(f, "/") || slices.Contains(strings.Split(f, "/"), ".git"):
+		return "agent left a nested git repository or .git entry: " + f
+	case m.protected(f):
+		return "agent changed a protected path: " + f
+	}
+	return ""
+}
+
+// hostGit is the -c options every git command TLM runs after an agent touched the
+// worktree (commit, rebase --continue) starts with: hooks off, since husky,
+// pre-commit and friends read their config from the worktree, i.e. would run what
+// the agent wrote; and the user's own identity when there is one, else TLM's.
+func hostGit(ctx context.Context, dir string) []string {
+	args := []string{"-c", "core.hooksPath=/dev/null"}
+	for _, k := range []struct{ key, val string }{{"user.name", "TLM"}, {"user.email", "tlm@localhost"}} {
+		if v, err := proc.Run(ctx, dir, "git", "config", k.key); err != nil || v == "" {
+			args = append(args, "-c", k.key+"="+k.val)
+		}
+	}
+	return args
+}
+
 // reasonNoChanges is what commitAgentWork says when the agent edited nothing; for a
 // review round that is a valid outcome (replies only).
 const reasonNoChanges = "agent made no changes"
@@ -245,13 +272,8 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return reasonNoChanges, nil
 	}
 	for _, f := range files {
-		// An untracked directory is listed as "dir/"; with a nested repo inside, git add -A would
-		// commit a gitlink and skip the per-file checks. Any .git entry is refused as well.
-		if strings.HasSuffix(f, "/") || slices.Contains(strings.Split(f, "/"), ".git") {
-			return reject("agent left a nested git repository or .git entry: %s", f)
-		}
-		if m.protected(f) {
-			return reject("agent changed a protected path: %s", f)
+		if why := m.pathProblem(f); why != "" {
+			return reject("%s", why)
 		}
 	}
 	lines, binary, err := changedLines(ctx, h.Worktree, files)
@@ -269,14 +291,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 	if _, err := proc.Run(ctx, h.Worktree, "git", "add", "-A"); err != nil {
 		return reject("git add failed: %v", err)
 	}
-	// The user's own git identity when there is one. Hooks are off: husky, pre-commit and
-	// friends read their config from the worktree, i.e. would run what the agent wrote.
-	args := []string{"-c", "core.hooksPath=/dev/null"}
-	for _, k := range []struct{ key, val string }{{"user.name", "TLM"}, {"user.email", "tlm@localhost"}} {
-		if v, err := proc.Run(ctx, h.Worktree, "git", "config", k.key); err != nil || v == "" {
-			args = append(args, "-c", k.key+"="+k.val)
-		}
-	}
+	args := hostGit(ctx, h.Worktree)
 	summary := strings.Join(strings.Fields(res.Summary), " ")
 	if summary == "" {
 		summary = "fix"

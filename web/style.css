@@ -92,6 +92,7 @@ section { display: flex; flex-direction: column; gap: 10px; }
 .list > li + li { border-top: 1px solid var(--line2); }
 .list .grow { min-width: 0; }
 .list time, .list .facts { color: var(--muted); font-size: 13px; }
+.lastmile .list li.depth1 { padding-left: 28px; } .lastmile .list li.depth2 { padding-left: 56px; } .lastmile .list li.depth3 { padding-left: 84px; } /* a stack under its root */
 .list .facts, .list .err { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; } /* the run page has it all */
 .pagehead { display: flex; flex-direction: column; gap: 8px; }
 .meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--muted); font-size: 13px; }

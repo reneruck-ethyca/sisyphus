@@ -22,21 +22,47 @@ func Tone(state string) string {
 type View struct {
 	Handoff
 	Tone      string   `json:"tone"`
-	Over      bool     `json:"over"`      // the handoff is over: merged, closed or cancelled
-	Reviewing []string `json:"reviewing"` // asked to review now; before the PR is read, the planned humans
+	Over      bool     `json:"over"`                 // the handoff is over: merged, closed or cancelled
+	Reviewing []string `json:"reviewing"`            // asked to review now; before the PR is read, the planned humans
+	Depth     int      `json:"depth"`                // how far down a stack: 0 for a root or a handoff on its own
+	WaitingOn string   `json:"waiting_on,omitempty"` // the open parent this stacked handoff sits on
 }
 
-// Views lists the handoffs for the dashboard, newest first; never nil.
+// Views lists the handoffs for the dashboard, newest root first; never nil. A stack
+// is kept together: each parent is followed by its children, oldest first, with Depth set.
 func (m *Manager) Views() []View {
 	hs := m.List()
-	out := make([]View, 0, len(hs))
-	for i := len(hs) - 1; i >= 0; i-- {
-		h := hs[i]
+	byID := map[string]View{}
+	kids := map[string][]string{} // parent id -> children ids, oldest first
+	for _, h := range hs {
 		v := View{Handoff: h, Tone: Tone(h.State), Over: Terminal(h.State), Reviewing: h.Reviewers}
 		if h.Snapshot != nil {
 			v.Reviewing = h.Snapshot.Requested
 		}
+		byID[h.ID] = v
+	}
+	for _, h := range hs {
+		if _, ok := byID[h.StackParent]; ok {
+			kids[h.StackParent] = append(kids[h.StackParent], h.ID)
+		}
+	}
+	out := make([]View, 0, len(hs))
+	var add func(id string, depth int)
+	add = func(id string, depth int) {
+		v := byID[id]
+		v.Depth = depth
+		if parent, ok := byID[v.StackParent]; ok && !parent.Over {
+			v.WaitingOn = parent.ID
+		}
 		out = append(out, v)
+		for _, c := range kids[id] {
+			add(c, depth+1)
+		}
+	}
+	for i := len(hs) - 1; i >= 0; i-- {
+		if _, ok := byID[hs[i].StackParent]; !ok {
+			add(hs[i].ID, 0)
+		}
 	}
 	return out
 }

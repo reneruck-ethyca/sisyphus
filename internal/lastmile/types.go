@@ -34,8 +34,9 @@ func Terminal(state string) bool {
 
 // Triggers an agent round can answer; FixRounds is counted per trigger.
 const (
-	TriggerCI     = "ci"
-	TriggerReview = "review"
+	TriggerCI       = "ci"
+	TriggerReview   = "review"
+	TriggerConflict = "conflict" // rebases, clean or not; the rounds counted are the conflict agent's runs
 )
 
 // Notify events.
@@ -71,7 +72,7 @@ type Autonomy struct {
 type Request struct {
 	Worktree     string   `json:"worktree"` // absolute path of the worktree to hand over
 	Base         string   `json:"base"`
-	StackParent  string   `json:"stack_parent,omitempty"` // handoff id or branch; not acted on yet
+	StackParent  string   `json:"stack_parent,omitempty"` // handoff id, or a branch: a handoff's, else a plain base
 	Title        string   `json:"title,omitempty"`        // "" = the last commit's subject
 	Body         string   `json:"body,omitempty"`         // "" = the repo's PR template
 	Jira         string   `json:"jira,omitempty"`
@@ -93,7 +94,7 @@ type Handoff struct {
 	Branch       string       `json:"branch"`
 	Worktree     string       `json:"worktree"`
 	Base         string       `json:"base"`
-	StackParent  string       `json:"stack_parent,omitempty"`
+	StackParent  string       `json:"stack_parent,omitempty"` // id of the parent handoff while the stack lasts
 	Title        string       `json:"title"`
 	Body         string       `json:"body,omitempty"`
 	Jira         string       `json:"jira,omitempty"`
@@ -126,6 +127,10 @@ type Handoff struct {
 	FlakeHead       string         `json:"flake_head,omitempty"`     // the head SHA FlakeReruns counts for
 	FlakeReruns     int            `json:"flake_reruns,omitempty"`   // flake reruns on FlakeHead
 	Gen             int            `json:"gen,omitempty"`            // bumped by edits from outside the tick, which discard a tick in progress
+
+	// Stack bookkeeping (design §3): while StackParent is set, Base is the parent's branch.
+	ParentHead   string `json:"parent_head,omitempty"`   // the parent's last head while it was open: the old base point once a squash merge hides it
+	ParentMerged bool   `json:"parent_merged,omitempty"` // the parent merged, and stack-parent-merged was sent
 
 	// Reviewer bookkeeping (design §6): GitHub is the source of truth after the first request.
 	BotRequested     bool     `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once

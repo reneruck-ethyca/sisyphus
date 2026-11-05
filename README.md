@@ -365,6 +365,27 @@ thread TLM answered "Fixed in …" → `needs-human` ("reviewer re-raised a fixe
 review counter. Every handoff keeps a log of its last 100 events (PR opened, state changes, agent runs,
 commits, replies posted or skipped, bot-cap hits, body updates) in its JSON as `events`.
 
+Stacks (`--stack-parent <id|branch>`): the parent is a handoff of the same repo (by id, or by branch among the
+open ones); the child's PR base is the parent's branch and it opens right away. A branch nobody hands off is
+just a plain base. Cycles and a parent in another repo are refused. TLM notes the parent's head while it is
+open. When the parent merges the child gets `stack-parent-merged`, its PR is retargeted to the parent's own
+base (`gh pr edit --base`) and rebased with `git rebase --onto origin/<base> <parent's last head> <branch>`
+(that survives a squash merge) and pushed with `--force-with-lease`. A parent that was closed or cancelled
+sends the child to `needs-human` ("stack parent closed"). The Last mile page shows a stack under its root,
+children indented, "waiting on <parent>" while the parent is open.
+
+Base drift: TLM rebases only when GitHub says the PR is `BEHIND` or `DIRTY` (or `CONFLICTING`) and the base
+really moved, never merely because it did. `git merge-tree --write-tree` predicts the result: no conflict →
+rebase onto `origin/<base>`, force-push with lease, back to `ci-running`. A conflict → state `conflict`: with
+`fix-ci` on (conflicts count as CI-like), the host starts the rebase and the conflict agent resolves the
+files each stop leaves (`git diff` of the markers, both sides, the replayed commit); without it `needs-human`
+("rebase conflict: <files>"). The host checks the files (no `<<<<<<<`, `=======`, `>>>>>>>` line, only the
+conflicted files edited, no protected path, nested repo or link), `git add`s them and runs
+`rebase --continue`, up to `max_fix_rounds` agent runs (`tlm resume` resets them). An escalation, a refused
+resolution or a failure aborts the rebase and puts the worktree back at its head → `needs-human`. Every git
+command of a rebase runs with hooks off, and a rebase found in progress with no run behind it (a crash) is
+aborted on the next tick. Retargets, rebases, conflict-agent runs and force-pushes go in the handoff's event log.
+
 Whatever an agent leaves behind on any exit (a failed run, an invalid result, an escalation) is cleaned: new
 gitignored files are removed, changed ones are named in the reason (size, mtime, mode, inode and ctime are
 compared), and the tree goes back to the head it started at. A nested git repository or `.git` entry is refused.

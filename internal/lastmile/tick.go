@@ -60,7 +60,11 @@ func (m *Manager) advance(ctx context.Context, h *Handoff) error {
 	if h.PRNumber == 0 {
 		return m.openPR(ctx, h)
 	}
-	if a, ok := m.running.get(h.ID); ok {
+	a, running := m.running.get(h.ID)
+	if !running {
+		m.abortStaleRebase(ctx, h)
+	}
+	if running {
 		if !a.done {
 			return nil // the agent holds the worktree; the handoff shows "fix agent running"
 		}
@@ -161,6 +165,12 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 		}
 		s.Draft = false
 	}
+	if done, err := m.stack(ctx, h, p, s); done || err != nil {
+		return err
+	}
+	if done, err := m.drift(ctx, h, s, base); done || err != nil {
+		return err
+	}
 	state, reason := nextState(*h, s)
 	if s.CI == CIRed {
 		s.Failures = m.failures(ctx, *h, s.Checks)
@@ -252,6 +262,9 @@ func (m *Manager) escalate(ctx context.Context, h *Handoff, reason string) {
 func (m *Manager) afterCommit(ctx context.Context, before, after Handoff) {
 	if m.OnChange != nil {
 		m.OnChange()
+	}
+	if !before.ParentMerged && after.ParentMerged {
+		m.Notify(ctx, after, EventStackParentMerged)
 	}
 	switch {
 	case before.PRNumber == 0 && after.PRNumber != 0:
