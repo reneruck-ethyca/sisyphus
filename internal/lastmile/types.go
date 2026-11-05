@@ -98,12 +98,33 @@ type Handoff struct {
 	MaxFixRounds int          `json:"max_fix_rounds"`
 	Requester    string       `json:"requester,omitempty"`
 
-	State    string    `json:"state"`
-	Reason   string    `json:"reason,omitempty"` // why it's in State, when that needs saying (needs-human)
-	PRNumber int       `json:"pr_number,omitempty"`
-	PRURL    string    `json:"pr_url,omitempty"`
+	// ReviewersSet says Reviewers is the user's choice even when empty (a dashboard edit
+	// to "nobody"); otherwise an empty Reviewers means "use the roster".
+	ReviewersSet bool `json:"reviewers_set,omitempty"`
+
+	State     string `json:"state"`
+	PrevState string `json:"prev_state,omitempty"` // State before needs-human, so the UI can say "was ci-red"
+	Reason    string `json:"reason,omitempty"`     // why it's in State, when that needs saying (ci-red, needs-human)
+	Error     string `json:"error,omitempty"`      // the last tick's failure; "" after a good one
+	Warning   string `json:"warning,omitempty"`    // something to look at that isn't a failure (no reviewers)
+	PRNumber  int    `json:"pr_number,omitempty"`
+	PRURL     string `json:"pr_url,omitempty"`
+	// LastBodyWritten is the PR body TLM last wrote, to tell a human's edit from its own (M2).
+	LastBodyWritten string `json:"last_body_written,omitempty"`
+	FixRounds       int    `json:"fix_rounds"` // used so far; the fix agents of later phases count here
+
+	// Reviewer bookkeeping (design §6): GitHub is the source of truth after the first request.
+	BotRequested     bool     `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once
+	HumansRequested  bool     `json:"humans_requested,omitempty"`  // the humans were requested, once
+	Requested        []string `json:"requested,omitempty"`         // everyone TLM requested
+	Removed          []string `json:"removed,omitempty"`           // requested by TLM, removed on GitHub by a human
+	ReviewersPending bool     `json:"reviewers_pending,omitempty"` // a reviewer edit waits to be applied on GitHub
+
+	Snapshot *Snapshot `json:"snapshot,omitempty"` // the PR as of the last tick
+
 	Created  time.Time `json:"created"`
-	Updated  time.Time `json:"updated"`
+	Updated  time.Time `json:"updated"` // last change of State
+	PROpened time.Time `json:"pr_opened,omitempty"`
 }
 
 // Notifies says whether event is one the handoff asked to be told about.

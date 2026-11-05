@@ -36,6 +36,12 @@ type Status struct {
 	Reviewing    []ActiveReview    `json:"reviewing"`             // review runs in progress, oldest first
 	Ignored      []tracker.Ignored `json:"ignored"`               // PRs untracked by hand
 	Activity     []Activity        `json:"activity"`              // latest review runs across PRs, newest first
+	Handoffs     []lastmile.View   `json:"handoffs"`              // the last mile's handoffs, newest first
+}
+
+// NeedsHuman lists the handoffs waiting for a person, for the dashboard's banner.
+func (s Status) NeedsHuman() []lastmile.View {
+	return slices.DeleteFunc(slices.Clone(s.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateNeedsHuman })
 }
 
 // ActiveReview is a review run in progress and its container.
@@ -493,7 +499,12 @@ func (s *Service) publish() {
 		}
 	}
 	slices.SortFunc(active, func(a, b ActiveReview) int { return a.Started.Compare(b.Started) })
+	handoffs := []lastmile.View{}
+	if s.LastMile != nil {
+		handoffs = s.LastMile.Views()
+	}
 	s.update(func(st *Status) {
+		st.Handoffs = handoffs
 		st.PRs, st.RuntimeError, st.Reviewing, st.Activity = prs, runtimeErr, active, activity(prs)
 		st.Budget, st.BudgetNote, st.BudgetWait = budget, note, wait
 	})
@@ -545,7 +556,11 @@ func (s *Service) Handoff(ctx context.Context, req lastmile.Request) (lastmile.H
 	if s.LastMile == nil {
 		return lastmile.Handoff{}, ErrLastMileDisabled
 	}
-	return s.LastMile.Handoff(ctx, req)
+	h, err := s.LastMile.Handoff(ctx, req)
+	if err == nil {
+		s.publish()
+	}
+	return h, err
 }
 
 // Handoffs lists the handoffs, oldest first; never nil.
@@ -554,6 +569,25 @@ func (s *Service) Handoffs() []lastmile.Handoff {
 		return []lastmile.Handoff{}
 	}
 	return s.LastMile.List()
+}
+
+// UseLastMile sets the manager handoffs go to and refreshes the dashboard when they change.
+func (s *Service) UseLastMile(m *lastmile.Manager) {
+	s.LastMile = m
+	m.OnChange = s.publish
+	s.publish()
+}
+
+// SetReviewers replaces a handoff's human reviewers (see lastmile.Manager.SetReviewers).
+func (s *Service) SetReviewers(id string, logins []string) (lastmile.Handoff, error) {
+	if s.LastMile == nil {
+		return lastmile.Handoff{}, ErrLastMileDisabled
+	}
+	h, err := s.LastMile.SetReviewers(id, logins)
+	if err == nil {
+		s.publish()
+	}
+	return h, err
 }
 
 // HandoffByID returns one handoff.

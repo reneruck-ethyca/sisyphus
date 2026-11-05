@@ -13,7 +13,7 @@ import (
 )
 
 // Manager owns the handoffs: accepts them, keeps them in lastmile.json, and
-// (from the next phase on) drives each through its lifecycle.
+// drives each through its lifecycle.
 type Manager struct {
 	GH GitHub
 
@@ -22,30 +22,36 @@ type Manager struct {
 	path    string
 	runHook func(ctx context.Context, command string, timeout time.Duration, dir string, env map[string]string) error
 	kick    chan struct{}
+	now     func() time.Time
 
-	mu       sync.Mutex // guards handoffs and the file
-	handoffs []Handoff  // oldest first
+	// OnChange is called after a handoff changed; the app uses it to refresh the dashboard.
+	OnChange func()
+
+	mu       sync.Mutex     // guards handoffs, cursors and the file
+	handoffs []Handoff      // oldest first
+	cursors  map[string]int // by repo: where the reviewer roster's round-robin continues
 }
 
 type storeFile struct {
-	Handoffs []Handoff `json:"handoffs"`
+	Handoffs []Handoff      `json:"handoffs"`
+	Cursors  map[string]int `json:"cursors,omitempty"`
 }
 
 // New loads the handoffs saved in stateDir/lastmile.json.
 func New(cfg config.Config, gh GitHub, locks *tracker.Locks, stateDir string) (*Manager, error) {
 	m := &Manager{GH: gh, cfg: cfg, locks: locks, path: filepath.Join(stateDir, "lastmile.json"),
-		runHook: tracker.RunHook, kick: make(chan struct{}, 1)}
+		runHook: tracker.RunHook, kick: make(chan struct{}, 1), now: time.Now}
 	var f storeFile
 	if err := jsonfile.Load(m.path, &f); err != nil {
 		return nil, err
 	}
-	m.handoffs = f.Handoffs
+	m.handoffs, m.cursors = f.Handoffs, f.Cursors
 	return m, nil
 }
 
 // saveLocked writes the handoffs; the caller holds m.mu.
 func (m *Manager) saveLocked() error {
-	return jsonfile.Save(m.path, storeFile{Handoffs: m.handoffs})
+	return jsonfile.Save(m.path, storeFile{Handoffs: m.handoffs, Cursors: m.cursors})
 }
 
 // List returns the handoffs, oldest first; never nil, so it encodes as [].
@@ -73,22 +79,3 @@ func (m *Manager) Kick() {
 	default:
 	}
 }
-
-// Run ticks every lastmile.interval and on Kick until ctx is done.
-func (m *Manager) Run(ctx context.Context) {
-	t := time.NewTicker(m.cfg.LastMile.Interval.Duration)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-		case <-m.kick:
-		case <-ctx.Done():
-			return
-		}
-		m.tick(ctx)
-	}
-}
-
-// tick moves each open handoff along.
-// ponytail: nothing to move yet; the PR lifecycle (opening, CI, reviews) lands in the next phase.
-func (m *Manager) tick(context.Context) {}

@@ -1,0 +1,22 @@
+{{template "head" "Last mile"}}
+{{template "top" .Top}}
+<main class="lastmile">
+<h1>Last mile</h1>
+{{range .NeedsHuman}}<p class="notice"><b>{{.ID}} needs you</b>{{with .PrevState}} (was {{.}}){{end}}: {{.Reason}}{{with .PRURL}} <a href="{{.}}" target="_blank" rel="noopener">Open PR ↗</a>{{end}}</p>{{end}}
+{{with .Handoffs}}<ol class="list card">{{range .}}<li>
+  <span class="chip {{.Tone}}">{{.State}}</span>
+  <span class="grow">{{if .PRURL}}<a href="{{.PRURL}}" target="_blank" rel="noopener">{{base .Repo}} #{{.PRNumber}}</a> {{end}}{{.Title}}
+    <span class="facts">{{.ID}}{{with .Reason}} · {{.}}{{end}}{{with .PrevState}} · was {{.}}{{end}} · fix rounds {{.FixRounds}}/{{.MaxFixRounds}}{{with .Reviewing}} · reviewers {{join . ", "}}{{end}}</span>
+    {{with .Error}}<span class="err">{{.}}</span>{{end}}{{with .Warning}}<span class="facts">{{.}}</span>{{end}}</span>
+  {{ago .Updated}}</li>{{end}}</ol>
+{{else}}<p class="muted">No handoffs. An agent hands a branch over with <code>tlm handoff</code>.</p>{{end}}
+</main>
+<script>
+  // Reload when the status changes, unless a field has focus.
+  let seen;
+  stream("/api/status/stream").onmessage = (m) => {
+    seen ??= m.data;
+    if (m.data !== seen && !document.hidden && !document.activeElement?.matches("input, select, textarea")) location.reload();
+  };
+</script>
+{{template "foot"}}

@@ -296,8 +296,23 @@ is `~/.config/sisyphus/eval/cases/`. A case:
 ## Last mile (TLM)
 
 An agent that finished a branch hands it over instead of babysitting the PR; sisyphus then owns the
-worktree (the agent must not touch it again). So far a handoff is checked and recorded; opening the PR
-and everything after it comes in later phases.
+worktree (the agent must not touch it again). sisyphus then pushes the branch and opens the PR (title
+prefixed `ENG-1234: ` when `--jira` is given, body from `--body-file`, else the repo's
+`.github/pull_request_template.md`), and every `lastmile.interval` reads the PR and moves the handoff along:
+`handed-off → pr-open → ci-running → ci-red | ci-green → awaiting-review → approved → merged`, or `closed`
+when someone closes it. CI is green when every check completed without failure (skipped and neutral pass).
+Red CI puts the handoff in `needs-human` (the `lastmile.needs_human_label` on the PR, the `needs-human`
+event, a banner on the Last mile page) unless `fix-ci` is on, where it waits in `ci-red` for the fix agent
+of a later phase. `needs-human` stays until a person deals with the PR; merged and closed are still noticed.
+A restart after a crash between push and PR creation adopts the open PR instead of opening a second.
+
+Reviewers: the bot (`lastmile.bot_reviewer`) is requested once the PR is ready (a PR the handoff didn't ask
+to be a draft is marked ready); humans are requested once, at the first green CI, from `--reviewers` as
+given, else `lastmile.reviewers` (per-repo override, `count`, round-robin skipping the PR author, the cursor
+kept in `lastmile.json`), else nobody and a warning. After that GitHub decides: whoever a human removes is
+never re-added, reviewers a human adds are left alone. `PUT /api/handoffs/{id}/reviewers` (a JSON list, or
+`{"reviewers": [...]}`) replaces the human list: before the request it changes the plan, afterwards the
+next tick applies the difference (naming someone anew re-adds them).
 
 ```
 tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
@@ -322,7 +337,8 @@ states or when the handoff is merged or closed.
 in the environment as `TLM_ID`, `TLM_EVENT`, …. A failing command is logged, never fatal.
 
 API: `POST /api/handoffs` (JSON body with the flags' names in snake_case; 201 with the handoff),
-`GET /api/handoffs`, `GET /api/handoffs/{id}`. Handoffs are kept in `lastmile.json` next to the state file.
+`GET /api/handoffs`, `GET /api/handoffs/{id}`, `PUT /api/handoffs/{id}/reviewers`. The dashboard lists the
+handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.json` next to the state file.
 
 | Field | Default | |
 |---|---|---|

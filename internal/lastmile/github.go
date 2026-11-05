@@ -14,6 +14,7 @@ type GitHub interface {
 	EditPR(ctx context.Context, ref github.PRRef, e github.PREdit) error
 	Comment(ctx context.Context, ref github.PRRef, body string) error
 	CreateLabel(ctx context.Context, repo, name, color, description string) error
+	FindPR(ctx context.Context, repo, branch string) (github.PRRef, bool, error)
 }
 
 var _ GitHub = github.CLI{}
@@ -27,7 +28,8 @@ type FakeGitHub struct {
 	Ready     []github.PRRef
 	Comments  []string
 	Labels    []string
-	Err       error // returned by every call
+	Existing  github.PRRef // the open PR FindPR reports; zero = none
+	Err       error        // returned by every call
 }
 
 func (f *FakeGitHub) PRView(_ context.Context, ref github.PRRef) (github.PRSnapshot, error) {
@@ -57,4 +59,8 @@ func (f *FakeGitHub) Comment(_ context.Context, _ github.PRRef, body string) err
 func (f *FakeGitHub) CreateLabel(_ context.Context, _, name, _, _ string) error {
 	f.Labels = append(f.Labels, name)
 	return f.Err
+}
+
+func (f *FakeGitHub) FindPR(context.Context, string, string) (github.PRRef, bool, error) {
+	return f.Existing, f.Existing.Number != 0, f.Err
 }

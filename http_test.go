@@ -655,3 +655,44 @@ func TestHTTPHandoffsDisabled(t *testing.T) {
 		t.Errorf("create = %d, want 503", code)
 	}
 }
+
+func TestHTTPHandoffReviewers(t *testing.T) {
+	srv, clone := handoffServer(t)
+	_, body := post(t, srv.URL+"/api/handoffs", `{"worktree": `+strconv.Quote(clone)+`, "base": "main"}`)
+	var h lastmile.Handoff
+	if err := json.Unmarshal([]byte(body), &h); err != nil {
+		t.Fatal(err)
+	}
+	put := func(path, body string) (int, string) {
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+path, strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	for _, in := range []string{`["alice","bob"]`, `{"reviewers": ["alice","bob"]}`} {
+		code, body := put("/api/handoffs/"+h.ID+"/reviewers", in)
+		var got lastmile.Handoff
+		if err := json.Unmarshal([]byte(body), &got); code != 200 || err != nil || strings.Join(got.Reviewers, ",") != "alice,bob" || !got.ReviewersSet {
+			t.Errorf("%s = %d %s", in, code, body)
+		}
+	}
+	if code, body := put("/api/handoffs/"+h.ID+"/reviewers", `["not a login"]`); code != 400 || !strings.Contains(body, "GitHub login") {
+		t.Errorf("bad login = %d %s", code, body)
+	}
+	if code, _ := put("/api/handoffs/"+h.ID+"/reviewers", `"x"`); code != 400 {
+		t.Errorf("bad body = %d", code)
+	}
+	if code, _ := put("/api/handoffs/nope/reviewers", `[]`); code != 404 {
+		t.Errorf("unknown = %d", code)
+	}
+	if code, body := get(t, srv.URL+"/lastmile"); code != 200 || !strings.Contains(body, h.ID) || !strings.Contains(body, "handed-off") {
+		t.Errorf("page = %d %s", code, body)
+	}
+	if code, body := get(t, srv.URL+"/api/status"); code != 200 || !strings.Contains(body, `"handoffs"`) || !strings.Contains(body, h.ID) {
+		t.Errorf("status = %d", code)
+	}
+}

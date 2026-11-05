@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -119,4 +120,27 @@ func (CLI) CreateLabel(ctx context.Context, repo, name, color, description strin
 func (CLI) RerunFailed(ctx context.Context, repo string, runID int64) error {
 	_, err := proc.Run(ctx, "", "gh", "run", "rerun", strconv.FormatInt(runID, 10), "--failed", "--repo", repo)
 	return err
+}
+
+// FindPR returns the open PR whose head is branch, if there is one: how a
+// handoff adopts a PR it opened before a crash.
+func (CLI) FindPR(ctx context.Context, repo, branch string) (PRRef, bool, error) {
+	out, err := proc.Run(ctx, "", "gh", "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number", "--limit", "1")
+	if err != nil {
+		return PRRef{}, false, err
+	}
+	return parsePRList(repo, out)
+}
+
+func parsePRList(repo, out string) (PRRef, bool, error) {
+	var prs []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+		return PRRef{}, false, fmt.Errorf("parse pr list: %w", err)
+	}
+	if len(prs) == 0 {
+		return PRRef{}, false, nil
+	}
+	return PRRef{Repo: repo, Number: prs[0].Number}, true, nil
 }

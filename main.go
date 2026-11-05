@@ -112,9 +112,11 @@ func main() {
 	}
 	svc := app.NewService(cfg, tr, rev, logs)
 	if !cfg.LastMile.Disabled {
-		if svc.LastMile, err = lastmile.New(cfg, gh, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
+		lm, err := lastmile.New(cfg, gh, tr.Locks, filepath.Dir(cfg.StateFile))
+		if err != nil {
 			fatal(err)
 		}
+		svc.UseLastMile(lm)
 	}
 	slog.Info("sisyphus starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)
 

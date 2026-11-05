@@ -43,11 +43,12 @@
 <section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
   {{with .LastError}}<p class="notice">The last check failed: {{.}}</p>{{end}}
   {{template "notices" .}}
+  {{with .NeedsHuman}}<p class="notice">{{len .}} handoff{{if ne (len .) 1}}s{{end}} needing you → <a href="/lastmile">Last mile</a></p>{{end}}
   {{with .InGroup "attention"}}<ol class="list card">{{range .}}<li>
     <span class="chip {{.Tone}}">{{.Verdict}}</span>
     <span class="grow"><a href="/prs/{{.Repo}}/{{.Number}}">{{.Title}}</a><span class="facts">{{base .Repo}} #{{.Number}} · {{or .LastError .ReviewNote}}</span></span>
     {{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}{{end}}</li>{{end}}</ol>
-  {{else}}{{if and (not .LastError) (not .RuntimeError) .Reviews}}<div class="card empty"><div><b>Nothing needs you right now</b>
+  {{else}}{{if and (not .LastError) (not .RuntimeError) .Reviews (not .NeedsHuman)}}<div class="card empty"><div><b>Nothing needs you right now</b>
     <div class="muted">Failed reviews, merge conflicts and container problems show up here.</div></div></div>{{end}}{{end}}
 </section>
 <section aria-labelledby="now"><h2 id="now">Reviewing now</h2>

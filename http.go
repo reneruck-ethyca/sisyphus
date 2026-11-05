@@ -65,6 +65,7 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"pct":     func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
 	"warnAt":  func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
 	"base":    path.Base,
+	"join":    strings.Join,
 	// dict passes several values to a template: dict "Key" value ...
 	"dict": func(kv ...any) map[string]any {
 		m := map[string]any{}
@@ -270,6 +271,37 @@ func newHandler(svc *app.Service) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, h)
 	})
+	mux.HandleFunc("PUT /api/handoffs/{id}/reviewers", func(w http.ResponseWriter, r *http.Request) {
+		// The body is the desired human reviewers: a JSON list, or {"reviewers": [...]}.
+		var raw json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var logins []string
+		if err := json.Unmarshal(raw, &logins); err != nil {
+			var obj struct {
+				Reviewers []string `json:"reviewers"`
+			}
+			if err := json.Unmarshal(raw, &obj); err != nil {
+				http.Error(w, "body must be a list of logins or {\"reviewers\": [...]}", http.StatusBadRequest)
+				return
+			}
+			logins = obj.Reviewers
+		}
+		h, err := svc.SetReviewers(r.PathValue("id"), logins)
+		var invalid lastmile.InvalidError
+		switch {
+		case errors.Is(err, lastmile.ErrNotFound), errors.Is(err, app.ErrLastMileDisabled):
+			http.NotFound(w, r)
+		case errors.As(err, &invalid):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			writeJSON(w, http.StatusOK, h)
+		}
+	})
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
@@ -304,6 +336,9 @@ func newHandler(svc *app.Service) http.Handler {
 	})
 	mux.HandleFunc("GET /api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
 		streamLogs(w, r, svc)
+	})
+	mux.HandleFunc("GET /lastmile", func(w http.ResponseWriter, r *http.Request) {
+		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile"}, Status: svc.Status()})
 	})
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
@@ -481,6 +516,11 @@ func (d dashboard) InGroup(group string) []app.PRView {
 		}
 	}
 	return out
+}
+
+type lastmilePage struct {
+	Top topbar
+	app.Status
 }
 
 type logsPage struct {
