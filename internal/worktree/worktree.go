@@ -163,6 +163,6 @@ func Reset(ctx context.Context, dir, sha string) error {
 	if _, err := proc.Run(ctx, dir, "git", "reset", "--hard", "--quiet", sha); err != nil {
 		return err
 	}
-	_, err := proc.Run(ctx, dir, "git", "clean", "-fd", "--quiet")
+	_, err := proc.Run(ctx, dir, "git", "clean", "-ffd", "--quiet")
 	return err
 }

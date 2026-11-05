@@ -73,7 +73,7 @@ func (m *Manager) protected(p string) bool {
 		}
 	}
 	for _, g := range denied {
-		if globMatch(g, p) {
+		if globMatch(g, p) || globMatch(g, p+"/") { // a directory entry under a protected path
 			return true
 		}
 	}
@@ -154,11 +154,15 @@ func changedLines(ctx context.Context, dir string, files []string) (n int, binar
 	return n, "", nil
 }
 
-// stamp is what tells a file changed without reading it.
+// stamp is what tells a file changed without reading it. The inode and ctime are
+// there because an agent can set size, mtime and mode back with utimes and chmod,
+// but not ctime.
 type stamp struct {
-	size int64
-	mod  time.Time
-	mode os.FileMode
+	size  int64
+	mod   time.Time
+	mode  os.FileMode
+	ino   uint64
+	ctime int64
 }
 
 // ignoredFiles stamps the worktree's gitignored files. The write path never
@@ -177,7 +181,8 @@ func ignoredFiles(ctx context.Context, dir string) (map[string]stamp, error) {
 			continue
 		}
 		if fi, err := os.Lstat(filepath.Join(dir, f)); err == nil {
-			files[f] = stamp{fi.Size(), fi.ModTime(), fi.Mode()}
+			ino, ctime := sysStamp(fi)
+			files[f] = stamp{fi.Size(), fi.ModTime(), fi.Mode(), ino, ctime}
 		}
 	}
 	return files, nil
@@ -204,6 +209,10 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([
 	slices.Sort(changed)
 	return changed, nil
 }
+
+// reasonNoChanges is what commitAgentWork says when the agent edited nothing; for a
+// review round that is a valid outcome (replies only).
+const reasonNoChanges = "agent made no changes"
 
 // commitAgentWork is the one way an agent's edits reach the branch (design §5):
 // it inspects the worktree, throws everything away if the change breaks a rule,
@@ -233,9 +242,14 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return "", err
 	}
 	if len(files) == 0 {
-		return "agent made no changes", nil
+		return reasonNoChanges, nil
 	}
 	for _, f := range files {
+		// An untracked directory is listed as "dir/"; with a nested repo inside, git add -A would
+		// commit a gitlink and skip the per-file checks. Any .git entry is refused as well.
+		if strings.HasSuffix(f, "/") || slices.Contains(strings.Split(f, "/"), ".git") {
+			return reject("agent left a nested git repository or .git entry: %s", f)
+		}
 		if m.protected(f) {
 			return reject("agent changed a protected path: %s", f)
 		}

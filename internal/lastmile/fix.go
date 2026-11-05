@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/proc"
 	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 // TaskRunner runs an agent on a worktree; *review.Reviewer does.
@@ -21,28 +25,71 @@ type TaskRunner interface {
 // maxDiffPrompt bounds the diff in the fix prompt.
 const maxDiffPrompt = 60 << 10
 
+// effects is what an agent run leaves for the tick to write into the handoff:
+// the tick is the only writer, so a run never races with it.
+type effects struct {
+	events    []Event
+	posted    []int64  // comment ids TLM posted
+	fixed     []string // threads answered "Fixed in …"
+	handed    []Item   // items the cursor moves over
+	body      *string  // the PR body TLM wrote
+	requested []string // reviewers TLM re-requested
+}
+
+func (e *effects) log(kind, format string, a ...any) {
+	e.events = append(e.events, Event{Time: time.Now(), Kind: kind, Text: fmt.Sprintf(format, a...)})
+}
+
+// apply writes the effects into h.
+func (e effects) apply(h *Handoff) {
+	for _, ev := range e.events {
+		logEvent(h, ev.Time, ev.Kind, ev.Text)
+	}
+	if len(e.posted) > 0 {
+		h.Posted = append(slices.Clone(h.Posted), e.posted...)
+		if len(h.Posted) > maxPosted {
+			h.Posted = h.Posted[len(h.Posted)-maxPosted:]
+		}
+	}
+	h.FixedThreads = union(h.FixedThreads, e.fixed...)
+	if len(e.handed) > 0 {
+		h.Cursor = advanceCursor(h.Cursor, e.handed)
+	}
+	if e.body != nil {
+		h.LastBodyWritten = *e.body
+	}
+	h.Requested = union(h.Requested, e.requested...)
+}
+
+// outcome is what an agent run found: reason "" = the work was pushed (or, for a
+// review round, answered).
+type outcome struct {
+	reason string
+	fx     effects
+}
+
 // agentRun is an agent run in flight for a handoff, or, once finished, what it
-// found for the next tick to apply: the tick is the only writer of handoffs, so
-// a run never races with it.
+// found for the next tick to apply.
 type agentRun struct {
-	cancel context.CancelFunc
-	done   bool
-	reason string // "" = the work was pushed
+	cancel  context.CancelFunc
+	trigger string // Trigger*
+	done    bool
+	outcome
 }
 
 // runs tracks the agent runs by handoff id, in memory: after a restart a run is
-// lost, and the next tick sees CI still red.
+// lost, and the next tick starts over from what GitHub shows.
 type runs struct {
 	mu sync.Mutex
 	m  map[string]*agentRun
 }
 
-// get returns a copy of the run: done and reason are written by its goroutine.
+// get returns a copy of the run: its outcome is written by its goroutine.
 func (r *runs) get(id string) (agentRun, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if a := r.m[id]; a != nil {
-		return agentRun{done: a.done, reason: a.reason}, true
+		return agentRun{done: a.done, trigger: a.trigger, outcome: a.outcome}, true
 	}
 	return agentRun{}, false
 }
@@ -78,12 +125,39 @@ func (r *runs) cancel(id string) {
 // Wait blocks until the agent runs started so far are over; for tests and shutdown.
 func (m *Manager) Wait() { m.wg.Wait() }
 
+// launch runs work on a copy of h beside the tick loop, for trigger. It returns
+// false when a run is already in flight for h.
+func (m *Manager) launch(ctx context.Context, h Handoff, trigger string, work func(context.Context, Handoff) outcome) bool {
+	runCtx, cancel := context.WithCancel(ctx)
+	run := &agentRun{cancel: cancel, trigger: trigger}
+	if !m.running.put(h.ID, run) {
+		cancel()
+		return false
+	}
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		defer cancel()
+		out := work(runCtx, h)
+		if ctx.Err() != nil || runCtx.Err() != nil { // shutdown or cancel: nothing to apply
+			m.running.drop(h.ID)
+			return
+		}
+		m.running.mu.Lock()
+		run.done, run.outcome = true, out
+		m.running.mu.Unlock()
+		m.Kick()
+	}()
+	return true
+}
+
 // agentFinished applies the outcome of a run that ended since the last tick.
 func (m *Manager) agentFinished(ctx context.Context, h *Handoff) {
 	a, _ := m.running.get(h.ID)
 	m.running.drop(h.ID)
+	a.fx.apply(h)
 	if a.reason != "" {
-		h.EscalatedBy = TriggerCI
+		h.EscalatedBy = a.trigger
 		m.escalate(ctx, h, a.reason)
 	} else {
 		m.setState(h, StateCIRunning, "")
@@ -109,57 +183,173 @@ func (m *Manager) redState(ctx context.Context, h *Handoff, s Snapshot) (state, 
 			return stop("same failure twice: " + f.Name)
 		}
 	}
-	if h.FixRounds == nil {
-		h.FixRounds = map[string]int{}
-	}
-	h.FixRounds[TriggerCI]++
+	h.FixRounds = bump(h.FixRounds, TriggerCI)
 	for _, f := range s.Failures {
 		h.FixedFailures = append(h.FixedFailures, f.Fingerprint)
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	run := &agentRun{cancel: cancel}
-	if !m.running.put(h.ID, run) {
-		cancel()
-		return StateCIRed, "fix agent running", nil
-	}
-	snap := *h // the goroutine works from a copy
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		defer cancel()
-		reason := m.fixCI(runCtx, snap, s)
-		if ctx.Err() != nil || runCtx.Err() != nil { // shutdown or cancel: nothing to apply
-			m.running.drop(snap.ID)
-			return
-		}
-		m.running.mu.Lock()
-		run.done, run.reason = true, reason
-		m.running.mu.Unlock()
-		m.Kick()
-	}()
+	m.launch(ctx, *h, TriggerCI, func(ctx context.Context, snap Handoff) outcome { return m.fixCI(ctx, snap, s) })
 	return StateCIRed, "fix agent running", nil
 }
 
-// fixCI runs the fix agent and, if it produced a change, the host write path.
-// It returns "" when the work was pushed, else why a human is needed.
-func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) string {
+// bump returns counts with key one higher, as a new map.
+func bump(counts map[string]int, key string) map[string]int {
+	out := maps.Clone(counts)
+	if out == nil {
+		out = map[string]int{}
+	}
+	out[key]++
+	return out
+}
+
+// agentJob is what the shared agent helper needs to know about one kind of run.
+type agentJob struct {
+	kind  string // "fix agent", "review agent": names the run in reasons
+	head  string // the head the PR shows; the worktree must be at it ("" = any)
+	base  string // for the diff against origin/<base>
+	build func(diff string, truncated bool) (prompt string, files map[string]string, err error)
+}
+
+// runAgent is the part every agent kind shares (design §5): it takes the
+// worktree lock, refuses a dirty or out-of-date worktree, snapshots the ignored
+// files, runs the agent and hands its result.json to apply, still under the lock.
+// apply decodes the result and goes through commitAgentWork; it returns "" when
+// it's done, else why a human is needed. On every other exit after the agent ran
+// the worktree is put back (see cleanup).
+func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply func(raw []byte, before map[string]stamp) string) (reason string) {
 	unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
 	if err != nil {
-		return "fix agent: " + err.Error()
+		return j.kind + ": " + err.Error()
 	}
 	defer unlock()
 
 	if st, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain"); err != nil || st != "" {
-		return "worktree has uncommitted changes; the fix agent would mix them in"
+		return "worktree has uncommitted changes; the " + j.kind + " would mix them in"
 	}
-	if head, err := proc.Run(ctx, h.Worktree, "git", "rev-parse", "HEAD"); err != nil || (s.Head != "" && head != s.Head) {
-		return fmt.Sprintf("worktree is at %.12s, the PR at %.12s", head, s.Head)
+	start, err := worktree.HeadSHA(ctx, h.Worktree)
+	if err != nil || (j.head != "" && start != j.head) {
+		return fmt.Sprintf("worktree is at %.12s, the PR at %.12s", start, j.head)
 	}
-	diff, _ := proc.Run(ctx, h.Worktree, "git", "diff", "origin/"+s.Base+"...HEAD")
+	diff, _ := proc.Run(ctx, h.Worktree, "git", "diff", "origin/"+j.base+"...HEAD")
 	truncated := len(diff) > maxDiffPrompt
 	if truncated {
 		diff = strings.ToValidUTF8(diff[:maxDiffPrompt], "")
 	}
+	prompt, files, err := j.build(diff, truncated)
+	if err != nil {
+		return j.kind + " prompt: " + err.Error()
+	}
+	before, err := ignoredFiles(ctx, h.Worktree)
+	if err != nil {
+		return "listing ignored files: " + err.Error()
+	}
+	// From here the agent may have touched the worktree.
+	defer func() {
+		if reason != "" {
+			reason = m.cleanup(ctx, h, start, before, reason)
+		}
+	}()
+	res, err := m.Tasks.RunTask(ctx, review.Task{ID: h.ID, Repo: h.Repo, Worktree: h.Worktree, Agent: h.Agent, Prompt: prompt, Context: files})
+	if err != nil {
+		slog.Warn("lastmile agent failed", "kind", j.kind, "id", h.ID, "err", err)
+		return j.kind + " failed: " + err.Error()
+	}
+	return apply(res.Result, before)
+}
+
+// cleanup puts the worktree back after a run that didn't end in a push: new
+// ignored files are removed and changed ones named in the reason (the agent
+// could have touched what the host runs later), and the tree goes back to the
+// starting head unless a commit moved it on. It runs on a context that survives
+// the cancel that may have ended the run.
+func (m *Manager) cleanup(ctx context.Context, h Handoff, start string, before map[string]stamp, reason string) string {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	changed, err := ignoredChanges(ctx, h.Worktree, before)
+	if err != nil {
+		slog.Warn("lastmile cleanup: ignored files", "id", h.ID, "err", err)
+	}
+	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == start {
+		if err := worktree.Reset(ctx, h.Worktree, start); err != nil {
+			slog.Warn("lastmile cleanup: reset", "id", h.ID, "err", err)
+		}
+	}
+	if names := strings.Join(changed, ", "); names != "" && !strings.Contains(reason, names) {
+		reason += "; gitignored files created or changed (new ones removed): " + names
+	}
+	return reason
+}
+
+// decode reads an agent's result.json into v.
+func decode(kind string, raw []byte, v any) string {
+	if err := json.Unmarshal(raw, v); err != nil {
+		return kind + "'s result.json is not valid: " + err.Error()
+	}
+	return ""
+}
+
+// applyBody writes the PR body an agent proposed, unless a human edited it since
+// TLM last did or it lost one of the template's sections; then the proposal goes
+// out as a PR comment instead (design §5). Failures are logged, never fatal: the
+// work is pushed already.
+func (m *Manager) applyBody(ctx context.Context, h Handoff, body, why string, fx *effects) {
+	ref := github.PRRef{Repo: h.Repo, Number: h.PRNumber}
+	p, err := m.GH.PRView(ctx, ref)
+	if err != nil {
+		fx.log("body", "body update skipped, reading the PR failed: %v", err)
+		return
+	}
+	var problem string
+	switch {
+	case !sameBody(p.Body, h.LastBodyWritten):
+		problem = "someone edited the description since TLM last wrote it"
+	case !hasHeadings(body, p.Body):
+		problem = "the proposal drops a section of the current description"
+	}
+	if problem == "" {
+		if err := m.GH.EditPR(ctx, ref, github.PREdit{Body: &body}); err != nil {
+			fx.log("body", "updating the description failed: %v", err)
+			return
+		}
+		fx.body = &body
+		fx.log("body", "description updated: %s", why)
+		return
+	}
+	text := fmt.Sprintf("TLM would change the PR description (%s), but %s, so here is the proposal instead.\n\n<details><summary>Proposed description</summary>\n\n%s\n\n</details>", why, problem, body)
+	id, err := m.GH.Comment(ctx, ref, text)
+	if err != nil {
+		fx.log("body", "posting the proposed description failed: %v", err)
+		return
+	}
+	if id != 0 {
+		fx.posted = append(fx.posted, id)
+	}
+	fx.log("body", "description not changed (%s); proposal posted as a comment: %s", problem, why)
+}
+
+// sameBody compares bodies the way GitHub round-trips them: line endings and
+// surrounding space don't count.
+func sameBody(a, b string) bool {
+	norm := func(s string) string { return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n")) }
+	return norm(a) == norm(b)
+}
+
+// hasHeadings says every "## " heading of old is still in next.
+func hasHeadings(next, old string) bool {
+	have := map[string]bool{}
+	for _, l := range strings.Split(next, "\n") {
+		have[strings.TrimSpace(l)] = true
+	}
+	for _, l := range strings.Split(old, "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "## ") && !have[l] {
+			return false
+		}
+	}
+	return true
+}
+
+// fixCI runs the fix agent and, if it produced a change, the host write path.
+func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
+	var fx effects
 	view := s
 	view.Failures = slices.Clone(s.Failures)
 	for i := range view.Failures {
@@ -167,32 +357,38 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) string {
 	}
 	snapJSON, _ := json.MarshalIndent(view, "", "  ")
 	failJSON, _ := json.MarshalIndent(s.Failures, "", "  ")
-	prompt, err := renderFixPrompt(fixPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base, Failures: s.Failures,
-		Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
-	if err != nil {
-		return "fix prompt: " + err.Error()
-	}
-	before, err := ignoredFiles(ctx, h.Worktree)
-	if err != nil {
-		return "listing ignored files: " + err.Error()
-	}
-	res, err := m.Tasks.RunTask(ctx, review.Task{ID: h.ID, Repo: h.Repo, Worktree: h.Worktree, Agent: h.Agent, Prompt: prompt,
-		Context: map[string]string{"snapshot.json": string(snapJSON), "failures.json": string(failJSON)}})
-	if err != nil {
-		slog.Warn("lastmile fix agent failed", "id", h.ID, "err", err)
-		return "fix agent failed: " + err.Error()
-	}
-	var out AgentResult
-	if err := json.Unmarshal(res.Result, &out); err != nil {
-		return "fix agent's result.json is not valid: " + err.Error()
-	}
-	reason, err := m.commitAgentWork(ctx, h, out, before)
-	if err != nil {
-		slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
-		return "writing the fix failed: " + err.Error()
-	}
-	if reason == "" {
-		slog.Info("lastmile fix pushed", "id", h.ID, "summary", out.Summary, "confidence", out.Confidence)
-	}
-	return reason
+	reason := m.runAgent(ctx, h, agentJob{kind: "fix agent", head: s.Head, base: s.Base,
+		build: func(diff string, truncated bool) (string, map[string]string, error) {
+			prompt, err := renderFixPrompt(fixPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base, Failures: s.Failures,
+				Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
+			return prompt, map[string]string{"snapshot.json": string(snapJSON), "failures.json": string(failJSON)}, err
+		}},
+		func(raw []byte, before map[string]stamp) string {
+			var out AgentResult
+			if r := decode("fix agent", raw, &out); r != "" {
+				return r
+			}
+			reason, err := m.commitAgentWork(ctx, h, out, before)
+			if err != nil {
+				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
+				return "writing the fix failed: " + err.Error()
+			}
+			if reason != "" {
+				return reason
+			}
+			slog.Info("lastmile fix pushed", "id", h.ID, "summary", out.Summary, "confidence", out.Confidence)
+			fx.log("agent", "fix agent: %s (confidence %s)", out.Summary, out.Confidence)
+			fx.log("commit", "pushed %s", m.headShort(ctx, h))
+			if out.Body != "" {
+				m.applyBody(ctx, h, out.Body, out.BodyReason, &fx)
+			}
+			return ""
+		})
+	return outcome{reason: reason, fx: fx}
+}
+
+// headShort is the worktree's head, abbreviated.
+func (m *Manager) headShort(ctx context.Context, h Handoff) string {
+	sha, _ := worktree.HeadSHA(ctx, h.Worktree)
+	return sha[:min(7, len(sha))]
 }

@@ -125,6 +125,7 @@ func (m *Manager) openPR(ctx context.Context, h *Handoff) error {
 	h.PRNumber, h.PROpened = ref.Number, m.now()
 	h.PRURL = fmt.Sprintf("https://github.com/%s/pull/%d", ref.Repo, ref.Number)
 	h.State, h.Updated = StatePROpen, m.now()
+	logEvent(h, m.now(), "pr-opened", h.PRURL)
 	return nil
 }
 
@@ -147,6 +148,7 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	s := buildSnapshot(p, h.PROpened, m.now())
 	base := cmp.Or(p.BaseRef, h.Base)
 	s.Behind = m.behind(ctx, *h, base)
+	s.BodyEdited = !sameBody(p.Body, h.LastBodyWritten)
 	h.Snapshot = &s
 	if h.State == StateNeedsHuman { // a person has it; only merged and closed are watched
 		return nil
@@ -171,6 +173,12 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 			return err
 		} else if rerun {
 			state, reason = StateCIRunning, ""
+		}
+	}
+	if s.CI != CIRed && state != StateNeedsHuman {
+		var err error
+		if state, reason, err = m.feedback(ctx, h, p, &s, state, reason); err != nil {
+			return err
 		}
 	}
 	// Requests follow the state computed before them: humans are asked at the first green,
@@ -212,6 +220,7 @@ func (m *Manager) behind(ctx context.Context, h Handoff, base string) int {
 func (m *Manager) setState(h *Handoff, state, reason string) {
 	if h.State != state {
 		h.State, h.Updated = state, m.now()
+		logEvent(h, h.Updated, "state", strings.TrimSuffix(state+": "+reason, ": "))
 	}
 	h.Reason = reason
 }
@@ -219,6 +228,7 @@ func (m *Manager) setState(h *Handoff, state, reason string) {
 // finish ends the handoff: merged or closed. The branch is free again.
 func (m *Manager) finish(h *Handoff, state string) {
 	h.State, h.Updated, h.Reason = state, m.now(), ""
+	logEvent(h, h.Updated, "state", state)
 }
 
 // escalate puts h in needs-human: the label on the PR (created if the repo lacks

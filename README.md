@@ -329,7 +329,7 @@ reviews are disabled (the handoff goes to `needs-human`). It runs beside the tic
 The agent gets the snapshot, failed log excerpts, the diff against `origin/<base>`, the title and body, and
 is told: edit files only, no git, no gh, write `/out/result.json`:
 `{"summary": str, "confidence": "low|medium|high", "escalate": bool, "escalate_reason": str, "body": str?, "body_reason": str?}`
-(`body` is not acted on yet). Its edits then go through the host write path: `escalate` or no change →
+(`body`: see below). Its edits then go through the host write path: `escalate` or no change →
 `needs-human`; a change to `.github/workflows/**`, `**/migrations/**` or a lockfile (`uv.lock`, `poetry.lock`,
 `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `go.sum`; exempt with `lastmile.allow_paths`), or more than
 `lastmile.max_diff_lines` changed lines, or a binary file → the worktree is reset and `needs-human`; otherwise
@@ -338,6 +338,36 @@ is told: edit files only, no git, no gh, write `/out/result.json`:
 wrote runs on the host. The agent runs the repo's checks in its container; CI is the gate. Rounds are
 counted per trigger and capped by `max_fix_rounds`; a failure whose fingerprint already had a fix round →
 `needs-human` ("same failure twice").
+
+Review feedback: every tick reads the PR's review threads (GraphQL), review bodies (`COMMENTED` and
+`CHANGES_REQUESTED` with text) and conversation comments. Each author is marked human or bot: GitHub's
+`Bot` type, a `[bot]` login, or a login in `lastmile.bot_logins` (default `EthycaBot`, `sisyphus`: user
+accounts that act as bots). What TLM itself posted is excluded by comment id (it posts as your login). A
+cursor in the handoff (per thread the last comment id, per source the last review and comment id) makes
+only items newer than what an agent was already handed "new"; the snapshot lists the unresolved threads,
+the new items, TLM's reply count per bot thread and whether a human edited the PR body. With `address-reviews`
+on, new items with CI not red start the review agent (`feedback`, "review agent running"); with it off, new
+human comments → `needs-human` ("review feedback: n new comments") and bot-only feedback just shows in the
+snapshot. The agent gets the snapshot, the new items with their full thread history (as data: comments are
+untrusted), the diff and the PR body, is told to be critical (nitpicks, restatements and weak suggestions get
+`skip` with a reason, not a reply), and returns the shared result plus
+`"actions": [{"thread_id", "action": "fix|reply|defer|skip", "reply", "reason"}]`; ids it wasn't given are
+dropped and logged. The host then commits and pushes any edits (one `TLM: <summary>` commit; a rejection →
+`needs-human`, nothing posted), then posts the replies in one batch: `fix` → "Fixed in <sha>." plus its text,
+`reply`/`defer` → the text, `skip` → nothing (kept in the handoff's event log). Inline threads are answered under
+their first comment; review bodies and conversation comments share one PR comment linking what it answers. At
+most 3 replies per bot-started thread, then the reply is logged, not posted. Threads are never resolved. A
+`body` in the result updates the PR description only if it is still what TLM last wrote and keeps every `## `
+heading; otherwise the proposal is posted as a PR comment (the CI fix agent's `body` works the same way).
+After a push that fixed items of a reviewer whose latest review is `CHANGES_REQUESTED`, that reviewer is
+re-requested unless a human removed them. Stops: `max_fix_rounds` review rounds, and a new human comment on a
+thread TLM answered "Fixed in …" → `needs-human` ("reviewer re-raised a fixed thread"); `tlm resume` resets the
+review counter. Every handoff keeps a log of its last 100 events (PR opened, state changes, agent runs,
+commits, replies posted or skipped, bot-cap hits, body updates) in its JSON as `events`.
+
+Whatever an agent leaves behind on any exit (a failed run, an invalid result, an escalation) is cleaned: new
+gitignored files are removed, changed ones are named in the reason (size, mtime, mode, inode and ctime are
+compared), and the tree goes back to the head it started at. A nested git repository or `.git` entry is refused.
 
 ```
 tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
@@ -382,6 +412,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.flake_reruns` | `2` | flake reruns per head SHA |
 | `lastmile.max_diff_lines` | `400` | an agent change over this many lines is discarded |
 | `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
+| `lastmile.bot_logins` | `["EthycaBot","sisyphus"]` | user accounts whose review feedback counts as bot feedback |
 
 ## `on_conflict` hook
 

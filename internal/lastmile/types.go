@@ -34,7 +34,8 @@ func Terminal(state string) bool {
 
 // Triggers an agent round can answer; FixRounds is counted per trigger.
 const (
-	TriggerCI = "ci"
+	TriggerCI     = "ci"
+	TriggerReview = "review"
 )
 
 // Notify events.
@@ -133,11 +134,41 @@ type Handoff struct {
 	Removed          []string `json:"removed,omitempty"`           // requested by TLM, removed on GitHub by a human
 	ReviewersPending bool     `json:"reviewers_pending,omitempty"` // a reviewer edit waits to be applied on GitHub
 
+	// Review inbox bookkeeping (design §4, §5).
+	Cursor       Cursor   `json:"cursor"`                  // what the review agent has been handed
+	Posted       []int64  `json:"posted,omitempty"`        // ids of the comments TLM posted (last maxPosted): TLM posts as the user
+	FixedThreads []string `json:"fixed_threads,omitempty"` // threads TLM answered "Fixed in …"; a human comment after it is a re-raise
+
+	Events []Event `json:"events,omitempty"` // the last maxEvents things that happened, oldest first
+
 	Snapshot *Snapshot `json:"snapshot,omitempty"` // the PR as of the last tick
 
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State
 	PROpened time.Time `json:"pr_opened,omitempty"`
+}
+
+// Event is one line of a handoff's log.
+type Event struct {
+	Time time.Time `json:"time"`
+	Kind string    `json:"kind"` // pr-opened | state | agent | commit | reply | skip | bot-cap | body | reviewer | escalated
+	Text string    `json:"text"`
+}
+
+// maxEvents and maxPosted bound what a handoff remembers.
+const (
+	maxEvents = 100
+	maxPosted = 500
+)
+
+// logEvent appends to h's log, dropping the oldest beyond maxEvents. It builds a
+// new slice: handoffs are shared by copy.
+func logEvent(h *Handoff, t time.Time, kind, text string) {
+	ev := append(slices.Clone(h.Events), Event{Time: t, Kind: kind, Text: text})
+	if len(ev) > maxEvents {
+		ev = ev[len(ev)-maxEvents:]
+	}
+	h.Events = ev
 }
 
 // Notifies says whether event is one the handoff asked to be told about.

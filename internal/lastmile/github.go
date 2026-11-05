@@ -12,7 +12,9 @@ type GitHub interface {
 	CreatePR(ctx context.Context, repo string, pr github.NewPR) (github.PRRef, error)
 	MarkReady(ctx context.Context, ref github.PRRef) error
 	EditPR(ctx context.Context, ref github.PRRef, e github.PREdit) error
-	Comment(ctx context.Context, ref github.PRRef, body string) error
+	Comment(ctx context.Context, ref github.PRRef, body string) (int64, error)
+	Reply(ctx context.Context, ref github.PRRef, commentID int64, body string) (int64, error)
+	Inbox(ctx context.Context, ref github.PRRef) (github.Inbox, error)
 	CreateLabel(ctx context.Context, repo, name, color, description string) error
 	FindPR(ctx context.Context, repo, branch string) (github.PRRef, bool, error)
 	RunLog(ctx context.Context, repo string, runID, jobID int64) (string, error)
@@ -29,6 +31,9 @@ type FakeGitHub struct {
 	Edits     []github.PREdit
 	Ready     []github.PRRef
 	Comments  []string
+	Replies   []FakeReply // ReplyToComment calls
+	InboxData github.Inbox
+	nextID    int64
 	Labels    []string
 	Existing  github.PRRef     // the open PR FindPR reports; zero = none
 	Logs      map[int64]string // RunLog by job id
@@ -55,9 +60,31 @@ func (f *FakeGitHub) EditPR(_ context.Context, _ github.PRRef, e github.PREdit) 
 	return f.Err
 }
 
-func (f *FakeGitHub) Comment(_ context.Context, _ github.PRRef, body string) error {
+// FakeReply is an inline reply the fake got.
+type FakeReply struct {
+	To   int64
+	Body string
+	ID   int64
+}
+
+func (f *FakeGitHub) id() int64 {
+	f.nextID++
+	return 9000 + f.nextID
+}
+
+func (f *FakeGitHub) Comment(_ context.Context, _ github.PRRef, body string) (int64, error) {
 	f.Comments = append(f.Comments, body)
-	return f.Err
+	return f.id(), f.Err
+}
+
+func (f *FakeGitHub) Reply(_ context.Context, _ github.PRRef, to int64, body string) (int64, error) {
+	r := FakeReply{To: to, Body: body, ID: f.id()}
+	f.Replies = append(f.Replies, r)
+	return r.ID, f.Err
+}
+
+func (f *FakeGitHub) Inbox(context.Context, github.PRRef) (github.Inbox, error) {
+	return f.InboxData, f.Err
 }
 
 func (f *FakeGitHub) CreateLabel(_ context.Context, _, name, _, _ string) error {

@@ -69,6 +69,7 @@ type LastMile struct {
 	FlakeReruns     int                  `json:"flake_reruns"`      // reruns per head SHA
 	MaxDiffLines    int                  `json:"max_diff_lines"`    // an agent's change above this is thrown away
 	AllowPaths      []string             `json:"allow_paths"`       // globs an agent may change although the denylist names them
+	BotLogins       []string             `json:"bot_logins"`        // user accounts that act as bots (their feedback counts as bot feedback)
 }
 
 // Reviewers is a roster TLM picks human reviewers from, round-robin.
@@ -103,6 +104,9 @@ func (l LastMile) check() error {
 		if _, err := regexp.Compile(f); err != nil {
 			return fmt.Errorf("flakes: %w", err)
 		}
+	}
+	if slices.Contains(l.BotLogins, "") {
+		return errors.New("bot_logins must be non-empty logins")
 	}
 	check := func(where string, r Reviewers) error {
 		if r.Count < 0 || slices.Contains(r.Roster, "") {
@@ -366,6 +370,7 @@ func defaults() Config {
 			NeedsHumanLabel: "tlm:needs-human",
 			FlakeReruns:     2,
 			MaxDiffLines:    400,
+			BotLogins:       []string{"EthycaBot", "sisyphus"},
 		},
 	}
 }

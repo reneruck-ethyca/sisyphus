@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,10 +161,19 @@ func (CLI) CreateReview(ctx context.Context, ref PRRef, file string) (string, er
 }
 
 // ReplyToComment answers in the thread of an inline review comment.
-func (CLI) ReplyToComment(ctx context.Context, ref PRRef, commentID int64, body string) error {
-	_, err := proc.Run(ctx, "", "gh", "api", "--method", "POST",
-		fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", ref.Repo, ref.Number, commentID), "-f", "body="+body)
+func (c CLI) ReplyToComment(ctx context.Context, ref PRRef, commentID int64, body string) error {
+	_, err := c.Reply(ctx, ref, commentID, body)
 	return err
+}
+
+// Reply is ReplyToComment that returns the new comment's id.
+func (CLI) Reply(ctx context.Context, ref PRRef, commentID int64, body string) (int64, error) {
+	out, err := proc.Run(ctx, "", "gh", "api", "--method", "POST",
+		fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", ref.Repo, ref.Number, commentID), "-f", "body="+body, "--jq", ".id")
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 }
 
 func parseSearch(out []byte) ([]PRRef, error) {

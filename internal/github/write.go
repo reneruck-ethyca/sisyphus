@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -104,10 +105,25 @@ func editArgs(ref PRRef, e PREdit) []string {
 	return args
 }
 
-// Comment posts a comment on the PR's conversation.
-func (CLI) Comment(ctx context.Context, ref PRRef, body string) error {
-	_, err := proc.Run(ctx, "", "gh", "pr", "comment", strconv.Itoa(ref.Number), "--repo", ref.Repo, "--body", body)
-	return err
+var issueCommentID = regexp.MustCompile(`#issuecomment-(\d+)`)
+
+// Comment posts a comment on the PR's conversation and returns its id (0 if gh's
+// output doesn't say).
+func (CLI) Comment(ctx context.Context, ref PRRef, body string) (int64, error) {
+	out, err := proc.Run(ctx, "", "gh", "pr", "comment", strconv.Itoa(ref.Number), "--repo", ref.Repo, "--body", body)
+	if err != nil {
+		return 0, err
+	}
+	return parseCommentID(out), nil
+}
+
+// parseCommentID reads the id from the comment URL gh prints.
+func parseCommentID(out string) int64 {
+	if m := issueCommentID.FindStringSubmatch(out); m != nil {
+		id, _ := strconv.ParseInt(m[1], 10, 64)
+		return id
+	}
+	return 0
 }
 
 // CreateLabel makes the label, or updates it if it exists.

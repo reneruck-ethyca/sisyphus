@@ -44,6 +44,8 @@ func (m *Manager) Resume(ctx context.Context, id string) (Handoff, error) {
 		} else {
 			delete(h.FixRounds, h.EscalatedBy)
 		}
+		// The review counter went with delete(FixRounds, EscalatedBy) above; the cursor stays, so
+		// what the human dealt with isn't handed to an agent again.
 		if h.EscalatedBy == TriggerCI || h.EscalatedBy == "" {
 			h.FixedFailures = nil // else the failure that sent it here would escalate again at once
 		}
