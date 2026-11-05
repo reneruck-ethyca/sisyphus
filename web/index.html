@@ -43,7 +43,7 @@
 <section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
   {{with .LastError}}<p class="notice">The last check failed: {{.}}</p>{{end}}
   {{template "notices" .}}
-  {{with .NeedsHuman}}<p class="notice">{{len .}} handoff{{if ne (len .) 1}}s{{end}} needing you → <a href="/lastmile">Last mile</a></p>{{end}}
+  {{with .NeedsHuman}}<p class="notice">{{len .}} handoff{{if ne (len .) 1}}s need{{else}} needs{{end}} you → <a href="/lastmile">Open Last mile</a></p>{{end}}
   {{with .InGroup "attention"}}<ol class="list card">{{range .}}<li>
     <span class="chip {{.Tone}}">{{.Verdict}}</span>
     <span class="grow"><a href="/prs/{{.Repo}}/{{.Number}}">{{.Title}}</a><span class="facts">{{base .Repo}} #{{.Number}} · {{or .LastError .ReviewNote}}</span></span>

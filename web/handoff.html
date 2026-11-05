@@ -1,0 +1,73 @@
+{{template "head" .V.ID}}
+{{template "top" .Top}}
+{{with .V}}<main class="lastmile">
+<div class="pagehead">
+  <nav class="meta-line" aria-label="Breadcrumb"><a href="/lastmile">Last mile</a><span>›</span><span>{{.ID}}</span></nav>
+  <h1>{{.Title}}</h1>
+  <div class="meta-line"><span class="chip {{.Tone}}">{{.State}}</span>{{with .PrevState}}<span>was {{.}}</span>{{end}}<span>{{.Repo}}{{if gh .PRURL}} <a href="{{gh .PRURL}}" target="_blank" rel="noopener">#{{.PRNumber}} ↗</a>{{end}}</span><span>branch <code>{{.Branch}}</code> onto <code>{{.Base}}</code></span>{{with .WaitingOn}}<span>waiting on <a href="/lastmile/{{.}}">{{.}}</a></span>{{end}}<span>updated {{ago .Updated}}</span></div>
+  {{with .Reason}}<p class="notice{{if ne $.V.State "needs-human"}} quiet{{end}}">{{.}}</p>{{end}}
+  {{with .Error}}<p class="err">{{.}}</p>{{end}}{{with .Warning}}<p class="muted">{{.}}</p>{{end}}
+  <div class="actions">{{template "actions" .}}</div>
+</div>
+
+<section>
+  <h2>Merge policy</h2>
+  <div class="card card-b">
+    {{with .Shadow}}<p><b>Would merge: <span class="{{if .WouldMerge}}y{{else}}n{{end}}">{{if .WouldMerge}}yes{{else}}no{{end}}</span></b> <span class="muted">as of {{ago .At}}, head <code>{{short .Head}}</code></span></p>
+    {{with .Blockers}}<ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    {{else}}<p class="muted">No verdict yet{{if ne .Autonomy.Merge "shadow"}}: this handoff runs with merge={{.Autonomy.Merge}}{{end}}.</p>{{end}}
+    <div class="actions"><a class="btn quiet small" href="/lastmile/shadow?handoff={{.ID}}#{{.ID}}">Shadow merge for this PR →</a></div>
+  </div>
+</section>
+
+<section>
+  <h2>Reviewers</h2>
+  <div class="card card-b">
+    <p class="rvs">{{template "reviewers" .}}</p>
+    <p class="muted">{{if .ReviewersSet}}Explicit: the humans you named.{{else}}Round-robin picks from the roster.{{end}}{{if .ReviewersPending}} An edit waits for the next tick.{{end}}</p>
+    <form class="inline" id="reviewers">
+      <label class="muted" for="logins">Human reviewers, comma separated</label>
+      <input id="logins" value="{{join .Reviewers ", "}}" autocomplete="off">
+      <button class="btn small" type="submit">Save</button>
+    </form>
+    <p class="err" id="rverr" hidden></p>
+  </div>
+</section>
+
+{{with .Snapshot}}<section>
+  <h2>Pull request</h2>
+  <div class="card card-b"><dl>
+    <dt>Head</dt><dd><code>{{short .Head}}</code> by {{.Author}}{{if .Draft}} · draft{{end}}</dd>
+    <dt>Checks</dt><dd>{{.CI}}{{range .Checks}}<br>{{if eq .Conclusion "FAILURE"}}<span class="n">✗</span>{{else if eq .Conclusion "SUCCESS"}}<span class="y">✓</span>{{else}}…{{end}} {{if gh .URL}}<a href="{{gh .URL}}" target="_blank" rel="noopener">{{.Name}}</a>{{else}}{{.Name}}{{end}} <span class="muted">{{.Status}} {{.Conclusion}}</span>{{end}}</dd>
+    {{with .Failures}}<dt>Failures</dt><dd>{{range .}}{{.Name}} <code>{{.Fingerprint}}</code>{{if .Flake}} <span class="muted">flake</span>{{end}}<br>{{end}}</dd>{{end}}
+    <dt>Threads</dt><dd>{{.Unresolved}} unresolved{{with .NewFeedback}}, {{len .}} new{{range .}} · {{.Author}}{{if .Bot}} (bot){{end}}{{end}}{{end}}</dd>
+    <dt>Mergeability</dt><dd>{{.Mergeable}} · {{.MergeState}} · behind {{.Behind}} of <code>{{.Base}}</code></dd>
+    <dt>Review</dt><dd>{{with .ReviewDecision}}{{.}}{{else}}no decision{{end}}{{range .Approvals}}<br>{{.User}} approved <code>{{short .CommitSHA}}</code>{{if .Stale}} <span class="n">stale</span>{{end}}{{if .Bot}} <span class="muted">bot</span>{{end}}{{end}}</dd>
+    <dt>Diff</dt><dd>+{{.Additions}} −{{.Deletions}} in {{len .Files}} file{{if ne (len .Files) 1}}s{{end}}</dd>
+  </dl></div>
+</section>{{end}}
+
+<section>
+  <h2>Fix rounds</h2>
+  <div class="card card-b rounds">{{template "rounds" .}}</div>
+</section>
+
+<section>
+  <h2>Timeline</h2>
+  <div class="card">{{with $.Events}}<ol class="timeline">{{range .}}<li><time datetime="{{.Time.UTC.Format "2006-01-02T15:04:05Z"}}" title="{{.Time.Local.Format "2 Jan 2006, 15:04:05"}}">{{stamp .Time}}</time><span class="chip">{{.Kind}}</span><span class="text">{{.Text}}</span></li>{{end}}</ol>
+  {{else}}<p class="card-b muted">Nothing has happened yet.</p>{{end}}</div>
+</section>
+</main>{{end}}
+<script>
+  document.getElementById("reviewers").onsubmit = async (e) => {
+    e.preventDefault();
+    const logins = document.getElementById("logins").value.split(",").map(s => s.trim()).filter(Boolean);
+    const r = await fetch("/api/handoffs/" + encodeURIComponent({{.V.ID}}) + "/reviewers", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(logins)});
+    if (r.ok) return location.reload();
+    const err = document.getElementById("rverr");
+    err.textContent = await r.text();
+    err.hidden = false;
+  };
+</script>
+{{template "lmscript"}}
+{{template "foot"}}

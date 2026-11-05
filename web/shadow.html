@@ -1,0 +1,57 @@
+{{template "head" "Shadow merge"}}
+{{template "top" .Top}}
+<main class="lastmile">
+<div class="pagehead">
+  <nav class="meta-line" aria-label="Breadcrumb"><a href="/lastmile">Last mile</a><span>›</span><span>Shadow merge</span></nav>
+  <h1>Shadow merge</h1>
+  <div class="meta-line"><span>What the merge policy would have done, against what a person did. Nothing merges on it.</span></div>
+</div>
+
+{{with .Report}}<div class="tiles">
+  <div class="tile"><b>{{.Totals.Observed}}</b><span>observed</span></div>
+  <div class="tile"><b>{{.Totals.Merged}}</b><span>merged</span></div>
+  <div class="tile"><b>{{.Totals.Closed}}</b><span>closed</span></div>
+  <div class="tile"><b>{{.Totals.Open}}</b><span>open</span></div>
+  <div class="tile"><b>{{if .Totals.Merged}}{{secs $.MeanSec}}{{else}}n/a{{end}}</b><span>mean time in review</span></div>
+</div>{{end}}
+
+{{with .Focus}}<section class="focus" id="{{$.FocusID}}">
+  <div class="meta-line" style="color: var(--fg)"><h2>{{$.FocusTitle}} · verdict history</h2><a href="/lastmile/shadow">Show all PRs</a>{{with $.FocusID}}<a href="/lastmile/{{.}}" style="margin-left: auto">Back to handoff →</a>{{end}}</div>
+  <div class="card scrollx"><table>
+    <thead><tr><th>When</th><th>Head</th><th>Entry</th><th>Blockers</th><th>Signals</th></tr></thead>
+    <tbody>{{range .History}}<tr><td>{{stamp .Time}}</td><td><code>{{short .Head}}</code></td>
+      <td>{{if .Outcome}}<span class="chip {{if eq .Outcome "merged"}}ok{{end}}">{{.Outcome}}</span>{{with .MergedBy}} by {{.}}{{end}}{{else}}<span class="chip {{if .WouldMerge}}ok{{else}}bad{{end}}">would merge: {{if .WouldMerge}}yes{{else}}no{{end}}</span>{{end}}</td>
+      <td>{{join .Blockers "; "}}</td><td>{{with .Signals}}{{template "signals" .}}{{end}}</td></tr>
+    {{else}}<tr><td colspan="5" class="muted">Nothing logged for this PR yet.</td></tr>{{end}}</tbody>
+  </table></div>
+</section>{{end}}
+
+{{with .Report}}<section>
+  <h2>Verdict vs. what the human did</h2>
+  <div class="card scrollx"><table>
+    <thead><tr><th>Verdict</th><th>Merged</th><th>Closed</th><th>Still open</th></tr></thead>
+    <tbody>
+      <tr><td>Would merge: yes</td><td>{{.Agreement.WouldMergeYes.Merged}}</td><td>{{.Agreement.WouldMergeYes.Closed}}</td><td>{{.Agreement.WouldMergeYes.Open}}</td></tr>
+      <tr><td>Would merge: no</td><td>{{.Agreement.WouldMergeNo.Merged}}</td><td>{{.Agreement.WouldMergeNo.Closed}}</td><td>{{.Agreement.WouldMergeNo.Open}}</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Signals per PR</h2>
+  <div class="card scrollx"><table>
+    <thead><tr><th>PR</th><th>Would merge</th><th>Blockers</th><th>Signals</th><th>Outcome</th><th>Verdict</th></tr></thead>
+    <tbody>{{range .PRs}}<tr id="pr-{{.HandoffID}}">
+      <td>{{if .PR}}<a href="https://github.com/{{.Repo}}/pull/{{.PR}}" target="_blank" rel="noopener">{{base .Repo}} #{{.PR}}</a>{{end}}<br><a class="muted" href="/lastmile/{{.HandoffID}}">{{.HandoffID}}</a></td>
+      <td>{{if .VerdictAt.IsZero}}<span class="muted">none yet</span>{{else}}<span class="chip {{if .WouldMerge}}ok{{else}}bad{{end}}">{{if .WouldMerge}}yes{{else}}no{{end}}</span>{{end}}</td>
+      <td>{{join .Blockers "; "}}</td>
+      <td>{{with .Signals}}{{template "signals" .}}{{end}}</td>
+      <td>{{with .Outcome}}{{.}}{{else}}open{{end}}{{with .MergedBy}} by {{.}}{{end}}{{if not .OutcomeAt.IsZero}}<br><span class="muted">{{stamp .OutcomeAt}}</span>{{end}}</td>
+      <td class="muted">{{if not .VerdictAt.IsZero}}{{ago .VerdictAt}}<br><a href="/lastmile/shadow?handoff={{.HandoffID}}#{{.HandoffID}}">history</a>{{end}}</td></tr>
+    {{else}}<tr><td colspan="6" class="muted">No PR observed yet. Handoffs with <code>merge=shadow</code> show up here.</td></tr>{{end}}</tbody>
+  </table></div>
+</section>{{end}}
+</main>
+{{template "foot"}}
+
+{{define "signals"}}diff +{{.Additions}} −{{.Deletions}} · {{.Files}} files · {{len .Approvers}} approval{{if ne (len .Approvers) 1}}s{{end}}{{if .ApprovalsStale}} (stale){{end}} · {{.Unresolved}} unresolved · behind {{.Behind}}{{with .RiskyPaths}} · risky {{join . ", "}}{{end}} · {{range $k, $v := .FixRounds}}{{$k}} rounds {{$v}} · {{end}}flakes {{.FlakeReruns}} · {{secs .TimeInReviewSec}} in review{{end}}

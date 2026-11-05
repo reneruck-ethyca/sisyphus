@@ -1,27 +1,49 @@
 {{template "head" "Last mile"}}
 {{template "top" .Top}}
 <main class="lastmile">
-<h1>Last mile</h1>
-{{range .NeedsHuman}}<p class="notice"><b>{{.ID}} needs you</b>{{with .PrevState}} (was {{.}}){{end}}: {{.Reason}}{{with .PRURL}} <a href="{{.}}" target="_blank" rel="noopener">Open PR ↗</a>{{end}}</p>{{end}}
-{{with .Handoffs}}<ol class="list card">{{range .}}<li{{if .Depth}} class="depth{{.Depth}}"{{end}}>
+<div class="pagehead">
+  <h1>Last mile</h1>
+  <div class="meta-line"><span>{{len .Handoffs}} handoff{{if ne (len .Handoffs) 1}}s{{end}}</span></div>
+</div>
+{{range .NeedsHuman}}<p class="notice" role="alert"><b>Needs you: <a href="/lastmile/{{.ID}}">{{.ID}}{{if .PRNumber}} · {{base .Repo}} #{{.PRNumber}}{{end}}</a></b> {{.Title}}{{with .PrevState}} (was {{.}}){{end}}: {{.Reason}}
+  {{if gh .PRURL}}<a href="{{gh .PRURL}}" target="_blank" rel="noopener">Open PR ↗</a> {{end}}<a href="/lastmile/{{.ID}}">Open handoff →</a></p>{{end}}
+<div class="card">
+  <div class="card-h"><span class="muted">Newest first, stacks together</span><a class="end" href="/lastmile/shadow"><b>Shadow-merge report →</b></a></div>
+{{with .Handoffs}}<ol class="lm">
+  <li class="hd"><span>State</span><span>Handoff</span><span>Fix rounds</span><span>Reviewers</span><span>Updated</span><span></span></li>
+  {{range .}}<li{{if .Depth}} class="depth{{.Depth}}"{{end}}>
   <span class="chip {{.Tone}}">{{.State}}</span>
-  <span class="grow">{{if .PRURL}}<a href="{{.PRURL}}" target="_blank" rel="noopener">{{base .Repo}} #{{.PRNumber}}</a> {{end}}{{.Title}}
-    <span class="facts">{{.ID}}{{with .WaitingOn}} · waiting on {{.}}{{end}}{{with .Reason}} · {{.}}{{end}}{{with .PrevState}} · was {{.}}{{end}} · fix rounds {{index .FixRounds "ci"}}/{{.MaxFixRounds}}{{with .Reviewing}} · reviewers {{join . ", "}}{{end}}</span>
+  <span class="grow"><a class="ttl" href="/lastmile/{{.ID}}">{{.Title}}</a>
+    <span class="facts"><span class="id">{{.ID}}</span>{{if gh .PRURL}} · <a href="{{gh .PRURL}}" target="_blank" rel="noopener">{{base .Repo}} #{{.PRNumber}}</a>{{end}}{{with .WaitingOn}} · waiting on {{.}}{{end}}{{with .Reason}} · {{.}}{{end}}{{with .PrevState}} · was {{.}}{{end}}</span>
     {{with .Error}}<span class="err">{{.}}</span>{{end}}{{with .Warning}}<span class="facts">{{.}}</span>{{end}}</span>
-  {{if eq .State "needs-human"}}<button data-act="/api/handoffs/{{.ID}}/resume">Resume</button> {{end}}{{if not .Over}}<button data-act="/api/handoffs/{{.ID}}/cancel">Cancel</button> {{end}}{{ago .Updated}}</li>{{end}}</ol>
-{{else}}<p class="muted">No handoffs. An agent hands a branch over with <code>tlm handoff</code>.</p>{{end}}
+  <span class="rounds">{{template "rounds" .}}</span>
+  <span class="rvs">{{template "reviewers" .}}</span>
+  <span class="t">{{ago .Updated}}</span>
+  <span class="acts">{{template "actions" .}}</span></li>{{end}}
+</ol>
+<div class="card-f legend"><span><span class="rv">alice</span> requested by TLM</span><span><span class="rv human">+carol</span> added by a human</span><span><span class="rv gone">bob</span> removed by a human, never re-added</span></div>
+{{else}}<p class="card-b muted">No handoffs. An agent hands a branch over with <code>tlm handoff</code>.</p>{{end}}
+</div>
 </main>
-<script>
+{{template "lmscript"}}
+{{template "foot"}}
+
+{{define "rounds"}}{{$m := .MaxFixRounds}}{{range $k, $v := .FixRounds}}{{$k}} <b>{{$v}}</b>/{{$m}} {{else}}ci <b>0</b>/{{$m}}{{end}}{{end}}
+
+{{define "reviewers"}}{{range reviewerChips .}}<span class="rv{{with .Class}} {{.}}{{end}}">{{if eq .Class "human"}}+{{end}}{{.Login}}</span>{{else}}<span class="muted">nobody yet</span>{{end}}{{end}}
+
+{{define "actions"}}{{if eq .State "needs-human"}}<button class="btn small" data-act="/api/handoffs/{{.ID}}/resume">Resume</button> {{end}}{{if not .Over}}<button class="btn quiet small" data-act="/api/handoffs/{{.ID}}/cancel">Cancel</button>{{end}}{{end}}
+
+{{/* Buttons POST and reload; the status stream reloads the page when a tick changes something, unless a field has focus. */}}
+{{define "lmscript"}}<script>
   document.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
     b.disabled = true;
     const r = await fetch(b.dataset.act, {method: "POST"});
     if (r.ok) location.reload(); else { alert(await r.text()); b.disabled = false; }
   });
-  // Reload when the status changes, unless a field has focus.
   let seen;
   stream("/api/status/stream").onmessage = (m) => {
     seen ??= m.data;
     if (m.data !== seen && !document.hidden && !document.activeElement?.matches("input, select, textarea")) location.reload();
   };
-</script>
-{{template "foot"}}
+</script>{{end}}

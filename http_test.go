@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -777,5 +778,96 @@ garbage
 	}
 	if code, _ = get(t, srv.URL+"/api/lastmile/shadow?pr=bad"); code != 400 {
 		t.Errorf("bad pr = %d", code)
+	}
+}
+
+func TestHTTPLastMilePages(t *testing.T) {
+	srv, clone := handoffServer(t)
+	evil := `<script>alert(1)</script>`
+	_, body := post(t, srv.URL+"/api/handoffs", `{"worktree": `+strconv.Quote(clone)+`, "base": "main", "title": `+strconv.Quote(evil)+`}`)
+	var h lastmile.Handoff
+	if err := json.Unmarshal([]byte(body), &h); err != nil || h.ID == "" {
+		t.Fatalf("handoff: %v %s", err, body)
+	}
+	for _, p := range []string{"/lastmile", "/lastmile/" + h.ID, "/lastmile/shadow", "/lastmile/shadow?handoff=" + h.ID + "#" + h.ID} {
+		code, page := get(t, srv.URL+p)
+		if code != 200 {
+			t.Errorf("%s = %d %s", p, code, page)
+		}
+		if strings.Contains(page, evil) {
+			t.Errorf("%s renders the title unescaped", p)
+		}
+	}
+	if _, page := get(t, srv.URL+"/lastmile/"+h.ID); !strings.Contains(page, "&lt;script&gt;alert(1)") || !strings.Contains(page, "Shadow merge for this PR") || !strings.Contains(page, "/lastmile/shadow?handoff="+h.ID) {
+		t.Errorf("detail page: %s", page)
+	}
+	if _, page := get(t, srv.URL+"/lastmile"); !strings.Contains(page, "/lastmile/"+h.ID) || !strings.Contains(page, "/lastmile/shadow") {
+		t.Errorf("list page does not link the detail and the report: %s", page)
+	}
+	if code, _ := get(t, srv.URL+"/lastmile/nope"); code != 404 {
+		t.Errorf("unknown handoff = %d", code)
+	}
+	if code, _ := get(t, srv.URL+"/lastmile/shadow?pr=bad"); code != 400 {
+		t.Errorf("bad pr = %d", code)
+	}
+}
+
+func TestHTTPLastMilePagesDisabled(t *testing.T) {
+	cfg, tr := testkit.Tracker(t, &github.Fake{})
+	srv := httptest.NewServer(newHandler(app.NewService(cfg, tr, nil, app.NewLogBuffer(10))))
+	t.Cleanup(srv.Close)
+	for _, p := range []string{"/lastmile/shadow", "/lastmile/x"} {
+		if code, _ := get(t, srv.URL+p); code != 404 {
+			t.Errorf("%s = %d", p, code)
+		}
+	}
+}
+
+func TestHTTPShadowPage(t *testing.T) {
+	cfg, tr := testkit.Tracker(t, &github.Fake{})
+	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
+	srv := httptest.NewServer(newHandler(svc))
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	var err error
+	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir); err != nil {
+		t.Fatal(err)
+	}
+	log := `{"time":"2026-11-05T10:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"head":"abcdef123","would_merge":false,"blockers":["<b>x</b>"],"signals":{"additions":3}}
+{"time":"2026-11-05T11:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"outcome":"merged","merged_by":"carol","last_verdict":null}
+`
+	os.WriteFile(filepath.Join(dir, "lastmile-shadow.jsonl"), []byte(log), 0o600)
+	code, page := get(t, srv.URL+"/lastmile/shadow?pr=o/r%231")
+	if code != 200 || !strings.Contains(page, `id="h1"`) || !strings.Contains(page, "id=\"pr-h1\"") || !strings.Contains(page, "verdict history") ||
+		!strings.Contains(page, "&lt;b&gt;x&lt;/b&gt;") || strings.Contains(page, "<b>x</b>") || !strings.Contains(page, "https://github.com/o/r/pull/1") {
+		t.Errorf("shadow page = %d %s", code, page)
+	}
+}
+
+// A handoff deep in its life renders: snapshot, failures, verdict, events, a needs-human banner.
+func TestHandoffPageFull(t *testing.T) {
+	now := time.Now()
+	evil := `<img src=x onerror=alert(1)>`
+	h := lastmile.Handoff{ID: "h-1", Repo: "o/r", Title: evil, State: lastmile.StateNeedsHuman, PrevState: lastmile.StateCIRed, Reason: evil,
+		PRNumber: 7, PRURL: "javascript:alert(1)", FixRounds: map[string]int{"ci": 2}, MaxFixRounds: 3, Requested: []string{"a"}, Removed: []string{"b"},
+		Events: []lastmile.Event{{Time: now, Kind: "state", Text: evil}},
+		Shadow: &lastmile.Verdict{At: now, Head: "abcdef123", Blockers: []string{evil}},
+		Snapshot: &lastmile.Snapshot{Head: "abcdef123", Author: "x", CI: "red", Checks: []github.Check{{Name: "t", Conclusion: "FAILURE", URL: "https://github.com/o/r/actions/1"}},
+			Failures: []lastmile.Failure{{Name: "t", Fingerprint: "f"}}, Approvals: []lastmile.Approval{{User: "a", CommitSHA: "old", Stale: true}}, Requested: []string{"a", "c"}}}
+	v := lastmile.View{Handoff: h, Tone: "bad", Reviewing: []string{"a", "c"}}
+	var buf bytes.Buffer
+	if err := pages.ExecuteTemplate(&buf, "handoff.html", handoffPage{V: v, Events: h.Events}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, bad := range []string{evil, "javascript:"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("page contains %q", bad)
+		}
+	}
+	for _, want := range []string{"Would merge", "stale", "+c", "gone"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("page lacks %q", want)
+		}
 	}
 }

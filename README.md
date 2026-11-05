@@ -310,6 +310,12 @@ the label goes, the round counter of the trigger that escalated starts again, an
 branch and leaving GitHub as it is.
 A restart after a crash between push and PR creation adopts the open PR instead of opening a second.
 
+Pages: `/lastmile` lists the handoffs (stacks indented, a banner and a red count on the nav tab when one needs
+you); `/lastmile/{id}` is a handoff's page (event timeline, PR snapshot, reviewers editor, resume/cancel, the
+merge verdict); `/lastmile/shadow` is the shadow merge report (verdict vs what the human did, signals per PR),
+and `/lastmile/shadow?handoff={id}` or `?pr=owner/repo%23n` adds that PR's verdict history. The overview shows
+a line when handoffs need you.
+
 Reviewers: the bot (`lastmile.bot_reviewer`) is requested once the PR is ready (a PR the handoff didn't ask
 to be a draft is marked ready); humans are requested once, at the first green CI, from `--reviewers` as
 given, else `lastmile.reviewers` (per-repo override, `count`, round-robin skipping the PR author, the cursor

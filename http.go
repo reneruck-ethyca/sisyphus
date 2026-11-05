@@ -57,15 +57,18 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 		repo, n, _ := strings.Cut(prID, "#")
 		return "/prs/" + repo + "/" + n + "/runs/" + run
 	},
-	"outcome": func(r review.Run) string { l, _ := app.Outcome(r); return l },
-	"tone":    func(r review.Run) string { _, t := app.Outcome(r); return t },
-	"reason":  reasonLabel,
-	"dur":     runDuration,
-	"short":   func(sha string) string { return sha[:min(len(sha), 8)] },
-	"pct":     func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
-	"warnAt":  func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
-	"base":    path.Base,
-	"join":    strings.Join,
+	"outcome":       func(r review.Run) string { l, _ := app.Outcome(r); return l },
+	"tone":          func(r review.Run) string { _, t := app.Outcome(r); return t },
+	"reason":        reasonLabel,
+	"dur":           runDuration,
+	"short":         func(sha string) string { return sha[:min(len(sha), 8)] },
+	"pct":           func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
+	"warnAt":        func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
+	"base":          path.Base,
+	"gh":            githubURL,
+	"secs":          humanSeconds,
+	"reviewerChips": reviewerChips,
+	"join":          strings.Join,
 	// dict passes several values to a template: dict "Key" value ...
 	"dict": func(kv ...any) map[string]any {
 		m := map[string]any{}
@@ -379,7 +382,25 @@ func newHandler(svc *app.Service) http.Handler {
 		streamLogs(w, r, svc)
 	})
 	mux.HandleFunc("GET /lastmile", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile"}, Status: svc.Status()})
+		st := svc.Status()
+		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile", Status: &st}, Status: st})
+	})
+	mux.HandleFunc("GET /lastmile/shadow", func(w http.ResponseWriter, r *http.Request) {
+		shadowPage(w, r, svc)
+	})
+	mux.HandleFunc("GET /lastmile/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if svc.LastMile != nil {
+			for _, v := range svc.LastMile.Views() {
+				if v.ID == r.PathValue("id") {
+					st := svc.Status()
+					events := slices.Clone(v.Events)
+					slices.Reverse(events) // newest first
+					render(w, "handoff.html", handoffPage{Top: topbar{Page: "lastmile", Status: &st}, V: v, Events: events})
+					return
+				}
+			}
+		}
+		http.Error(w, "no such handoff", http.StatusNotFound)
 	})
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
@@ -562,6 +583,100 @@ func (d dashboard) InGroup(group string) []app.PRView {
 type lastmilePage struct {
 	Top topbar
 	app.Status
+}
+
+// handoffPage is one handoff's page; Events are newest first.
+type handoffPage struct {
+	Top    topbar
+	V      lastmile.View
+	Events []lastmile.Event
+}
+
+// shadowData is the shadow merge report page. Focus is the report narrowed to the ?handoff= or ?pr= PR.
+type shadowData struct {
+	Top        topbar
+	Report     lastmile.ShadowReport
+	MeanSec    int64
+	Focus      *lastmile.ShadowReport
+	FocusID    string // the handoff the narrowed report is about, the page's #anchor
+	FocusTitle string
+}
+
+// shadowPage renders the report; with ?handoff=id or ?pr=owner/repo%23n it adds that PR's verdict history.
+func shadowPage(w http.ResponseWriter, r *http.Request, svc *app.Service) {
+	rep, err := svc.ShadowReport(lastmile.ShadowQuery{})
+	if errors.Is(err, app.ErrLastMileDisabled) {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	st := svc.Status()
+	d := shadowData{Top: topbar{Page: "lastmile", Status: &st}, Report: rep, MeanSec: int64(rep.MeanTimeInReviewSec)}
+	q := lastmile.ShadowQuery{PR: r.URL.Query().Get("pr"), Handoff: r.URL.Query().Get("handoff")}
+	if q != (lastmile.ShadowQuery{}) {
+		f, err := svc.ShadowReport(q)
+		var invalid lastmile.InvalidError
+		switch {
+		case errors.As(err, &invalid):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		d.Focus, d.FocusTitle = &f, cmp.Or(q.PR, q.Handoff)
+		if len(f.PRs) > 0 {
+			d.FocusID = f.PRs[0].HandoffID
+			d.FocusTitle = fmt.Sprintf("%s #%d", f.PRs[0].Repo, f.PRs[0].PR)
+		}
+	}
+	render(w, "shadow.html", d)
+}
+
+// githubURL passes a link to a GitHub page and drops any other: PR URLs come from GitHub, but the page doesn't trust them.
+func githubURL(u string) string {
+	if strings.HasPrefix(u, "https://github.com/") {
+		return u
+	}
+	return ""
+}
+
+// humanSeconds says a duration in its largest two-ish units, "5 h", "2 d".
+func humanSeconds(s int64) string {
+	d := time.Duration(s) * time.Second
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d s", s)
+	case d < time.Hour:
+		return fmt.Sprintf("%d min", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%.1f h", d.Hours())
+	}
+	return fmt.Sprintf("%.1f d", d.Hours()/24)
+}
+
+type reviewerChip struct{ Login, Class string }
+
+// reviewerChips tells who is asked to review: those TLM requested plain, ones a human added "human",
+// and those a human removed "gone" (TLM won't re-add them).
+func reviewerChips(v lastmile.View) []reviewerChip {
+	var out []reviewerChip
+	for _, l := range v.Reviewing {
+		c := reviewerChip{Login: l}
+		if !slices.Contains(v.Requested, l) && v.Snapshot != nil {
+			c.Class = "human"
+		}
+		out = append(out, c)
+	}
+	for _, l := range v.Removed {
+		if !slices.Contains(v.Reviewing, l) {
+			out = append(out, reviewerChip{Login: l, Class: "gone"})
+		}
+	}
+	return out
 }
 
 type logsPage struct {
