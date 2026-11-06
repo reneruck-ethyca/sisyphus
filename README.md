@@ -426,8 +426,13 @@ tlm status <id> [--json]
 tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
 tlm resume <id>
 tlm cancel <id>
+tlm install
 tlm install-skill [--for claude,codex]
 ```
+
+`make install` (or `tlm install`) asks where to put `tlm` (default: the first writable bin dir on your
+PATH, such as `~/.local/bin`) and links it there to this checkout's `bin/sisyphus`, so a rebuild needs no
+reinstall. It then offers the skill below to Claude Code and Codex if they are on the machine.
 
 `tlm install-skill` installs or updates the `handing-off-to-tlm` agent skill (`skills/handing-off-to-tlm`,
 built into the binary) in `~/.claude/skills` and `~/.codex/skills` (`CLAUDE_CONFIG_DIR` and `CODEX_HOME`

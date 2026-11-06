@@ -112,3 +112,46 @@ func TestTLMInstallSkill(t *testing.T) {
 		t.Error("embedded skill lost its frontmatter")
 	}
 }
+
+func TestTLMInstall(t *testing.T) {
+	bin, claude := t.TempDir(), t.TempDir()
+	t.Setenv("PATH", bin)
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "absent"))
+	self, _ := os.Executable()
+	self, _ = filepath.EvalSymlinks(self)
+	run := func(stdin string) string {
+		t.Helper()
+		var out, errb bytes.Buffer
+		if err := tlmInstall(nil, strings.NewReader(stdin), &out, &errb); err != nil {
+			t.Fatalf("install: %v %s", err, errb.String())
+		}
+		return out.String()
+	}
+
+	// Defaults: the PATH dir, and yes to the skill for Claude (codex isn't there).
+	out := run("\n\n")
+	if got, _ := os.Readlink(filepath.Join(bin, "tlm")); got != self {
+		t.Fatalf("link = %q, want %q; out %q", got, self, out)
+	}
+	if _, err := os.Stat(filepath.Join(claude, "skills", skillName, "SKILL.md")); err != nil {
+		t.Errorf("claude skill: %v; out %q", err, out)
+	}
+	if !strings.Contains(out, "Codex: not found") {
+		t.Errorf("codex not reported missing: %q", out)
+	}
+	if out := run("\nn\n"); !strings.Contains(out, "tlm: up to date") || strings.Contains(out, "claude:") {
+		t.Errorf("rerun = %q", out)
+	}
+
+	// A file that isn't our link is only replaced when the answer is yes.
+	other := t.TempDir()
+	os.WriteFile(filepath.Join(other, "tlm"), []byte("x"), 0o755)
+	if out := run(other + "\n\nn\n"); !strings.Contains(out, "left as it is") || !strings.Contains(out, "isn't on your PATH") {
+		t.Errorf("keep = %q", out)
+	}
+	run(other + "\ny\nn\n")
+	if got, _ := os.Readlink(filepath.Join(other, "tlm")); got != self {
+		t.Errorf("replaced link = %q", got)
+	}
+}

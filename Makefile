@@ -1,4 +1,4 @@
-.PHONY: help build test lint plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
+.PHONY: help build install test lint plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
 
 LABEL := com.reneruck.sisyphus
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -14,6 +14,9 @@ help: ## list the targets (the default)
 build: ## build bin/sisyphus (and the bin/tlm symlink)
 	go build -tags production -o bin/sisyphus .
 	ln -sf sisyphus bin/tlm
+
+install: build ## put tlm on your PATH and offer the agent skill (interactive)
+	bin/sisyphus tlm install
 
 test: ## run the tests with the race detector
 	go test -race ./...

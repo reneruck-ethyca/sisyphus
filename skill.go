@@ -44,36 +44,40 @@ func tlmInstallSkill(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	homes := skillHomes()
 	var errs []error
 	for _, a := range commaList(*agents) {
-		dir, ok := homes[a]
-		if !ok {
-			errs = append(errs, fmt.Errorf("unknown agent %q (claude or codex)", a))
+		msg, err := installSkill(a)
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		path := filepath.Join(dir, skillName, "SKILL.md")
-		old, err := os.ReadFile(path)
-		what := "updated"
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			what = "installed"
-		case err != nil:
-			errs = append(errs, fmt.Errorf("%s: %w", a, err))
-			continue
-		case bytes.Equal(old, handoffSkill):
-			_, _ = fmt.Fprintf(stdout, "%s: up to date (%s)\n", a, path)
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", a, err))
-			continue
-		}
-		if err := os.WriteFile(path, handoffSkill, 0o644); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", a, err))
-			continue
-		}
-		_, _ = fmt.Fprintf(stdout, "%s: %s %s\n", a, what, path)
+		_, _ = fmt.Fprintf(stdout, "%s: %s\n", a, msg)
 	}
 	return errors.Join(errs...)
+}
+
+// installSkill writes the skill for one agent and says what it did.
+func installSkill(agent string) (string, error) {
+	dir, ok := skillHomes()[agent]
+	if !ok {
+		return "", fmt.Errorf("unknown agent %q (claude or codex)", agent)
+	}
+	path := filepath.Join(dir, skillName, "SKILL.md")
+	old, err := os.ReadFile(path)
+	what := "updated"
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		what = "installed"
+	case err != nil:
+		return "", fmt.Errorf("%s: %w", agent, err)
+	case bytes.Equal(old, handoffSkill):
+		return "up to date (" + path + ")", nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("%s: %w", agent, err)
+	}
+	if err := os.WriteFile(path, handoffSkill, 0o644); err != nil {
+		return "", fmt.Errorf("%s: %w", agent, err)
+	}
+	return what + " " + path, nil
 }

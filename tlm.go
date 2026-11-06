@@ -28,6 +28,7 @@ const tlmUsage = `usage: tlm handoff --base <branch> [--worktree dir] [--title t
        tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
        tlm resume <id>   hand a needs-human handoff back to TLM once a person dealt with it
        tlm cancel <id>   TLM stops managing the handoff (GitHub is left as it is)
+       tlm install       put tlm on your PATH and offer the agent skill to the agents found (asks first)
        tlm install-skill [--for claude,codex]   install or update the handing-off-to-tlm agent skill`
 
 // waitPoll is how often `tlm wait` asks; a var for tests.
@@ -50,6 +51,8 @@ func runTLM(args []string, stdout, stderr io.Writer) int {
 		err = tlmWait(args[1:], stdout, stderr)
 	case "resume", "cancel":
 		err = tlmAct(args[0], args[1:], stdout, stderr)
+	case "install":
+		err = tlmInstall(args[1:], os.Stdin, stdout, stderr)
 	case "install-skill":
 		err = tlmInstallSkill(args[1:], stdout, stderr)
 	default:
