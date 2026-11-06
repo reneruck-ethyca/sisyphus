@@ -1325,9 +1325,9 @@ func (r *Reviewer) appendLog(prID string, run Run, lw *lineWriter, line string) 
 
 // --- live output ---
 
-// SubscribeEvents streams every run's events as they're produced, until cancel.
+// subscribe streams every run's events as they're produced, until cancel.
 // A subscriber more than 1024 events behind misses events rather than stalling runs.
-func (r *Reviewer) SubscribeEvents() (<-chan RunEvent, func()) {
+func (r *Reviewer) subscribe() (<-chan RunEvent, func()) {
 	ch := make(chan RunEvent, 1024)
 	r.mu.Lock()
 	r.subs[ch] = struct{}{}
@@ -1358,9 +1358,7 @@ func (r *Reviewer) publish(prID, runID string, evs []Event) {
 // ErrNoRun means there's no such run for the PR.
 var ErrNoRun = errors.New("no such run")
 
-// Events parses a run's log so far and returns the number of the next line to
-// come. With SubscribeEvents: subscribe first, read this backlog, then skip live
-// events with Line < next.
+// Events parses a run's log so far and returns the number of the next line to come.
 func (r *Reviewer) Events(prID, runID string) (evs []Event, next int, err error) {
 	dir, ok := r.RunDir(prID, runID)
 	if !ok {
@@ -1381,6 +1379,79 @@ func (r *Reviewer) Events(prID, runID string) (evs []Event, next int, err error)
 		evs, next = append(evs, e...), n+1
 	}
 	return evs, next, nil
+}
+
+// Follow streams a run's events from line from on: the backlog, then live ones
+// with no gap or repeat between them. The channel closes once the run is over
+// and its last events are sent, or when ctx ends.
+func (r *Reviewer) Follow(ctx context.Context, prID, runID string, from int) (<-chan Event, error) {
+	live, cancel := r.subscribe() // before the backlog, so nothing falls in between
+	backlog, next, err := r.Events(prID, runID)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	out := make(chan Event)
+	go func() {
+		defer close(out)
+		defer cancel()
+		send := func(e Event) bool {
+			select {
+			case out <- e:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+		for _, e := range backlog {
+			if e.Line >= from && !send(e) {
+				return
+			}
+		}
+		from = max(next, from)
+		mine := func(e RunEvent) bool { return e.PR == prID && e.Run == runID && e.Line >= from }
+		// ponytail: polls the run's status; a finish signal on the subscription if a second's lag matters
+		check := time.NewTicker(followPoll)
+		defer check.Stop()
+		for {
+			select {
+			case e := <-live:
+				if mine(e) && !send(e.Event) {
+					return
+				}
+			case <-check.C:
+				if r.running(prID, runID) {
+					continue
+				}
+				for { // what the run printed last is already queued
+					select {
+					case e := <-live:
+						if mine(e) && !send(e.Event) {
+							return
+						}
+					default:
+						return
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+var followPoll = time.Second
+
+func (r *Reviewer) running(prID, runID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, run := range r.st.Runs[prID] {
+		if run.ID == runID {
+			return run.Status == Running
+		}
+	}
+	return false
 }
 
 // finish stops the stack, releases the worktree, then records the outcome and

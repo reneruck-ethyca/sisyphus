@@ -218,14 +218,12 @@ func (s *Service) RunEvents(prID, runID string) ([]review.Event, int, error) {
 	return s.rev.Events(prID, runID)
 }
 
-// SubscribeRunEvents streams every run's output events until cancel. Subscribe
-// before reading RunEvents' backlog, and skip live events with Line below it.
-func (s *Service) SubscribeRunEvents() (<-chan review.RunEvent, func()) {
+// FollowRun streams a review run's output from line from on until the run is over (see review.Reviewer.Follow).
+func (s *Service) FollowRun(ctx context.Context, prID, runID string, from int) (<-chan review.Event, error) {
 	if s.rev == nil {
-		ch := make(chan review.RunEvent)
-		return ch, func() {}
+		return nil, review.ErrNoRun
 	}
-	return s.rev.SubscribeEvents()
+	return s.rev.Follow(ctx, prID, runID, from)
 }
 
 // RunDir returns the directory holding one review run's run.json, log and out/.

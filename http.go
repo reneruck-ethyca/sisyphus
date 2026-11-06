@@ -810,67 +810,47 @@ func findRun(pr app.PRView, id string) *review.Run {
 // streamRun sends a run's events from line ?from= on as server-sent events: the
 // backlog, then live ones. Once the run is over it sends a "done" event and ends.
 func streamRun(w http.ResponseWriter, r *http.Request, svc *app.Service) {
-	id, runID := prID(r), r.PathValue("run")
-	live, cancel := svc.SubscribeRunEvents() // before the backlog, so nothing falls in between
-	defer cancel()
-	backlog, next, err := svc.RunEvents(id, runID)
+	from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+	events, err := svc.FollowRun(r.Context(), prID(r), r.PathValue("run"), from)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+	sse := newSSE(w)
+	for e := range events {
+		if !sse.send("", e) {
+			return
+		}
+	}
+	sse.send("done", struct{}{})
+}
+
+// sse writes server-sent events. newSSE sends the headers at once, so a client
+// sees the stream open before the first event.
+type sse struct {
+	w  http.ResponseWriter
+	rc *http.ResponseController
+}
+
+func newSSE(w http.ResponseWriter) sse {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	rc := http.NewResponseController(w)
-	send := func(event string, v any) bool {
-		b, _ := json.Marshal(v)
-		if event != "" {
-			fmt.Fprintf(w, "event: %s\n", event)
-		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
-			return false
-		}
-		return rc.Flush() == nil
+	s := sse{w, http.NewResponseController(w)}
+	s.rc.Flush()
+	return s
+}
+
+// send writes v as JSON, as the named event if event isn't "", and reports
+// whether the client is still there.
+func (s sse) send(event string, v any) bool {
+	b, _ := json.Marshal(v)
+	if event != "" {
+		fmt.Fprintf(s.w, "event: %s\n", event)
 	}
-	for _, e := range backlog {
-		if e.Line >= from && !send("", e) {
-			return
-		}
+	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", b); err != nil {
+		return false
 	}
-	rc.Flush()
-	running := func() bool {
-		pr, _ := svc.PR(id)
-		run := findRun(pr, runID)
-		return run != nil && run.Status == review.Running
-	}
-	check := time.NewTicker(time.Second)
-	defer check.Stop()
-	for {
-		select {
-		case e := <-live:
-			if e.PR == id && e.Run == runID && e.Line >= max(next, from) && !send("", e.Event) {
-				return
-			}
-		case <-check.C:
-			if !running() {
-				// Drain what the run printed last, then tell the page to settle.
-				for drained := false; !drained; {
-					select {
-					case e := <-live:
-						if e.PR == id && e.Run == runID && e.Line >= max(next, from) {
-							send("", e.Event)
-						}
-					default:
-						drained = true
-					}
-				}
-				send("done", struct{}{})
-				return
-			}
-		case <-r.Context().Done():
-			return
-		}
-	}
+	return s.rc.Flush() == nil
 }
 
 // streamStatus sends the status as JSON now and after every change, at most
@@ -878,17 +858,8 @@ func streamRun(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 func streamStatus(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 	changed, cancel := svc.SubscribeStatus()
 	defer cancel()
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	rc := http.NewResponseController(w)
-	send := func() bool {
-		b, _ := json.Marshal(svc.Status())
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
-			return false
-		}
-		return rc.Flush() == nil
-	}
-	for send() {
+	sse := newSSE(w)
+	for sse.send("", svc.Status()) {
 		select {
 		case <-changed:
 		case <-r.Context().Done():
@@ -909,27 +880,20 @@ var statusEvery = 2 * time.Second
 func streamLogs(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 	live, cancel := svc.SubscribeLogs() // before the backlog, so nothing falls in between
 	defer cancel()
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	rc := http.NewResponseController(w)
+	sse := newSSE(w)
 	var last uint64
 	send := func(e app.LogEntry) bool {
 		if e.Seq <= last {
 			return true // already sent with the backlog
 		}
 		last = e.Seq
-		b, _ := json.Marshal(e)
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
-			return false
-		}
-		return rc.Flush() == nil
+		return sse.send("", e)
 	}
 	for _, e := range svc.Logs() {
 		if !send(e) {
 			return
 		}
 	}
-	rc.Flush() // send headers even with an empty backlog
 	for {
 		select {
 		case e := <-live:

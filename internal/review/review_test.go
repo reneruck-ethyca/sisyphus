@@ -504,7 +504,7 @@ func TestReattachExitedPastDeadline(t *testing.T) {
 
 func TestClaudeOutputStreamsAndIsRecorded(t *testing.T) {
 	f := newFixture(t)
-	live, cancel := f.r.SubscribeEvents()
+	live, cancel := f.r.subscribe()
 	defer cancel()
 	f.start(t)
 	f.r.Tracked(f.tr)
@@ -1138,5 +1138,58 @@ func TestDesignReviewOnlyOnRequest(t *testing.T) {
 	}
 	if err := f.r.Trigger(tr); err != nil || len(f.r.st.Queue) != 1 || f.r.st.Queue[0].Reason != ReasonManual {
 		t.Fatalf("trigger: %v, queue = %+v", err, f.r.st.Queue)
+	}
+}
+
+func TestFollowSendsBacklogThenLiveThenCloses(t *testing.T) {
+	followPoll = 10 * time.Millisecond
+	t.Cleanup(func() { followPoll = time.Second })
+	f := newFixture(t)
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	id, runID := f.containers()[0].ID, f.runs()[0].ID
+	f.rt.Print(id, "── sisyphus: claude ──\n")
+	waitFor(t, "backlog", func() bool { evs, _, _ := f.r.Events(refA.Key(), runID); return len(evs) == 1 })
+
+	ctx := context.Background()
+	all, err := f.r.Follow(ctx, refA.Key(), runID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, err := f.r.Follow(ctx, refA.Key(), runID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.r.Follow(ctx, refA.Key(), "nope", 0); !errors.Is(err, ErrNoRun) {
+		t.Fatalf("unknown run: %v", err)
+	}
+	f.rt.Print(id, `{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the diff."}]}}`+"\n")
+	f.succeed(id, "")
+
+	collect := func(ch <-chan Event) (lines []int) {
+		timeout := time.After(5 * time.Second)
+		for {
+			select {
+			case e, ok := <-ch:
+				if !ok {
+					return lines
+				}
+				lines = append(lines, e.Line)
+			case <-timeout:
+				t.Fatalf("still open after %v", lines)
+			}
+		}
+	}
+	got := collect(all)
+	if len(got) < 3 || got[0] != 0 || got[1] != 1 || !slices.IsSorted(got) {
+		t.Fatalf("lines = %v, want 0, 1, … in order", got)
+	}
+	_, next, _ := f.r.Events(refA.Key(), runID)
+	if got[len(got)-1] != next-1 {
+		t.Fatalf("lines = %v, log ends at %d", got, next-1)
+	}
+	if s := collect(skip); len(s) != len(got)-1 || s[0] != 1 {
+		t.Fatalf("from 1 = %v", s)
 	}
 }
