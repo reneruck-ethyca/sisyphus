@@ -2,28 +2,9 @@ package lastmile
 
 import "time"
 
-// Tones colour a state chip; they match the dashboard's chip classes.
-const (
-	ToneBad     = "bad"     // ci-red, conflict, needs-human
-	ToneOK      = "ok"      // ci-green, approved, merged
-	ToneNeutral = "neutral" // everything else
-)
-
-// Tone is the chip colour of a state.
-func Tone(state string) string {
-	switch state {
-	case StateCIRed, StateConflict, StateNeedsHuman:
-		return ToneBad
-	case StateCIGreen, StateApproved, StateMerged:
-		return ToneOK
-	}
-	return ToneNeutral
-}
-
 // View is a handoff as the dashboard shows it.
 type View struct {
 	Handoff
-	Tone      string   `json:"tone"`
 	Over      bool     `json:"over"`                 // the handoff is over: merged, closed or cancelled
 	Reviewing []string `json:"reviewing"`            // asked to review now; before the PR is read, the planned humans
 	Depth     int      `json:"depth"`                // how far down a stack: 0 for a root or a handoff on its own
@@ -42,7 +23,7 @@ func (m *Manager) Views() []View {
 	byID := map[string]View{}
 	kids := map[string][]string{} // parent id -> children ids, oldest first
 	for _, h := range hs {
-		v := View{Handoff: h, Tone: Tone(h.State), Over: Terminal(h.State), Reviewing: h.Reviewers}
+		v := View{Handoff: h, Over: Terminal(h.State), Reviewing: h.Reviewers}
 		if h.Snapshot != nil {
 			v.Reviewing = h.Snapshot.Requested
 		}

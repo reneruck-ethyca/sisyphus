@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
-// Tones colour a verdict in the UIs.
+// Tones colour a verdict or a handoff state in the UIs.
 const (
 	ToneOK      = "ok"      // approved
 	ToneChanges = "changes" // changes requested
@@ -122,4 +123,137 @@ func activity(prs []PRView) []Activity {
 func upToDate(tr tracker.Tracked, rs review.PRStatus) bool {
 	last := rs.Latest()
 	return rs.State == "" && last != nil && last.Status == review.Succeeded && last.Job.PR.HeadSHA == tr.HeadSHA
+}
+
+// HandoffTone is the chip colour of a handoff state.
+func HandoffTone(state string) string {
+	switch state {
+	case lastmile.StateCIRed, lastmile.StateConflict, lastmile.StateNeedsHuman:
+		return ToneBad
+	case lastmile.StateCIGreen, lastmile.StateApproved, lastmile.StateMerged:
+		return ToneOK
+	}
+	return ToneNeutral
+}
+
+var reasons = map[string]string{review.ReasonNew: "PR first seen", review.ReasonCommits: "new commits",
+	review.ReasonReplies: "new replies", review.ReasonManual: "run by you"}
+
+// ReasonLabel says why a review run started.
+func ReasonLabel(r string) string { return cmp.Or(reasons[r], r) }
+
+// RunDuration is how long a run took, or has been running.
+func RunDuration(r review.Run) string {
+	end := r.Finished
+	if r.Status == review.Running || end.IsZero() {
+		end = time.Now()
+	}
+	d := end.Sub(r.Started).Round(time.Second)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d s", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d min %d s", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// PRView shows a history entry with the tracked PRs' page.
+func (h HistoryRow) PRView() PRView {
+	return PRView{ID: h.ID, Review: review.PRStatus{Runs: h.Runs}, Tracked: tracker.Tracked{
+		PRRef: h.PRRef, URL: h.URL, Title: h.Title, Author: h.Author, TrackedAt: h.TrackedAt}}
+}
+
+// Board is the dashboard pages' reading of a Status: what needs you, the PR groups and the counts.
+type Board struct{ Status }
+
+// PRGroup is one heading of the PR list.
+type PRGroup struct {
+	Label string
+	PRs   []PRView
+}
+
+var groupLabels = []struct{ key, label string }{
+	{GroupAttention, "Needs you"}, {GroupReviewing, "Reviewing"}, {GroupReviewed, "Reviewed"}, {GroupWaiting, "Not reviewed yet"},
+}
+
+// Groups is the PR list by what the user has to do, empty groups left out.
+func (b Board) Groups() []PRGroup {
+	var out []PRGroup
+	for _, g := range groupLabels {
+		if prs := b.InGroup(g.key); len(prs) > 0 {
+			out = append(out, PRGroup{g.label, prs})
+		}
+	}
+	return out
+}
+
+// InGroup lists the PRs in one Group*.
+func (b Board) InGroup(group string) []PRView {
+	var out []PRView
+	for _, pr := range b.PRs {
+		if pr.Group == group {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// AwaitingYou lists the PRs sisyphus reviewed that wait for your verdict, newest first.
+func (b Board) AwaitingYou() []PRView {
+	out := slices.DeleteFunc(b.InGroup(GroupReviewed), func(p PRView) bool {
+		return p.Tone != ToneOK && p.Tone != ToneChanges
+	})
+	slices.SortFunc(out, func(a, b PRView) int { return b.VerdictAt.Compare(a.VerdictAt) })
+	return out
+}
+
+// Failing lists the PRs whose review or sync failed.
+func (b Board) Failing() []PRView { return b.InGroup(GroupAttention) }
+
+// NeedsHuman lists the handoffs waiting for a person.
+func (b Board) NeedsHuman() []lastmile.View {
+	return slices.DeleteFunc(slices.Clone(b.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateNeedsHuman })
+}
+
+// NeedsCount is the number of items in the "Needs you" list.
+func (b Board) NeedsCount() int {
+	return len(b.NeedsHuman()) + len(b.Failing()) + len(b.AwaitingYou())
+}
+
+// Queued counts the PRs waiting for a run slot.
+func (b Board) Queued() (n int) {
+	for _, p := range b.PRs {
+		if p.Review.State == review.StateQueued {
+			n++
+		}
+	}
+	return n
+}
+
+// Recent is the latest few review runs.
+func (b Board) Recent() []Activity { return b.Activity[:min(len(b.Activity), 3)] }
+
+// AgentsRunning lists the handoffs with an agent run in flight, oldest run first.
+func (b Board) AgentsRunning() []lastmile.View {
+	out := slices.DeleteFunc(slices.Clone(b.Handoffs), func(v lastmile.View) bool { return v.AgentRunning == "" })
+	slices.SortFunc(out, func(a, b lastmile.View) int { return a.AgentStarted.Compare(b.AgentStarted) })
+	return out
+}
+
+// LMCount counts the open handoffs in any of the states; none = every open one.
+func (b Board) LMCount(states ...string) (n int) {
+	for _, v := range b.Handoffs {
+		if len(states) == 0 && !v.Over || slices.Contains(states, v.State) {
+			n++
+		}
+	}
+	return n
+}
+
+// Merged is the last few merged handoffs, newest first.
+func (b Board) Merged() []lastmile.View {
+	out := slices.DeleteFunc(slices.Clone(b.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateMerged })
+	slices.SortFunc(out, func(a, b lastmile.View) int { return b.Updated.Compare(a.Updated) })
+	return out[:min(len(out), 3)]
 }

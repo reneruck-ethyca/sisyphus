@@ -864,7 +864,7 @@ func TestHandoffPageFull(t *testing.T) {
 		Shadow: &lastmile.Verdict{At: now, Head: "abcdef123", Blockers: []string{evil}},
 		Snapshot: &lastmile.Snapshot{Head: "abcdef123", Author: "x", CI: "red", Checks: []github.Check{{Name: "t", Conclusion: "FAILURE", URL: "https://github.com/o/r/actions/1"}},
 			Failures: []lastmile.Failure{{Name: "t", Fingerprint: "f"}}, Approvals: []lastmile.Approval{{User: "a", CommitSHA: "old", Stale: true}}, Requested: []string{"a", "c"}}}
-	v := lastmile.View{Handoff: h, Tone: "bad", Reviewing: []string{"a", "c"}}
+	v := lastmile.View{Handoff: h, Reviewing: []string{"a", "c"}}
 	var buf bytes.Buffer
 	if err := pages.ExecuteTemplate(&buf, "handoff.html", handoffPage{V: v, Events: h.Events}); err != nil {
 		t.Fatal(err)
@@ -875,7 +875,7 @@ func TestHandoffPageFull(t *testing.T) {
 			t.Errorf("page contains %q", bad)
 		}
 	}
-	for _, want := range []string{"Would merge", "stale", "+c", "gone"} {
+	for _, want := range []string{"Would merge", "stale", "+c", "gone", `chip bad">needs-human`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("page lacks %q", want)
 		}
@@ -886,7 +886,7 @@ func TestHandoffPageFull(t *testing.T) {
 func TestHTTPHome(t *testing.T) {
 	evil := `<script>alert(1)</script>`
 	now := time.Now()
-	h := homePage{dashboard: dashboard{Status: app.Status{Reviews: true, SlotsUsed: 2, SlotsMax: 3,
+	h := homePage{dashboard: dashboard{Board: app.Board{Status: app.Status{Reviews: true, SlotsUsed: 2, SlotsMax: 3,
 		PRs: []app.PRView{
 			{ID: "o/r#1", Tracked: tracker.Tracked{PRRef: github.PRRef{Repo: "o/r", Number: 1}, Title: evil, URL: "https://github.com/o/r/pull/1", Author: "carol"},
 				Group: app.GroupReviewed, Tone: app.ToneChanges, Verdict: "Changes requested", VerdictAt: now},
@@ -895,7 +895,7 @@ func TestHTTPHome(t *testing.T) {
 		Handoffs: []lastmile.View{
 			{Handoff: lastmile.Handoff{ID: "h1", Title: evil, State: lastmile.StateNeedsHuman, Reason: evil, PRNumber: 7, Repo: "o/r", PRURL: "https://evil.example/x"}},
 			{Handoff: lastmile.Handoff{ID: "h2", Title: "Fixing", State: lastmile.StateCIRed}, AgentRunning: lastmile.TriggerCI, AgentStarted: now}},
-	}}}
+	}}}}
 	rec := httptest.NewRecorder()
 	render(rec, "home.html", h)
 	page := rec.Body.String()
@@ -907,26 +907,6 @@ func TestHTTPHome(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("home missing %q", want)
 		}
-	}
-}
-
-func TestHomeNeedsYou(t *testing.T) {
-	now := time.Now()
-	pr := func(n int, group, tone string) app.PRView {
-		return app.PRView{ID: "o/r#" + strconv.Itoa(n), Group: group, Tone: tone, Verdict: "v" + strconv.Itoa(n), VerdictAt: now.Add(time.Duration(n) * time.Minute)}
-	}
-	h := homePage{dashboard: dashboard{Status: app.Status{
-		PRs: []app.PRView{pr(1, app.GroupReviewed, app.ToneOK), pr(2, app.GroupReviewed, app.ToneNeutral), pr(3, app.GroupAttention, app.ToneBad), pr(4, app.GroupReviewed, app.ToneChanges)},
-		Handoffs: []lastmile.View{
-			{Handoff: lastmile.Handoff{ID: "a", State: lastmile.StateNeedsHuman}},
-			{Handoff: lastmile.Handoff{ID: "b", State: lastmile.StateCIRed}},
-			{Handoff: lastmile.Handoff{ID: "c", State: lastmile.StateMerged}, Over: true}},
-	}}}
-	if got := h.AwaitingYou(); len(got) != 2 || got[0].ID != "o/r#4" || got[1].ID != "o/r#1" {
-		t.Errorf("awaiting you = %+v, want the approved and changes-requested ones, newest first", got)
-	}
-	if h.NeedsCount() != 4 || h.LMCount() != 2 || h.LMCount(lastmile.StateCIRed, lastmile.StateConflict) != 1 || len(h.Merged()) != 1 {
-		t.Errorf("needs %d, open %d, red %d, merged %d", h.NeedsCount(), h.LMCount(), h.LMCount(lastmile.StateCIRed), len(h.Merged()))
 	}
 }
 

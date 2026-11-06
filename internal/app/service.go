@@ -41,18 +41,6 @@ type Status struct {
 	SlotsMax     int               `json:"slots_max"`             // review.max_concurrent; 0 when reviews are disabled
 }
 
-// AgentsRunning lists the handoffs with an agent run in flight, oldest run first.
-func (s Status) AgentsRunning() []lastmile.View {
-	out := slices.DeleteFunc(slices.Clone(s.Handoffs), func(v lastmile.View) bool { return v.AgentRunning == "" })
-	slices.SortFunc(out, func(a, b lastmile.View) int { return a.AgentStarted.Compare(b.AgentStarted) })
-	return out
-}
-
-// NeedsHuman lists the handoffs waiting for a person, for the dashboard's banner.
-func (s Status) NeedsHuman() []lastmile.View {
-	return slices.DeleteFunc(slices.Clone(s.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateNeedsHuman })
-}
-
 // ActiveReview is a review run in progress and its container.
 type ActiveReview struct {
 	PR        string    `json:"pr"`

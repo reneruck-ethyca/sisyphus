@@ -4,7 +4,7 @@
 <div class="pagehead">
   <nav class="meta-line" aria-label="Breadcrumb"><a href="/lastmile">Last mile</a><span>›</span><span>{{.ID}}</span></nav>
   <h1>{{.Title}}</h1>
-  <div class="meta-line"><span class="chip {{.Tone}}">{{.State}}</span>{{with .PrevState}}<span>was {{.}}</span>{{end}}<span>{{.Repo}}{{if gh .PRURL}} <a href="{{gh .PRURL}}" target="_blank" rel="noopener">#{{.PRNumber}} ↗</a>{{end}}</span><span>branch <code>{{.Branch}}</code> onto <code>{{.Base}}</code></span>{{with .WaitingOn}}<span>waiting on <a href="/lastmile/{{.}}">{{.}}</a></span>{{end}}<span>updated {{ago .Updated}}</span></div>
+  <div class="meta-line"><span class="chip {{stateTone .State}}">{{.State}}</span>{{with .PrevState}}<span>was {{.}}</span>{{end}}<span>{{.Repo}}{{if gh .PRURL}} <a href="{{gh .PRURL}}" target="_blank" rel="noopener">#{{.PRNumber}} ↗</a>{{end}}</span><span>branch <code>{{.Branch}}</code> onto <code>{{.Base}}</code></span>{{with .WaitingOn}}<span>waiting on <a href="/lastmile/{{.}}">{{.}}</a></span>{{end}}<span>updated {{ago .Updated}}</span></div>
   {{with .Reason}}<p class="notice{{if ne $.V.State "needs-human"}} quiet{{end}}">{{.}}</p>{{end}}
   {{with .Error}}<p class="err">{{.}}</p>{{end}}{{with .Warning}}<p class="muted">{{.}}</p>{{end}}
   <div class="actions">{{template "actions" .}}</div>

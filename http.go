@@ -25,7 +25,6 @@ import (
 	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
-	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 //go:embed web/*.html web/style.css
@@ -60,8 +59,9 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	},
 	"outcome":       func(r review.Run) string { l, _ := app.Outcome(r); return l },
 	"tone":          func(r review.Run) string { _, t := app.Outcome(r); return t },
-	"reason":        reasonLabel,
-	"dur":           runDuration,
+	"reason":        app.ReasonLabel,
+	"dur":           app.RunDuration,
+	"stateTone":     app.HandoffTone,
 	"short":         func(sha string) string { return sha[:min(len(sha), 8)] },
 	"pct":           func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
 	"warnAt":        func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
@@ -125,27 +125,6 @@ func rel(t time.Time) string {
 		return "in " + v
 	}
 	return v + " ago"
-}
-
-var reasons = map[string]string{review.ReasonNew: "PR first seen", review.ReasonCommits: "new commits",
-	review.ReasonReplies: "new replies", review.ReasonManual: "run by you"}
-
-func reasonLabel(r string) string { return cmp.Or(reasons[r], r) }
-
-// runDuration is how long a run took, or has been running.
-func runDuration(r review.Run) string {
-	end := r.Finished
-	if r.Status == review.Running || end.IsZero() {
-		end = time.Now()
-	}
-	d := end.Sub(r.Started).Round(time.Second)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%d s", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%d min %d s", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // startHTTP serves the dashboard and JSON API on addr, or on a free loopback
@@ -348,7 +327,7 @@ func newHandler(svc *app.Service) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		d := dashboard{Status: svc.Status(), PR: &pr, Run: run, Events: evs, Next: next}
+		d := dashboard{Board: app.Board{Status: svc.Status()}, PR: &pr, Run: run, Events: evs, Next: next}
 		if d.ReviewFile, err = svc.ReviewFile(pr.ID, run.ID); err != nil {
 			slog.Warn("review file", "pr", pr.ID, "run", run.ID, "err", err)
 		}
@@ -368,7 +347,7 @@ func newHandler(svc *app.Service) http.Handler {
 	})
 	mux.HandleFunc("GET /lastmile", func(w http.ResponseWriter, r *http.Request) {
 		st := svc.Status()
-		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile", Status: &st}, Status: st})
+		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile", Status: &st}, Board: app.Board{Status: st}})
 	})
 	mux.HandleFunc("GET /lastmile/shadow", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
 		shadowPage(w, r, svc, lm)
@@ -389,7 +368,7 @@ func newHandler(svc *app.Service) http.Handler {
 		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
 	})
 	history := func(w http.ResponseWriter, r *http.Request) {
-		d := dashboard{Status: svc.Status(), History: svc.History()}
+		d := dashboard{Board: app.Board{Status: svc.Status()}, History: svc.History()}
 		if r.PathValue("number") != "" {
 			i := slices.IndexFunc(d.History, func(h app.HistoryRow) bool { return h.ID == prID(r) })
 			if i < 0 {
@@ -397,7 +376,7 @@ func newHandler(svc *app.Service) http.Handler {
 				return
 			}
 			d.Hist = &d.History[i]
-			pr := historyView(*d.Hist)
+			pr := d.Hist.PRView()
 			d.PR = &pr
 			show := pr.Review.Latest()
 			if id := r.PathValue("run"); id != "" {
@@ -456,7 +435,7 @@ func newHandler(svc *app.Service) http.Handler {
 		restartSoon()
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		h := homePage{dashboard: dashboard{Status: svc.Status()}}
+		h := homePage{dashboard: dashboard{Board: app.Board{Status: svc.Status()}}}
 		if lm := svc.LastMile(); lm != nil {
 			if rep, err := lm.ShadowReport(lastmile.ShadowQuery{}); err == nil { // unreadable: the card is left out
 				h.Shadow = &rep
@@ -465,7 +444,7 @@ func newHandler(svc *app.Service) http.Handler {
 		render(w, "home.html", h)
 	})
 	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "index.html", dashboard{Status: svc.Status()})
+		render(w, "index.html", dashboard{Board: app.Board{Status: svc.Status()}})
 	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}", func(w http.ResponseWriter, r *http.Request) {
 		pr, ok := svc.PR(prID(r))
@@ -473,7 +452,7 @@ func newHandler(svc *app.Service) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		d := dashboard{Status: svc.Status(), PR: &pr}
+		d := dashboard{Board: app.Board{Status: svc.Status()}, PR: &pr}
 		if d.Stack, d.StackErr = svc.Stack(r.Context(), pr.ID); d.StackErr != nil {
 			slog.Warn("stack status", "pr", pr.ID, "err", d.StackErr)
 		}
@@ -506,7 +485,7 @@ func newHandler(svc *app.Service) http.Handler {
 // dashboard is the two-column page: every PR on the left, PR (if any) on the
 // right, and one of its review runs (if any) streaming below.
 type dashboard struct {
-	app.Status
+	app.Board
 	PR     *app.PRView
 	Run    *review.Run
 	Events []review.Event
@@ -523,16 +502,18 @@ type dashboard struct {
 
 func (d dashboard) Archive() bool { return d.History != nil }
 
-// historyView shows a history entry with the PR templates.
-func historyView(h app.HistoryRow) app.PRView {
-	return app.PRView{ID: h.ID, Review: review.PRStatus{Runs: h.Runs}, Tracked: tracker.Tracked{
-		PRRef: h.PRRef, URL: h.URL, Title: h.Title, Author: h.Author, TrackedAt: h.TrackedAt}}
-}
-
 // topbar is the header: the dashboard shows Status in it, other pages don't.
 type topbar struct {
 	Page   string
 	Status *app.Status
+}
+
+// NeedsHuman feeds the Last mile tab's badge.
+func (t topbar) NeedsHuman() []lastmile.View {
+	if t.Status == nil {
+		return nil
+	}
+	return app.Board{Status: *t.Status}.NeedsHuman()
 }
 
 func (d dashboard) Top() topbar {
@@ -553,86 +534,9 @@ func (h homePage) Top() topbar { return topbar{Status: &h.Status} }
 
 func (h homePage) Title() string { return "Home" }
 
-// AwaitingYou lists the PRs sisyphus reviewed that wait for your verdict, newest first.
-func (h homePage) AwaitingYou() []app.PRView {
-	out := slices.DeleteFunc(h.InGroup(app.GroupReviewed), func(p app.PRView) bool {
-		return p.Tone != app.ToneOK && p.Tone != app.ToneChanges
-	})
-	slices.SortFunc(out, func(a, b app.PRView) int { return b.VerdictAt.Compare(a.VerdictAt) })
-	return out
-}
-
-// Failing lists the PRs whose review or sync failed.
-func (h homePage) Failing() []app.PRView { return h.InGroup(app.GroupAttention) }
-
-// NeedsCount is the number of items in the "Needs you" list.
-func (h homePage) NeedsCount() int {
-	return len(h.NeedsHuman()) + len(h.Failing()) + len(h.AwaitingYou())
-}
-
-// Queued counts the PRs waiting for a run slot.
-func (h homePage) Queued() (n int) {
-	for _, p := range h.PRs {
-		if p.Review.State == review.StateQueued {
-			n++
-		}
-	}
-	return n
-}
-
-// Recent is the latest few review runs.
-func (h homePage) Recent() []app.Activity { return h.Activity[:min(len(h.Activity), 3)] }
-
-// LMCount counts the open handoffs in any of the states; none = every open one.
-func (h homePage) LMCount(states ...string) (n int) {
-	for _, v := range h.Handoffs {
-		if len(states) == 0 && !v.Over || slices.Contains(states, v.State) {
-			n++
-		}
-	}
-	return n
-}
-
-// Merged is the last few merged handoffs, newest first.
-func (h homePage) Merged() []lastmile.View {
-	out := slices.DeleteFunc(slices.Clone(h.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateMerged })
-	slices.SortFunc(out, func(a, b lastmile.View) int { return b.Updated.Compare(a.Updated) })
-	return out[:min(len(out), 3)]
-}
-
-type prGroup struct {
-	Label string
-	PRs   []app.PRView
-}
-
-var groupLabels = []struct{ key, label string }{
-	{app.GroupAttention, "Needs you"}, {app.GroupReviewing, "Reviewing"}, {app.GroupReviewed, "Reviewed"}, {app.GroupWaiting, "Not reviewed yet"},
-}
-
-// Groups is the PR list by what the user has to do, empty groups left out.
-func (d dashboard) Groups() []prGroup {
-	var out []prGroup
-	for _, g := range groupLabels {
-		if prs := d.InGroup(g.key); len(prs) > 0 {
-			out = append(out, prGroup{g.label, prs})
-		}
-	}
-	return out
-}
-
-func (d dashboard) InGroup(group string) []app.PRView {
-	var out []app.PRView
-	for _, pr := range d.PRs {
-		if pr.Group == group {
-			out = append(out, pr)
-		}
-	}
-	return out
-}
-
 type lastmilePage struct {
 	Top topbar
-	app.Status
+	app.Board
 }
 
 // handoffPage is one handoff's page; Events are newest first.

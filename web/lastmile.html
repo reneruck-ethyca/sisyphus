@@ -12,7 +12,7 @@
 {{with .Handoffs}}<ol class="lm">
   <li class="hd"><span>State</span><span>Handoff</span><span>Fix rounds</span><span>Reviewers</span><span>Updated</span><span></span></li>
   {{range .}}<li{{if .Depth}} class="depth{{.Depth}}"{{end}}>
-  <span class="chip {{.Tone}}">{{.State}}</span>
+  <span class="chip {{stateTone .State}}">{{.State}}</span>
   <span class="grow"><a class="ttl" href="/lastmile/{{.ID}}">{{.Title}}</a>
     <span class="facts"><span class="id">{{.ID}}</span>{{if gh .PRURL}} · <a href="{{gh .PRURL}}" target="_blank" rel="noopener">{{base .Repo}} #{{.PRNumber}}</a>{{end}}{{with .WaitingOn}} · waiting on {{.}}{{end}}{{with .Reason}} · {{.}}{{end}}{{with .PrevState}} · was {{.}}{{end}}</span>
     {{with .Error}}<span class="err">{{.}}</span>{{end}}{{with .Warning}}<span class="facts">{{.}}</span>{{end}}</span>

@@ -21,7 +21,7 @@
 {{/* top is the header bar; .Status is nil on pages that don't show it. */}}
 {{define "top"}}<header class="top">
   <a class="brand" href="/">sisyphus</a>
-  <nav><a href="/reviews"{{if eq .Page "reviews"}} aria-current="page"{{end}}>Reviews</a><a href="/lastmile"{{if eq .Page "lastmile"}} aria-current="page"{{end}}>Last mile{{with .Status}}{{with .NeedsHuman}}<span class="badge" aria-label="{{len .}} need you">{{len .}}</span>{{end}}{{end}}</a><a href="/history"{{if eq .Page "history"}} aria-current="page"{{end}}>History</a><a href="/logs"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a><a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings{{if skill.Stale}}<span class="badge dot" title="Skill update available" aria-label="skill update available"></span>{{end}}</a></nav>
+  <nav><a href="/reviews"{{if eq .Page "reviews"}} aria-current="page"{{end}}>Reviews</a><a href="/lastmile"{{if eq .Page "lastmile"}} aria-current="page"{{end}}>Last mile{{with .NeedsHuman}}<span class="badge" aria-label="{{len .}} need you">{{len .}}</span>{{end}}</a><a href="/history"{{if eq .Page "history"}} aria-current="page"{{end}}>History</a><a href="/logs"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a><a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings{{if skill.Stale}}<span class="badge dot" title="Skill update available" aria-label="skill update available"></span>{{end}}</a></nav>
   {{with .Status}}<div class="top-status">
   {{if .Running}}<span class="checked running">Checking now…</span>
   {{else if .LastRun.IsZero}}<span class="checked running">Starting…</span>
