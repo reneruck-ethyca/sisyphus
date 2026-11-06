@@ -37,13 +37,7 @@ var styleCSS, _ = webFS.ReadFile("web/style.css")
 var openInBrowser = func(url string) error { return exec.Command("open", url).Run() }
 
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
-	"staleSkills": func() []string {
-		var names []string
-		for _, a := range staleSkillAgents() {
-			names = append(names, agentNames[a])
-		}
-		return names
-	},
+	"skill": skillState,
 	"when": func(t time.Time) string {
 		if t.IsZero() {
 			return "never"
@@ -331,14 +325,15 @@ func newHandler(svc *app.Service) http.Handler {
 			writeJSON(w, http.StatusOK, rep)
 		}
 	})
-	// Brings every out-of-date copy of the handoff skill up to this binary's; the
-	// content is fixed, so like the buttons below it needs no token.
+	// Brings every out-of-date copy of the handoff skill up to this binary's, in
+	// the background; GET reports how it went. The content is fixed, so like the
+	// buttons below it needs no token.
 	mux.HandleFunc("POST /api/skill/update", func(w http.ResponseWriter, r *http.Request) {
-		if err := updateStaleSkills(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		startSkillUpdate()
+		writeJSON(w, http.StatusAccepted, skillState())
+	})
+	mux.HandleFunc("GET /api/skill", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, skillState())
 	})
 	// The dashboard's buttons call these, so no token (as with the reviewers edit); the API is loopback.
 	for _, verb := range []string{"resume", "cancel"} {

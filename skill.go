@@ -93,7 +93,9 @@ var agentNames = map[string]string{"claude": "Claude Code", "codex": "Codex"}
 // someone's choice. A hand-edited skill also reads as stale.
 var staleSkills struct {
 	sync.Mutex
-	agents []string
+	agents   []string
+	updating bool   // an update runs in the background
+	err      string // why the last update failed ("" = it didn't)
 }
 
 // markStaleSkills sets the marker; the skill only changes with the binary, so
@@ -112,25 +114,46 @@ func markStaleSkills() {
 	staleSkills.Unlock()
 }
 
-// staleSkillAgents reads the marker.
-func staleSkillAgents() []string {
-	staleSkills.Lock()
-	defer staleSkills.Unlock()
-	return slices.Clone(staleSkills.agents)
+// skillStatus is the marker as the dashboard shows it.
+type skillStatus struct {
+	Stale    []string `json:"stale"` // agent display names
+	Updating bool     `json:"updating"`
+	Error    string   `json:"error,omitempty"`
 }
 
-// updateStaleSkills installs the binary's skill for every marked agent and
-// keeps only the ones that failed marked.
-func updateStaleSkills() error {
+func skillState() skillStatus {
 	staleSkills.Lock()
 	defer staleSkills.Unlock()
-	var failed []string
-	var errs []error
+	st := skillStatus{Updating: staleSkills.updating, Error: staleSkills.err}
 	for _, a := range staleSkills.agents {
-		if _, err := installSkill(a); err != nil {
-			failed, errs = append(failed, a), append(errs, err)
-		}
+		st.Stale = append(st.Stale, agentNames[a])
 	}
-	staleSkills.agents = failed
-	return errors.Join(errs...)
+	return st
+}
+
+// startSkillUpdate installs the binary's skill for every marked agent in the
+// background; agents that fail stay marked. A no-op while one runs.
+func startSkillUpdate() {
+	staleSkills.Lock()
+	defer staleSkills.Unlock()
+	if staleSkills.updating {
+		return
+	}
+	staleSkills.updating, staleSkills.err = true, ""
+	agents := slices.Clone(staleSkills.agents)
+	go func() {
+		var failed []string
+		var errs []error
+		for _, a := range agents {
+			if _, err := installSkill(a); err != nil {
+				failed, errs = append(failed, a), append(errs, err)
+			}
+		}
+		staleSkills.Lock()
+		defer staleSkills.Unlock()
+		staleSkills.agents, staleSkills.updating = failed, false
+		if err := errors.Join(errs...); err != nil {
+			staleSkills.err = err.Error()
+		}
+	}()
 }

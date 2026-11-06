@@ -936,12 +936,27 @@ func TestHTTPSkillUpdate(t *testing.T) {
 	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "skill update available") {
 		t.Fatalf("no dot on the Settings tab")
 	}
-	if _, body := get(t, srv.URL+"/settings"); !strings.Contains(body, "skill is available for Claude Code.") {
+	if _, body := get(t, srv.URL+"/settings"); !strings.Contains(body, `"stale":["Claude Code"]`) {
 		t.Fatalf("no update offer on the settings page")
 	}
 	resp, err := http.Post(srv.URL+"/api/skill/update", "", nil)
-	if err != nil || resp.StatusCode != http.StatusNoContent {
+	if err != nil || resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("update = %v %v", resp, err)
+	}
+	resp.Body.Close()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		_, body := get(t, srv.URL+"/api/skill")
+		var st skillStatus
+		json.Unmarshal([]byte(body), &st)
+		if !st.Updating {
+			if len(st.Stale) != 0 || st.Error != "" {
+				t.Fatalf("after the update: %s", body)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("update never finished")
+		}
 	}
 	if b, _ := os.ReadFile(path); !bytes.Equal(b, handoffSkill) {
 		t.Error("skill not updated")
@@ -949,7 +964,7 @@ func TestHTTPSkillUpdate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(codex, "skills", skillName)); err == nil {
 		t.Error("codex got a skill it never had")
 	}
-	if _, body := get(t, srv.URL+"/settings"); strings.Contains(body, "skill update available") || !strings.Contains(body, "up to date") {
+	if _, body := get(t, srv.URL+"/settings"); strings.Contains(body, "skill update available") || strings.Contains(body, "Claude Code") {
 		t.Error("update still offered")
 	}
 }
