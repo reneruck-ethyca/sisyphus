@@ -180,8 +180,7 @@ func health(tr tracker.Tracked) string {
 // owns the run loop and hands out copies; the tracker locks, so PR actions and
 // a running tick serialise there.
 type Service struct {
-	// LastMile takes handoffs; nil when lastmile.disabled. Set before Run.
-	LastMile *lastmile.Manager
+	lastMile *lastmile.Manager // nil when lastmile.disabled
 
 	cfg     config.Config
 	tracker *tracker.Tracker
@@ -401,8 +400,8 @@ func (s *Service) RunQueued() bool { return len(s.runNow) > 0 }
 // Ticks never overlap. Reviews run alongside; leftover review containers are
 // re-attached before the first tick so it won't sync a worktree still in use.
 func (s *Service) Run(ctx context.Context) {
-	if s.LastMile != nil {
-		go s.LastMile.Run(ctx)
+	if s.lastMile != nil {
+		go s.lastMile.Run(ctx)
 	}
 	if s.rev != nil {
 		s.rev.Reattach(ctx)
@@ -511,8 +510,8 @@ func (s *Service) publish() {
 	}
 	slices.SortFunc(active, func(a, b ActiveReview) int { return a.Started.Compare(b.Started) })
 	handoffs := []lastmile.View{}
-	if s.LastMile != nil {
-		handoffs = s.LastMile.Views()
+	if s.lastMile != nil {
+		handoffs = s.lastMile.Views()
 	}
 	s.update(func(st *Status) {
 		st.Handoffs = handoffs
@@ -560,89 +559,13 @@ func (s *Service) SaveSettings(values map[string]any) error {
 	return nil
 }
 
-// ErrLastMileDisabled is what handoffs get when lastmile.disabled is set.
-var ErrLastMileDisabled = errors.New("the last mile is disabled (lastmile.disabled)")
-
-// Handoff takes a branch over for TLM (see lastmile.Manager.Handoff).
-// HandoffAuthorized says whether tok may create handoffs; with the last mile
-// disabled any token passes, so the caller gets ErrLastMileDisabled instead.
-func (s *Service) HandoffAuthorized(tok string) bool {
-	return s.LastMile == nil || s.LastMile.Authorized(tok)
-}
-
-func (s *Service) Handoff(ctx context.Context, req lastmile.Request) (lastmile.Handoff, error) {
-	if s.LastMile == nil {
-		return lastmile.Handoff{}, ErrLastMileDisabled
-	}
-	h, err := s.LastMile.Handoff(ctx, req)
-	if err == nil {
-		s.publish()
-	}
-	return h, err
-}
-
-// Handoffs lists the handoffs, oldest first; never nil.
-func (s *Service) Handoffs() []lastmile.Handoff {
-	if s.LastMile == nil {
-		return []lastmile.Handoff{}
-	}
-	return s.LastMile.List()
-}
-
-// ShadowReport summarises the merge=shadow log (see lastmile.Manager.ShadowReport).
-func (s *Service) ShadowReport(q lastmile.ShadowQuery) (lastmile.ShadowReport, error) {
-	if s.LastMile == nil {
-		return lastmile.ShadowReport{}, ErrLastMileDisabled
-	}
-	return s.LastMile.ShadowReport(q)
-}
-
-// UseLastMile sets the manager handoffs go to and refreshes the dashboard when they change.
+// UseLastMile sets the manager that takes handoffs and refreshes the dashboard
+// when they change. Call it before Run.
 func (s *Service) UseLastMile(m *lastmile.Manager) {
-	s.LastMile = m
+	s.lastMile = m
 	m.OnChange = s.publish
 	s.publish()
 }
 
-// SetReviewers replaces a handoff's human reviewers (see lastmile.Manager.SetReviewers).
-func (s *Service) SetReviewers(id string, logins []string) (lastmile.Handoff, error) {
-	if s.LastMile == nil {
-		return lastmile.Handoff{}, ErrLastMileDisabled
-	}
-	h, err := s.LastMile.SetReviewers(id, logins)
-	if err == nil {
-		s.publish()
-	}
-	return h, err
-}
-
-// ResumeHandoff and CancelHandoff are lastmile.Manager.Resume and Cancel.
-func (s *Service) ResumeHandoff(ctx context.Context, id string) (lastmile.Handoff, error) {
-	if s.LastMile == nil {
-		return lastmile.Handoff{}, ErrLastMileDisabled
-	}
-	h, err := s.LastMile.Resume(ctx, id)
-	if err == nil {
-		s.publish()
-	}
-	return h, err
-}
-
-func (s *Service) CancelHandoff(id string) (lastmile.Handoff, error) {
-	if s.LastMile == nil {
-		return lastmile.Handoff{}, ErrLastMileDisabled
-	}
-	h, err := s.LastMile.Cancel(id)
-	if err == nil {
-		s.publish()
-	}
-	return h, err
-}
-
-// HandoffByID returns one handoff.
-func (s *Service) HandoffByID(id string) (lastmile.Handoff, bool) {
-	if s.LastMile == nil {
-		return lastmile.Handoff{}, false
-	}
-	return s.LastMile.Get(id)
-}
+// LastMile is the manager that takes handoffs; nil when lastmile.disabled.
+func (s *Service) LastMile() *lastmile.Manager { return s.lastMile }

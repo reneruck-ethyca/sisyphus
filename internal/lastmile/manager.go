@@ -26,7 +26,8 @@ type Manager struct {
 	now     func() time.Time
 	token   string // required to create handoffs (Authorized)
 
-	// OnChange is called after a handoff changed; the app uses it to refresh the dashboard.
+	// OnChange is called, without the lock held, after any handoff changed; the
+	// app uses it to refresh the dashboard.
 	OnChange func()
 
 	running runs           // agent runs in flight, by handoff id

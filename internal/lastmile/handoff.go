@@ -44,12 +44,22 @@ func (m *Manager) Handoff(ctx context.Context, req Request) (Handoff, error) {
 	if err := m.inspect(ctx, &h, req.StackParent); err != nil {
 		return Handoff{}, err
 	}
+	if err := m.add(&h); err != nil {
+		return Handoff{}, err
+	}
+	m.changed()
+	m.Kick()
+	return h, nil
+}
+
+// add gives h an id and stores it, unless its branch is already owned.
+func (m *Manager) add(h *Handoff) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if i := slices.IndexFunc(m.handoffs, func(o Handoff) bool {
 		return o.Repo == h.Repo && o.Branch == h.Branch && !Terminal(o.State)
 	}); i >= 0 {
-		return Handoff{}, invalid("branch %s of %s is already owned by handoff %s (%s)", h.Branch, h.Repo, m.handoffs[i].ID, m.handoffs[i].State)
+		return invalid("branch %s of %s is already owned by handoff %s (%s)", h.Branch, h.Repo, m.handoffs[i].ID, m.handoffs[i].State)
 	}
 	for { // 4 hex digits: a clash is possible, so draw again
 		h.ID = newID(h.Repo, h.Branch)
@@ -57,13 +67,12 @@ func (m *Manager) Handoff(ctx context.Context, req Request) (Handoff, error) {
 			break
 		}
 	}
-	m.handoffs = append(m.handoffs, h)
+	m.handoffs = append(m.handoffs, *h)
 	if err := m.saveLocked(); err != nil {
 		m.handoffs = m.handoffs[:len(m.handoffs)-1]
-		return Handoff{}, err
+		return err
 	}
-	m.Kick()
-	return h, nil
+	return nil
 }
 
 // parse checks what req says by itself, without looking at the worktree.

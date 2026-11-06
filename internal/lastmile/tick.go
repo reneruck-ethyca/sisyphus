@@ -273,9 +273,7 @@ func (m *Manager) escalate(ctx context.Context, h *Handoff, reason string) {
 
 // afterCommit sends the notifications a tick's change calls for.
 func (m *Manager) afterCommit(ctx context.Context, before, after Handoff) {
-	if m.OnChange != nil {
-		m.OnChange()
-	}
+	m.changed()
 	if !before.ParentMerged && after.ParentMerged {
 		m.Notify(ctx, after, EventStackParentMerged)
 	}

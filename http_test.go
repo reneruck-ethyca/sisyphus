@@ -594,9 +594,11 @@ func handoffServer(t *testing.T) (*httptest.Server, string) {
 	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
 	var err error
 	dir := t.TempDir()
-	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir); err != nil {
+	lm, err := lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	svc.UseLastMile(lm)
 	b, err := os.ReadFile(lastmile.TokenFile(dir))
 	if err != nil {
 		t.Fatal(err)
@@ -762,9 +764,11 @@ func TestHTTPShadowReport(t *testing.T) {
 	}
 	dir := t.TempDir()
 	var err error
-	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir); err != nil {
+	lm, err := lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	svc.UseLastMile(lm)
 	if code, body := get(t, srv.URL+"/api/lastmile/shadow"); code != 200 || !strings.Contains(body, `"observed":0`) || !strings.Contains(body, `"prs":[]`) {
 		t.Errorf("empty = %d %s", code, body)
 	}
@@ -834,9 +838,11 @@ func TestHTTPShadowPage(t *testing.T) {
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
 	var err error
-	if svc.LastMile, err = lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir); err != nil {
+	lm, err := lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	svc.UseLastMile(lm)
 	log := `{"time":"2026-11-05T10:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"head":"abcdef123","would_merge":false,"blockers":["<b>x</b>"],"signals":{"additions":3}}
 {"time":"2026-11-05T11:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"outcome":"merged","merged_by":"carol","last_verdict":null}
 `

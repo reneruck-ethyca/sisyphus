@@ -190,3 +190,40 @@ func TestRenderNotify(t *testing.T) {
 		t.Error("unknown field should fail")
 	}
 }
+
+func TestActionsNotifyOnceWithoutTheLock(t *testing.T) {
+	m, clone, _ := fixture(t)
+	changes := 0
+	m.OnChange = func() {
+		m.Views() // takes the lock: deadlocks if a caller still holds it
+		changes++
+	}
+	expect := func(what string, want int) {
+		t.Helper()
+		if changes != want {
+			t.Fatalf("after %s: %d changes, want %d", what, changes, want)
+		}
+	}
+	h, err := m.Handoff(context.Background(), Request{Worktree: clone, Base: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect("handoff", 1)
+	if _, err := m.SetReviewers(h.ID, []string{"alice"}); err != nil {
+		t.Fatal(err)
+	}
+	expect("reviewers", 2)
+	if _, err := m.SetReviewers("nope", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	expect("a failed edit", 2)
+	m.set(t, h.ID, func(h *Handoff) { h.State = StateNeedsHuman })
+	if _, err := m.Resume(context.Background(), h.ID); err != nil {
+		t.Fatal(err)
+	}
+	expect("resume", 3)
+	if _, err := m.Cancel(h.ID); err != nil {
+		t.Fatal(err)
+	}
+	expect("cancel", 4)
+}

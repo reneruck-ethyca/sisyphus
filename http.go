@@ -245,7 +245,12 @@ func newHandler(svc *app.Service) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/handoffs", func(w http.ResponseWriter, r *http.Request) {
-		if !svc.HandoffAuthorized(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) {
+		lm := svc.LastMile()
+		if lm == nil {
+			http.Error(w, errLastMileDisabled, http.StatusServiceUnavailable)
+			return
+		}
+		if !lm.Authorized(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) {
 			http.Error(w, "missing or wrong token: send lastmile.token from sisyphus's state dir as a Bearer token (tlm does)", http.StatusUnauthorized)
 			return
 		}
@@ -256,31 +261,25 @@ func newHandler(svc *app.Service) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		h, err := svc.Handoff(r.Context(), req)
-		var invalid lastmile.InvalidError
-		switch {
-		case errors.As(err, &invalid):
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		case errors.Is(err, app.ErrLastMileDisabled):
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			writeJSON(w, http.StatusCreated, h)
-		}
+		h, err := lm.Handoff(r.Context(), req)
+		writeLastMile(w, r, http.StatusCreated, h, err)
 	})
 	mux.HandleFunc("GET /api/handoffs", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, svc.Handoffs())
+		hs := []lastmile.Handoff{}
+		if lm := svc.LastMile(); lm != nil {
+			hs = lm.List()
+		}
+		writeJSON(w, http.StatusOK, hs)
 	})
-	mux.HandleFunc("GET /api/handoffs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		h, ok := svc.HandoffByID(r.PathValue("id"))
+	mux.HandleFunc("GET /api/handoffs/{id}", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		h, ok := lm.Get(r.PathValue("id"))
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		writeJSON(w, http.StatusOK, h)
-	})
-	mux.HandleFunc("PUT /api/handoffs/{id}/reviewers", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("PUT /api/handoffs/{id}/reviewers", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
 		// The body is the desired human reviewers: a JSON list, or {"reviewers": [...]}.
 		var raw json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
@@ -298,33 +297,13 @@ func newHandler(svc *app.Service) http.Handler {
 			}
 			logins = obj.Reviewers
 		}
-		h, err := svc.SetReviewers(r.PathValue("id"), logins)
-		var invalid lastmile.InvalidError
-		switch {
-		case errors.Is(err, lastmile.ErrNotFound), errors.Is(err, app.ErrLastMileDisabled):
-			http.NotFound(w, r)
-		case errors.As(err, &invalid):
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			writeJSON(w, http.StatusOK, h)
-		}
-	})
-	mux.HandleFunc("GET /api/lastmile/shadow", func(w http.ResponseWriter, r *http.Request) {
-		rep, err := svc.ShadowReport(lastmile.ShadowQuery{PR: r.URL.Query().Get("pr"), Handoff: r.URL.Query().Get("handoff")})
-		var invalid lastmile.InvalidError
-		switch {
-		case errors.Is(err, app.ErrLastMileDisabled):
-			http.NotFound(w, r)
-		case errors.As(err, &invalid):
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			writeJSON(w, http.StatusOK, rep)
-		}
-	})
+		h, err := lm.SetReviewers(r.PathValue("id"), logins)
+		writeLastMile(w, r, http.StatusOK, h, err)
+	}))
+	mux.HandleFunc("GET /api/lastmile/shadow", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		rep, err := lm.ShadowReport(lastmile.ShadowQuery{PR: r.URL.Query().Get("pr"), Handoff: r.URL.Query().Get("handoff")})
+		writeLastMile(w, r, http.StatusOK, rep, err)
+	}))
 	// Installs (or updates) or uninstalls the handoff skill for one agent, in the
 	// background; GET /api/skill reports how it went. It only writes or removes
 	// the embedded skill in the agent's skill dir, so like the buttons below it
@@ -341,26 +320,16 @@ func newHandler(svc *app.Service) http.Handler {
 	})
 	// The dashboard's buttons call these, so no token (as with the reviewers edit); the API is loopback.
 	for _, verb := range []string{"resume", "cancel"} {
-		mux.HandleFunc("POST /api/handoffs/{id}/"+verb, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /api/handoffs/{id}/"+verb, withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
 			var h lastmile.Handoff
 			var err error
 			if verb == "resume" {
-				h, err = svc.ResumeHandoff(r.Context(), r.PathValue("id"))
+				h, err = lm.Resume(r.Context(), r.PathValue("id"))
 			} else {
-				h, err = svc.CancelHandoff(r.PathValue("id"))
+				h, err = lm.Cancel(r.PathValue("id"))
 			}
-			var invalid lastmile.InvalidError
-			switch {
-			case errors.Is(err, lastmile.ErrNotFound), errors.Is(err, app.ErrLastMileDisabled):
-				http.NotFound(w, r)
-			case errors.As(err, &invalid):
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			case err != nil:
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			default:
-				writeJSON(w, http.StatusOK, h)
-			}
-		})
+			writeLastMile(w, r, http.StatusOK, h, err)
+		}))
 	}
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
@@ -401,19 +370,17 @@ func newHandler(svc *app.Service) http.Handler {
 		st := svc.Status()
 		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile", Status: &st}, Status: st})
 	})
-	mux.HandleFunc("GET /lastmile/shadow", func(w http.ResponseWriter, r *http.Request) {
-		shadowPage(w, r, svc)
-	})
+	mux.HandleFunc("GET /lastmile/shadow", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		shadowPage(w, r, svc, lm)
+	}))
 	mux.HandleFunc("GET /lastmile/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if svc.LastMile != nil {
-			for _, v := range svc.LastMile.Views() {
-				if v.ID == r.PathValue("id") {
-					st := svc.Status()
-					events := slices.Clone(v.Events)
-					slices.Reverse(events) // newest first
-					render(w, "handoff.html", handoffPage{Top: topbar{Page: "lastmile", Status: &st}, V: v, Events: events})
-					return
-				}
+		st := svc.Status()
+		for _, v := range st.Handoffs {
+			if v.ID == r.PathValue("id") {
+				events := slices.Clone(v.Events)
+				slices.Reverse(events) // newest first
+				render(w, "handoff.html", handoffPage{Top: topbar{Page: "lastmile", Status: &st}, V: v, Events: events})
+				return
 			}
 		}
 		http.Error(w, "no such handoff", http.StatusNotFound)
@@ -490,8 +457,10 @@ func newHandler(svc *app.Service) http.Handler {
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		h := homePage{dashboard: dashboard{Status: svc.Status()}}
-		if rep, err := svc.ShadowReport(lastmile.ShadowQuery{}); err == nil { // disabled or unreadable: the card is left out
-			h.Shadow = &rep
+		if lm := svc.LastMile(); lm != nil {
+			if rep, err := lm.ShadowReport(lastmile.ShadowQuery{}); err == nil { // unreadable: the card is left out
+				h.Shadow = &rep
+			}
 		}
 		render(w, "home.html", h)
 	})
@@ -683,13 +652,38 @@ type shadowData struct {
 	FocusTitle string
 }
 
-// shadowPage renders the report; with ?handoff=id or ?pr=owner/repo%23n it adds that PR's verdict history.
-func shadowPage(w http.ResponseWriter, r *http.Request, svc *app.Service) {
-	rep, err := svc.ShadowReport(lastmile.ShadowQuery{})
-	if errors.Is(err, app.ErrLastMileDisabled) {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
+const errLastMileDisabled = "the last mile is disabled (lastmile.disabled)"
+
+// withLastMile serves h with the last mile, or 404 when it is disabled.
+func withLastMile(svc *app.Service, h func(http.ResponseWriter, *http.Request, *lastmile.Manager)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		lm := svc.LastMile()
+		if lm == nil {
+			http.Error(w, errLastMileDisabled, http.StatusNotFound)
+			return
+		}
+		h(w, r, lm)
 	}
+}
+
+// writeLastMile answers with v as JSON, or with the status a last-mile error calls for.
+func writeLastMile(w http.ResponseWriter, r *http.Request, status int, v any, err error) {
+	var invalid lastmile.InvalidError
+	switch {
+	case errors.Is(err, lastmile.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.As(err, &invalid):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	default:
+		writeJSON(w, status, v)
+	}
+}
+
+// shadowPage renders the report; with ?handoff=id or ?pr=owner/repo%23n it adds that PR's verdict history.
+func shadowPage(w http.ResponseWriter, r *http.Request, svc *app.Service, lm *lastmile.Manager) {
+	rep, err := lm.ShadowReport(lastmile.ShadowQuery{})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -698,7 +692,7 @@ func shadowPage(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 	d := shadowData{Top: topbar{Page: "lastmile", Status: &st}, Report: rep, MeanSec: int64(rep.MeanTimeInReviewSec)}
 	q := lastmile.ShadowQuery{PR: r.URL.Query().Get("pr"), Handoff: r.URL.Query().Get("handoff")}
 	if q != (lastmile.ShadowQuery{}) {
-		f, err := svc.ShadowReport(q)
+		f, err := lm.ShadowReport(q)
 		var invalid lastmile.InvalidError
 		switch {
 		case errors.As(err, &invalid):

@@ -162,6 +162,19 @@ func (m *Manager) SetReviewers(id string, logins []string) (Handoff, error) {
 		}
 		want = union(want, l)
 	}
+	h, err := m.setReviewers(id, want)
+	if err != nil {
+		return Handoff{}, err
+	}
+	slog.Info("lastmile reviewers set", "id", id, "reviewers", want)
+	m.changed()
+	m.Kick()
+	return h, nil
+}
+
+// setReviewers stores want as the handoff's reviewers. Unlike update it leaves
+// Gen alone: commit merges the list into a tick that is running.
+func (m *Manager) setReviewers(id string, want []string) (Handoff, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	i := slices.IndexFunc(m.handoffs, func(h Handoff) bool { return h.ID == id })
@@ -184,7 +197,5 @@ func (m *Manager) SetReviewers(id string, logins []string) (Handoff, error) {
 		m.handoffs[i] = prev
 		return Handoff{}, err
 	}
-	slog.Info("lastmile reviewers set", "id", id, "reviewers", want)
-	m.Kick()
 	return h, nil
 }
