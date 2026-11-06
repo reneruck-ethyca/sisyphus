@@ -924,47 +924,71 @@ func TestHomeNeedsYou(t *testing.T) {
 	}
 }
 
-func TestHTTPSkillUpdate(t *testing.T) {
-	claude, codex := t.TempDir(), t.TempDir()
+func TestHTTPSkill(t *testing.T) {
+	claude, codex := t.TempDir(), t.TempDir() // both dirs exist: both agents count as found
 	t.Setenv("CLAUDE_CONFIG_DIR", claude)
-	t.Setenv("CODEX_HOME", codex) // no skill there: not offered
-	path := filepath.Join(claude, "skills", skillName, "SKILL.md")
-	os.MkdirAll(filepath.Dir(path), 0o755)
-	os.WriteFile(path, []byte("old"), 0o644)
+	t.Setenv("CODEX_HOME", codex)
+	path := func(dir string) string { return filepath.Join(dir, "skills", skillName, "SKILL.md") }
+	os.MkdirAll(filepath.Dir(path(claude)), 0o755)
+	os.WriteFile(path(claude), []byte("old"), 0o644)
 	srv, _, _ := newTestServer(t) // checks the skills at startup
 
 	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "skill update available") {
 		t.Fatalf("no dot on the Settings tab")
 	}
-	if _, body := get(t, srv.URL+"/settings"); !strings.Contains(body, `"stale":["Claude Code"]`) {
-		t.Fatalf("no update offer on the settings page")
-	}
-	resp, err := http.Post(srv.URL+"/api/skill/update", "", nil)
-	if err != nil || resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("update = %v %v", resp, err)
-	}
-	resp.Body.Close()
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		_, body := get(t, srv.URL+"/api/skill")
-		var st skillStatus
-		json.Unmarshal([]byte(body), &st)
-		if !st.Updating {
-			if len(st.Stale) != 0 || st.Error != "" {
-				t.Fatalf("after the update: %s", body)
+	act := func(agent, action string) skillStatus {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/api/skill/"+agent+"/"+action, "", nil)
+		if err != nil || resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("%s %s = %v %v", agent, action, resp, err)
+		}
+		resp.Body.Close()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			_, body := get(t, srv.URL+"/api/skill")
+			var st skillStatus
+			json.Unmarshal([]byte(body), &st)
+			if !st.Busy {
+				if st.Error != "" {
+					t.Fatalf("%s %s: %s", agent, action, st.Error)
+				}
+				return st
 			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("update never finished")
+			if time.Now().After(deadline) {
+				t.Fatalf("%s %s never finished", agent, action)
+			}
 		}
 	}
-	if b, _ := os.ReadFile(path); !bytes.Equal(b, handoffSkill) {
+	states := func(st skillStatus) string {
+		var out []string
+		for _, a := range st.Agents {
+			out = append(out, a.ID+"="+a.State)
+		}
+		return strings.Join(out, " ")
+	}
+	if got := states(skillState()); got != "claude=stale codex=absent" {
+		t.Fatalf("at startup: %s", got)
+	}
+	if got := states(act("claude", "install")); got != "claude=current codex=absent" {
+		t.Errorf("after the update: %s", got)
+	}
+	if b, _ := os.ReadFile(path(claude)); !bytes.Equal(b, handoffSkill) {
 		t.Error("skill not updated")
 	}
-	if _, err := os.Stat(filepath.Join(codex, "skills", skillName)); err == nil {
-		t.Error("codex got a skill it never had")
+	if got := states(act("codex", "install")); got != "claude=current codex=current" {
+		t.Errorf("after installing for codex: %s", got)
 	}
-	if _, body := get(t, srv.URL+"/settings"); strings.Contains(body, "skill update available") || strings.Contains(body, "Claude Code") {
-		t.Error("update still offered")
+	if got := states(act("claude", "uninstall")); got != "claude=absent codex=current" {
+		t.Errorf("after uninstalling for claude: %s", got)
+	}
+	if _, err := os.Stat(filepath.Dir(path(claude))); !os.IsNotExist(err) {
+		t.Errorf("claude's skill dir is still there: %v", err)
+	}
+	if _, body := get(t, srv.URL+"/settings"); strings.Contains(body, "skill update available") {
+		t.Error("dot still shown")
+	}
+	for _, p := range []string{"gemini/install", "claude/delete"} {
+		if resp, _ := http.Post(srv.URL+"/api/skill/"+p, "", nil); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", p, resp.StatusCode)
+		}
 	}
 }

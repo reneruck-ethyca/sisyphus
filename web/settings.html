@@ -8,8 +8,9 @@
 {{with .Err}}<p class="notice">{{.}}</p>{{end}}
 {{$sk := skill}}<section class="card" aria-labelledby="g-skill">
   <div class="card-h"><h2 id="g-skill">Agent skill</h2>
-  <span class="muted" id="skill-msg" role="status"></span>
-  <button type="button" id="skill-update" class="btn small end" hidden>Update skill</button></div>
+  <span class="muted">Teaches coding agents when and how to hand a branch to TLM (<code>handing-off-to-tlm</code>).</span></div>
+  <ul class="skill-agents" id="skill-agents"></ul>
+  <p class="muted skill-msg" id="skill-msg" role="status"></p>
 </section>
 <form id="settings">
 {{range .Groups}}{{if eq .Name "Advanced"}}<details class="fold" id="fold-advanced"><summary>Advanced
@@ -29,21 +30,40 @@
 </div>
 
 <script>
-  // The update runs in the background; while this page is open it asks how it
+  // Actions run in the background; while this page is open it asks how they
   // went every half second, otherwise the next page load shows it.
-  const su = document.getElementById("skill-update"), sm = document.getElementById("skill-msg");
+  const sl = document.getElementById("skill-agents"), sm = document.getElementById("skill-msg");
+  const label = {absent: "not installed", current: "up to date", stale: "update available"};
   const showSkill = (st) => {
-    const stale = st.stale || [];
-    su.hidden = st.updating || !stale.length;
-    if (st.updating) sm.textContent = "Updating the handing-off-to-tlm skill…";
-    else if (st.error) sm.textContent = "The update failed: " + st.error;
-    else if (stale.length) sm.textContent = "A newer handing-off-to-tlm skill is available for " + stale.join(" and ") + ".";
-    else sm.textContent = "The handing-off-to-tlm skill is up to date wherever it is installed; tlm install-skill installs it.";
-    if (!stale.length) document.querySelector(".top nav .badge.dot")?.remove();
-    if (st.updating) setTimeout(async () => showSkill(await (await fetch("/api/skill")).json()), 500);
+    const agents = st.agents || [];
+    sl.replaceChildren(...agents.map((a) => {
+      const li = document.createElement("li"), b = document.createElement("b"), s = document.createElement("span");
+      b.textContent = a.name;
+      s.className = "chip " + (a.state === "stale" ? "changes" : a.state === "current" ? "ok" : "neutral");
+      s.textContent = label[a.state];
+      li.append(b, s);
+      const btn = (text, action, quiet) => {
+        const x = document.createElement("button");
+        x.type = "button"; x.className = "btn small" + (quiet ? " quiet" : ""); x.textContent = text; x.disabled = st.busy;
+        x.onclick = async () => {
+          const r = await fetch("/api/skill/" + a.id + "/" + action, {method: "POST"});
+          r.ok ? showSkill(await r.json()) : (sm.textContent = await r.text());
+        };
+        li.append(x);
+      };
+      if (a.state === "absent") btn("Install", "install");
+      if (a.state === "stale") btn("Update", "install");
+      if (a.state !== "absent") btn("Uninstall", "uninstall", true);
+      return li;
+    }));
+    sm.textContent = st.busy ? "Working…" : st.error ? "That failed: " + st.error
+      : agents.length ? "" : "Neither Claude Code nor Codex was found on this machine.";
+    sm.hidden = !sm.textContent;
+    const dot = document.querySelector(".top nav .badge.dot");
+    if (dot && !agents.some((a) => a.state === "stale")) dot.remove();
+    if (st.busy) setTimeout(async () => showSkill(await (await fetch("/api/skill")).json()), 500);
   };
   showSkill({{$sk}});
-  su.onclick = async () => showSkill(await (await fetch("/api/skill/update", {method: "POST"})).json());
 </script>
 
 {{define "fields"}}{{range .}}<div class="field">

@@ -168,7 +168,7 @@ func startHTTP(addr string, svc *app.Service) (string, error) {
 }
 
 func newHandler(svc *app.Service) http.Handler {
-	markStaleSkills()
+	markSkills()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /style.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -325,11 +325,15 @@ func newHandler(svc *app.Service) http.Handler {
 			writeJSON(w, http.StatusOK, rep)
 		}
 	})
-	// Brings every out-of-date copy of the handoff skill up to this binary's, in
-	// the background; GET reports how it went. The content is fixed, so like the
-	// buttons below it needs no token.
-	mux.HandleFunc("POST /api/skill/update", func(w http.ResponseWriter, r *http.Request) {
-		startSkillUpdate()
+	// Installs (or updates) or uninstalls the handoff skill for one agent, in the
+	// background; GET /api/skill reports how it went. It only writes or removes
+	// the embedded skill in the agent's skill dir, so like the buttons below it
+	// needs no token.
+	mux.HandleFunc("POST /api/skill/{agent}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		if err := startSkillAction(r.PathValue("agent"), r.PathValue("action")); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		writeJSON(w, http.StatusAccepted, skillState())
 	})
 	mux.HandleFunc("GET /api/skill", func(w http.ResponseWriter, r *http.Request) {

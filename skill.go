@@ -87,73 +87,92 @@ func installSkill(agent string) (string, error) {
 // agentNames are the display names of the agents in skillHomes.
 var agentNames = map[string]string{"claude": "Claude Code", "codex": "Codex"}
 
-// staleSkills is the marker for agents (sorted ids) whose installed skill
-// differed from the one in this binary at startup (markStaleSkills), less those
-// updated since. Agents without the skill aren't listed: not having it was
-// someone's choice. A hand-edited skill also reads as stale.
-var staleSkills struct {
-	sync.Mutex
-	agents   []string
-	updating bool   // an update runs in the background
-	err      string // why the last update failed ("" = it didn't)
+// agentSkill is one agent's copy of the skill as the dashboard shows it.
+type agentSkill struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"` // "absent", "current" or "stale" (differs from this binary's; a hand edit too)
 }
 
-// markStaleSkills sets the marker; the skill only changes with the binary, so
-// once at startup is enough.
-func markStaleSkills() {
-	var out []string
-	for a, dir := range skillHomes() {
-		b, err := os.ReadFile(filepath.Join(dir, skillName, "SKILL.md"))
-		if err == nil && !bytes.Equal(b, handoffSkill) {
-			out = append(out, a)
+// skills is the marker the dashboard reads: each agent found on the machine (or
+// holding the skill) with the state of its copy. Set at startup and after each
+// install, update or uninstall, never per page: the skill only changes with the
+// binary or through these actions.
+var skills struct {
+	sync.Mutex
+	agents []agentSkill
+	busy   bool   // an action runs in the background
+	err    string // why the last action failed ("" = it didn't)
+}
+
+// markSkills sets the marker from the agents' skill dirs.
+func markSkills() {
+	var out []agentSkill
+	for _, a := range []struct{ id, cmd string }{{"claude", "claude"}, {"codex", "codex"}} {
+		st := "absent"
+		if b, err := os.ReadFile(filepath.Join(skillHomes()[a.id], skillName, "SKILL.md")); err == nil {
+			st = "stale"
+			if bytes.Equal(b, handoffSkill) {
+				st = "current"
+			}
+		}
+		if st != "absent" || agentPresent(a.id, a.cmd) {
+			out = append(out, agentSkill{a.id, agentNames[a.id], st})
 		}
 	}
-	slices.Sort(out)
-	staleSkills.Lock()
-	staleSkills.agents = out
-	staleSkills.Unlock()
+	skills.Lock()
+	skills.agents = out
+	skills.Unlock()
 }
 
 // skillStatus is the marker as the dashboard shows it.
 type skillStatus struct {
-	Stale    []string `json:"stale"` // agent display names
-	Updating bool     `json:"updating"`
-	Error    string   `json:"error,omitempty"`
+	Agents []agentSkill `json:"agents"`
+	Busy   bool         `json:"busy"`
+	Error  string       `json:"error,omitempty"`
+}
+
+// Stale says whether any agent has an out-of-date copy, for the Settings tab's dot.
+func (s skillStatus) Stale() bool {
+	return slices.ContainsFunc(s.Agents, func(a agentSkill) bool { return a.State == "stale" })
 }
 
 func skillState() skillStatus {
-	staleSkills.Lock()
-	defer staleSkills.Unlock()
-	st := skillStatus{Updating: staleSkills.updating, Error: staleSkills.err}
-	for _, a := range staleSkills.agents {
-		st.Stale = append(st.Stale, agentNames[a])
-	}
-	return st
+	skills.Lock()
+	defer skills.Unlock()
+	return skillStatus{Agents: slices.Clone(skills.agents), Busy: skills.busy, Error: skills.err}
 }
 
-// startSkillUpdate installs the binary's skill for every marked agent in the
-// background; agents that fail stay marked. A no-op while one runs.
-func startSkillUpdate() {
-	staleSkills.Lock()
-	defer staleSkills.Unlock()
-	if staleSkills.updating {
-		return
+// startSkillAction installs (or updates) or uninstalls the skill for one agent
+// in the background, then re-reads the marker. A no-op while another runs.
+func startSkillAction(agent, action string) error {
+	dir, ok := skillHomes()[agent]
+	if !ok {
+		return fmt.Errorf("unknown agent %q", agent)
 	}
-	staleSkills.updating, staleSkills.err = true, ""
-	agents := slices.Clone(staleSkills.agents)
+	if action != "install" && action != "uninstall" {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	skills.Lock()
+	defer skills.Unlock()
+	if skills.busy {
+		return nil
+	}
+	skills.busy, skills.err = true, ""
 	go func() {
-		var failed []string
-		var errs []error
-		for _, a := range agents {
-			if _, err := installSkill(a); err != nil {
-				failed, errs = append(failed, a), append(errs, err)
-			}
+		var err error
+		if action == "install" {
+			_, err = installSkill(agent)
+		} else {
+			err = os.RemoveAll(filepath.Join(dir, skillName))
 		}
-		staleSkills.Lock()
-		defer staleSkills.Unlock()
-		staleSkills.agents, staleSkills.updating = failed, false
-		if err := errors.Join(errs...); err != nil {
-			staleSkills.err = err.Error()
+		markSkills()
+		skills.Lock()
+		defer skills.Unlock()
+		skills.busy = false
+		if err != nil {
+			skills.err = err.Error()
 		}
 	}()
+	return nil
 }
