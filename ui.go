@@ -23,8 +23,9 @@ var trayIcon []byte
 
 // runApp owns the macOS main thread: menu-bar item, window, and the tick loop.
 // The window shows the dashboard; there is no second UI.
-func runApp(cfg config.Config, svc *app.Service) error {
-	dashURL, err := startHTTP(cfg.HTTPAddr, svc)
+func runApp(cfg config.Config, srv server) error {
+	svc := srv.svc
+	dashURL, err := startHTTP(cfg.HTTPAddr, srv)
 	if err != nil {
 		return fmt.Errorf("dashboard: %w", err)
 	}
@@ -65,7 +66,12 @@ func runApp(cfg config.Config, svc *app.Service) error {
 	tray.SetTooltip("sisyphus")
 	tray.SetMenu(menu)
 
-	svc.OnChange(func(st app.Status) { status.SetLabel(trayStatus(st)) })
+	changed, _ := svc.SubscribeStatus()
+	go func() {
+		for range changed {
+			status.SetLabel(trayStatus(svc.Status()))
+		}
+	}()
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go svc.Run(wapp.Context())
 	})

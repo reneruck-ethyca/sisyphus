@@ -110,7 +110,8 @@ func main() {
 		}
 		return
 	}
-	svc := app.NewService(cfg, tr, rev, logs)
+	srv := newServer(cfg, tr, rev, logs)
+	svc := srv.svc
 	if !cfg.LastMile.Disabled {
 		lm, err := lastmile.New(cfg, gh, tr.Locks, filepath.Dir(cfg.StateFile))
 		if err != nil {
@@ -131,7 +132,7 @@ func main() {
 		return
 	}
 
-	if err := runApp(cfg, svc); err != nil {
+	if err := runApp(cfg, srv); err != nil {
 		fatal(err)
 	}
 }

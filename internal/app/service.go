@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -173,19 +172,17 @@ type Service struct {
 	cfg     config.Config
 	tracker *tracker.Tracker
 	rev     *review.Reviewer // nil when reviews are disabled
-	logs    *LogBuffer
 	runNow  chan struct{}
 
 	mu      sync.Mutex
 	tracked []tracker.Tracked // last tracker snapshot
 	status  Status
-	subs    []func(Status)
 	wakers  map[chan struct{}]struct{} // SubscribeStatus: poked on every change
 }
 
-// NewService wires the tracker, the reviewer (nil = reviews disabled) and the log buffer.
-func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *LogBuffer) *Service {
-	s := &Service{cfg: cfg, tracker: tr, rev: rev, logs: logs, runNow: make(chan struct{}, 1)}
+// NewService wires the tracker and the reviewer (nil = reviews disabled).
+func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer) *Service {
+	s := &Service{cfg: cfg, tracker: tr, rev: rev, runNow: make(chan struct{}, 1)}
 	s.status = Status{User: cfg.User, Org: cfg.Org, Interval: cfg.Interval.String(), Reviews: rev != nil}
 	tr.OnSave = s.refreshPRs
 	if rev != nil {
@@ -212,23 +209,6 @@ func (s *Service) FollowRun(ctx context.Context, prID, runID string, from int) (
 		return nil, review.ErrNoRun
 	}
 	return s.rev.Follow(ctx, prID, runID, from)
-}
-
-// RunDir returns the directory holding one review run's run.json, log and out/.
-func (s *Service) RunDir(prID, runID string) (string, bool) {
-	if s.rev == nil {
-		return "", false
-	}
-	return s.rev.RunDir(prID, runID)
-}
-
-// ReviewFile is what a run's agent wrote to out/review.json; nil if it wrote none.
-func (s *Service) ReviewFile(prID, runID string) (*review.ReviewFile, error) {
-	dir, ok := s.RunDir(prID, runID)
-	if !ok {
-		return nil, fmt.Errorf("no run %s for %s", runID, prID)
-	}
-	return review.ReadReviewFile(dir)
 }
 
 // Status returns the latest snapshot. Its PRs slice is shared; don't mutate it.
@@ -274,21 +254,6 @@ func (s *Service) ReviewNow(id string) error {
 		}
 		return s.rev.Trigger(tr)
 	})
-}
-
-// SetAgent stores a complete profile override for one PR. Passing nil makes the
-// PR inherit the app-wide review.agent profile.
-func (s *Service) SetAgent(id string, agent *config.Agent) error {
-	return s.tracker.SetAgent(id, agent)
-}
-
-// Stack is what's on Docker for a PR's local stack (nil = its repo has none).
-func (s *Service) Stack(ctx context.Context, id string) (*review.StackStatus, error) {
-	tr, err := s.trackedPR(id)
-	if err != nil {
-		return nil, err
-	}
-	return s.rev.StackStatus(ctx, tr)
 }
 
 // ResetReviews forgets a PR's reviews (history, queued jobs, a running review)
@@ -340,19 +305,6 @@ func (s *Service) Retrack(ctx context.Context, id string) error {
 	return err
 }
 
-// Logs returns the most recent ops log entries, oldest first.
-func (s *Service) Logs() []LogEntry { return s.logs.Recent() }
-
-// SubscribeLogs streams new log entries until cancel is called.
-func (s *Service) SubscribeLogs() (<-chan LogEntry, func()) { return s.logs.Subscribe() }
-
-// OnChange registers fn to run (on the tick goroutine) after every snapshot change.
-func (s *Service) OnChange(fn func(Status)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subs = append(s.subs, fn)
-}
-
 // SubscribeStatus returns a channel that gets a (coalesced) signal after every
 // change; read Status for the snapshot. cancel stops it.
 func (s *Service) SubscribeStatus() (<-chan struct{}, func()) {
@@ -378,9 +330,6 @@ func (s *Service) RunNow() {
 	default:
 	}
 }
-
-// RunQueued reports whether a RunNow is waiting for the loop to pick it up.
-func (s *Service) RunQueued() bool { return len(s.runNow) > 0 }
 
 // Run ticks immediately, then every interval or on RunNow, until ctx is done.
 // Ticks never overlap. Reviews run alongside; leftover review containers are
@@ -510,7 +459,6 @@ func (s *Service) publish() {
 func (s *Service) update(fn func(*Status)) {
 	s.mu.Lock()
 	fn(&s.status)
-	st, subs := s.status, slices.Clone(s.subs)
 	for ch := range s.wakers {
 		select {
 		case ch <- struct{}{}:
@@ -518,31 +466,6 @@ func (s *Service) update(fn func(*Status)) {
 		}
 	}
 	s.mu.Unlock()
-	for _, sub := range subs {
-		sub(st)
-	}
-}
-
-// Settings is the config file's editable fields, for the settings pages.
-type Settings struct {
-	Path   string         `json:"path"`
-	Fields []config.Field `json:"fields"`
-}
-
-// Settings reads the config file now, so it shows saved changes not yet applied.
-func (s *Service) Settings() (Settings, error) {
-	fs, err := config.Settings(s.cfg.Path)
-	return Settings{Path: s.cfg.Path, Fields: fs}, err
-}
-
-// SaveSettings writes changed fields (key → value) to the config file; they
-// apply on restart.
-func (s *Service) SaveSettings(values map[string]any) error {
-	if err := config.SaveSettings(s.cfg.Path, values); err != nil {
-		return err
-	}
-	slog.Info("settings saved, restart to apply", "file", s.cfg.Path, "changed", slices.Sorted(maps.Keys(values)))
-	return nil
 }
 
 // UseLastMile sets the manager that takes handoffs and refreshes the dashboard

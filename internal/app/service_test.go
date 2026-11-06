@@ -37,15 +37,15 @@ func TestServiceSnapshot(t *testing.T) {
 		&tracker.Tracked{PRRef: refB, HeadSHA: "y", SyncedSHA: "y"},
 		a,
 	)
-	s := NewService(cfg, tr, nil, NewLogBuffer(10))
-	var changes int
-	s.OnChange(func(Status) { changes++ })
+	s := NewService(cfg, tr, nil)
+	changed, cancel := s.SubscribeStatus()
+	defer cancel()
 
 	s.RunOnce(context.Background())
 
 	st := s.Status()
-	if st.Running || st.LastRun.IsZero() || st.LastError != "" || changes == 0 {
-		t.Fatalf("status = %+v, changes = %d", st, changes)
+	if st.Running || st.LastRun.IsZero() || st.LastError != "" || len(changed) == 0 {
+		t.Fatalf("status = %+v, changed = %d", st, len(changed))
 	}
 	if len(st.PRs) != 2 || st.PRs[0].ID != testkit.RefA.Key() || st.PRs[1].ID != refB.Key() {
 		t.Fatalf("PRs not sorted by ID: %+v", st.PRs)
@@ -69,7 +69,7 @@ func TestServiceSnapshot(t *testing.T) {
 
 func TestServiceTickError(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{CandErr: errors.New("offline")})
-	s := NewService(cfg, tr, nil, NewLogBuffer(10))
+	s := NewService(cfg, tr, nil)
 	s.RunOnce(context.Background())
 	if st := s.Status(); st.LastError == "" || st.LastRun.IsZero() {
 		t.Fatalf("status = %+v", st)
@@ -78,23 +78,23 @@ func TestServiceTickError(t *testing.T) {
 
 func TestServiceRunNow(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
-	s := NewService(cfg, tr, nil, NewLogBuffer(10))
-	ticks := make(chan struct{}, 10)
-	s.OnChange(func(st Status) {
-		if !st.Running && !st.LastRun.IsZero() {
-			ticks <- struct{}{}
-		}
-	})
+	s := NewService(cfg, tr, nil)
+	changed, unsub := s.SubscribeStatus()
+	defer unsub()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
 
+	var last time.Time
 	for i := range 2 {
-		select {
-		case <-ticks:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("tick %d never happened", i+1)
+		for st := s.Status(); st.Running || !st.LastRun.After(last); st = s.Status() {
+			select {
+			case <-changed:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("tick %d never happened", i+1)
+			}
 		}
+		last = s.Status().LastRun
 		s.RunNow()
 	}
 }
@@ -107,7 +107,7 @@ func TestServiceShowsReviewState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewService(cfg, tr, rev, NewLogBuffer(10))
+	s := NewService(cfg, tr, rev)
 	s.RunOnce(context.Background()) // announces the PR; the reviewer isn't running, so it stays queued
 	st := s.Status()
 	if !st.Reviews || st.PRs[0].Review.State != "queued" || st.Summary() != "1 tracked · 1 review queued" {
@@ -173,7 +173,7 @@ func TestUntrackAndRetrackWhileRunning(t *testing.T) {
 	gh := &github.Fake{Cands: []github.PRRef{testkit.RefA}, PRs: map[string]github.PR{
 		testkit.RefA.Key(): {PRRef: testkit.RefA, State: "open", HeadSHA: "x", RequestedReviewers: []string{"me"}}}}
 	cfg, tr := testkit.Tracker(t, gh, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x", SyncedSHA: "x"})
-	s := NewService(cfg, tr, nil, NewLogBuffer(10)) // reviews disabled: untracking still works
+	s := NewService(cfg, tr, nil) // reviews disabled: untracking still works
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	go s.Run(ctx)

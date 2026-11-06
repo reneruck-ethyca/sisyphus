@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 //go:embed web/*.html web/style.css
@@ -127,10 +129,60 @@ func rel(t time.Time) string {
 	return v + " ago"
 }
 
+// server is what the handlers use: svc for status and actions that need both
+// tracker and reviewer, the rest directly.
+type server struct {
+	svc        *app.Service
+	tracker    *tracker.Tracker
+	rev        *review.Reviewer // nil when reviews are disabled
+	logs       *app.LogBuffer
+	configPath string
+}
+
+func newServer(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *app.LogBuffer) server {
+	return server{svc: app.NewService(cfg, tr, rev), tracker: tr, rev: rev, logs: logs, configPath: cfg.Path}
+}
+
+var errReviewsDisabled = errors.New("reviews are disabled")
+
+func (s server) runDir(prID, runID string) (string, bool) {
+	if s.rev == nil {
+		return "", false
+	}
+	return s.rev.RunDir(prID, runID)
+}
+
+// reviewFile is what a run's agent wrote to out/review.json; nil if it wrote none.
+func (s server) reviewFile(prID, runID string) (*review.ReviewFile, error) {
+	dir, ok := s.runDir(prID, runID)
+	if !ok {
+		return nil, fmt.Errorf("no run %s for %s", runID, prID)
+	}
+	return review.ReadReviewFile(dir)
+}
+
+func (s server) stack(ctx context.Context, pr app.PRView) (*review.StackStatus, error) {
+	if s.rev == nil {
+		return nil, errReviewsDisabled
+	}
+	return s.rev.StackStatus(ctx, pr.Tracked)
+}
+
+// settings is the config file's editable fields, read now so it shows saved changes not yet applied.
+type settings struct {
+	Path   string         `json:"path"`
+	Fields []config.Field `json:"fields"`
+}
+
+func (s server) settings() (settings, error) {
+	fs, err := config.Settings(s.configPath)
+	return settings{Path: s.configPath, Fields: fs}, err
+}
+
 // startHTTP serves the dashboard and JSON API on addr, or on a free loopback
-// port when addr is taken: the window needs it. Only app.Service is used, so
-// the handlers see the same snapshots as the tray.
-func startHTTP(addr string, svc *app.Service) (string, error) {
+// port when addr is taken: the window needs it. Status comes from app.Service,
+// so the handlers see the same snapshots as the tray.
+func startHTTP(addr string, srv server) (string, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		slog.Warn("dashboard address in use, picking a free port", "addr", addr, "err", err)
@@ -139,14 +191,15 @@ func startHTTP(addr string, svc *app.Service) (string, error) {
 		}
 	}
 	go func() {
-		if err := http.Serve(ln, newHandler(svc)); err != nil {
+		if err := http.Serve(ln, newHandler(srv)); err != nil {
 			slog.Error("http server stopped", "err", err)
 		}
 	}()
 	return "http://" + ln.Addr().String() + "/", nil
 }
 
-func newHandler(svc *app.Service) http.Handler {
+func newHandler(srv server) http.Handler {
+	svc := srv.svc
 	markSkills() // once: the handler is built at startup
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /style.css", func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +231,7 @@ func newHandler(svc *app.Service) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/runs/{run}/open", func(w http.ResponseWriter, r *http.Request) {
-		dir, ok := svc.RunDir(prID(r), r.PathValue("run"))
+		dir, ok := srv.runDir(prID(r), r.PathValue("run"))
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -217,7 +270,7 @@ func newHandler(svc *app.Service) http.Handler {
 		if !body.Inherit {
 			agent = &body.Agent
 		}
-		if err := svc.SetAgent(prID(r), agent); err != nil {
+		if err := srv.tracker.SetAgent(prID(r), agent); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -328,7 +381,7 @@ func newHandler(svc *app.Service) http.Handler {
 			return
 		}
 		d := dashboard{Board: app.Board{Status: svc.Status()}, PR: &pr, Run: run, Events: evs, Next: next}
-		if d.ReviewFile, err = svc.ReviewFile(pr.ID, run.ID); err != nil {
+		if d.ReviewFile, err = srv.reviewFile(pr.ID, run.ID); err != nil {
 			slog.Warn("review file", "pr", pr.ID, "run", run.ID, "err", err)
 		}
 		render(w, "index.html", d)
@@ -337,13 +390,13 @@ func newHandler(svc *app.Service) http.Handler {
 		streamRun(w, r, svc)
 	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		serveRunFile(w, r, svc)
+		serveRunFile(w, r, srv)
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, svc.Logs())
+		writeJSON(w, http.StatusOK, srv.logs.Recent())
 	})
 	mux.HandleFunc("GET /api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
-		streamLogs(w, r, svc)
+		streamLogs(w, r, srv.logs)
 	})
 	mux.HandleFunc("GET /lastmile", func(w http.ResponseWriter, r *http.Request) {
 		st := svc.Status()
@@ -365,7 +418,7 @@ func newHandler(svc *app.Service) http.Handler {
 		http.Error(w, "no such handoff", http.StatusNotFound)
 	})
 	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: svc.Logs()})
+		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: srv.logs.Recent()})
 	})
 	history := func(w http.ResponseWriter, r *http.Request) {
 		d := dashboard{Board: app.Board{Status: svc.Status()}, History: svc.History()}
@@ -393,7 +446,7 @@ func newHandler(svc *app.Service) http.Handler {
 			}
 			if show != nil {
 				var err error
-				if d.ReviewFile, err = svc.ReviewFile(pr.ID, show.ID); err != nil {
+				if d.ReviewFile, err = srv.reviewFile(pr.ID, show.ID); err != nil {
 					slog.Warn("review file", "pr", pr.ID, "run", show.ID, "err", err)
 				}
 			}
@@ -407,11 +460,11 @@ func newHandler(svc *app.Service) http.Handler {
 		writeJSON(w, http.StatusOK, svc.History())
 	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
-		st, err := svc.Settings()
+		st, err := srv.settings()
 		render(w, "settings.html", settingsPage{st, err})
 	})
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
-		st, err := svc.Settings()
+		st, err := srv.settings()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -424,10 +477,11 @@ func newHandler(svc *app.Service) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := svc.SaveSettings(values); err != nil {
+		if err := config.SaveSettings(srv.configPath, values); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		slog.Info("settings saved, restart to apply", "file", srv.configPath, "changed", slices.Sorted(maps.Keys(values)))
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/restart", func(w http.ResponseWriter, r *http.Request) {
@@ -453,12 +507,12 @@ func newHandler(svc *app.Service) http.Handler {
 			return
 		}
 		d := dashboard{Board: app.Board{Status: svc.Status()}, PR: &pr}
-		if d.Stack, d.StackErr = svc.Stack(r.Context(), pr.ID); d.StackErr != nil {
+		if d.Stack, d.StackErr = srv.stack(r.Context(), pr); d.StackErr != nil {
 			slog.Warn("stack status", "pr", pr.ID, "err", d.StackErr)
 		}
 		if last := pr.Review.Latest(); last != nil {
 			var err error
-			if d.ReviewFile, err = svc.ReviewFile(pr.ID, last.ID); err != nil {
+			if d.ReviewFile, err = srv.reviewFile(pr.ID, last.ID); err != nil {
 				slog.Warn("review file", "pr", pr.ID, "run", last.ID, "err", err)
 			}
 		}
@@ -676,7 +730,7 @@ func (d dashboard) Title() string {
 }
 
 type settingsPage struct {
-	app.Settings
+	settings
 	Err error
 }
 
@@ -781,8 +835,8 @@ var statusEvery = 2 * time.Second
 
 // streamLogs sends the backlog, then every new entry, as server-sent events
 // until the client goes away.
-func streamLogs(w http.ResponseWriter, r *http.Request, svc *app.Service) {
-	live, cancel := svc.SubscribeLogs() // before the backlog, so nothing falls in between
+func streamLogs(w http.ResponseWriter, r *http.Request, logs *app.LogBuffer) {
+	live, cancel := logs.Subscribe() // before the backlog, so nothing falls in between
 	defer cancel()
 	sse := newSSE(w)
 	var last uint64
@@ -793,7 +847,7 @@ func streamLogs(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 		last = e.Seq
 		return sse.send("", e)
 	}
-	for _, e := range svc.Logs() {
+	for _, e := range logs.Recent() {
 		if !send(e) {
 			return
 		}
@@ -812,8 +866,8 @@ func streamLogs(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 
 // serveRunFile serves a review run's files (log, run.json, out/…). os.Root keeps
 // paths and symlinks a reviewer left in out/ from escaping the run directory.
-func serveRunFile(w http.ResponseWriter, r *http.Request, svc *app.Service) {
-	dir, ok := svc.RunDir(prID(r), r.PathValue("run"))
+func serveRunFile(w http.ResponseWriter, r *http.Request, srv server) {
+	dir, ok := srv.runDir(prID(r), r.PathValue("run"))
 	if !ok {
 		http.NotFound(w, r)
 		return

@@ -33,8 +33,9 @@ func newTestServer(t *testing.T) (*httptest.Server, *app.Service, *app.LogBuffer
 	cfg, tr := testkit.Tracker(t, &github.Fake{},
 		&tracker.Tracked{PRRef: testkit.RefA, Title: "Fix <things>", Author: "octocat", URL: "https://github.com/ethyca/a/pull/1", HeadSHA: "x"})
 	logs := app.NewLogBuffer(10)
-	svc := app.NewService(cfg, tr, nil, logs)
-	srv := httptest.NewServer(newHandler(svc))
+	hs := newServer(cfg, tr, nil, logs)
+	svc := hs.svc
+	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	return srv, svc, logs
 }
@@ -106,17 +107,28 @@ func TestHTTPPRAgentOverride(t *testing.T) {
 
 func TestHTTPRun(t *testing.T) {
 	srv, svc, _ := newTestServer(t)
+	go svc.Run(t.Context())
+	waitTick := func(after time.Time) time.Time {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			if st := svc.Status(); !st.Running && st.LastRun.After(after) {
+				return st.LastRun
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("tick never happened")
+			}
+		}
+	}
+	first := waitTick(time.Time{}) // the loop's own; the next one only comes from the request, the interval is an hour
 	resp, err := http.Post(srv.URL+"/api/run", "", nil)
 	if err != nil || resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("%v %v", resp, err)
 	}
-	if !svc.RunQueued() {
-		t.Fatal("tick not queued")
-	}
+	waitTick(first)
 }
 
 func TestHTTPSettings(t *testing.T) {
-	srv, svc, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	code, body := get(t, srv.URL+"/settings")
 	if code != 200 || !strings.Contains(body, `name="review.agent.model"><option selected>opus</option>`) || strings.Contains(body, `http-equiv="refresh"`) {
 		t.Fatalf("/settings = %d: %s", code, body)
@@ -136,9 +148,9 @@ func TestHTTPSettings(t *testing.T) {
 	if c := put(`{"interval": "soon"}`); c != http.StatusBadRequest {
 		t.Fatalf("bad save = %d", c)
 	}
-	st, err := svc.Settings()
-	if err != nil {
-		t.Fatal(err)
+	var st settings
+	if _, body := get(t, srv.URL+"/api/settings"); json.Unmarshal([]byte(body), &st) != nil {
+		t.Fatalf("/api/settings: %s", body)
 	}
 	for _, f := range st.Fields {
 		if f.Key == "org" && f.Value != "acme" || f.Key == "review.max_turns" && f.Value != 5.0 || f.Key == "interval" && f.Value != "10m" {
@@ -181,7 +193,7 @@ func TestHTTPPages(t *testing.T) {
 }
 
 func TestHTTPRejectsForeignHostAndOrigin(t *testing.T) {
-	srv, svc, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	req, _ := http.NewRequest("GET", srv.URL+"/api/status", nil)
 	req.Host = "evil.example:7465" // DNS rebinding
 	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
@@ -190,7 +202,7 @@ func TestHTTPRejectsForeignHostAndOrigin(t *testing.T) {
 	req, _ = http.NewRequest("POST", srv.URL+"/api/run", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden || svc.RunQueued() {
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("cross-origin run: %v %v", resp, err)
 	}
 }
@@ -296,7 +308,8 @@ func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, re
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := app.NewService(cfg, tr, rev, app.NewLogBuffer(10))
+	hs := newServer(cfg, tr, rev, app.NewLogBuffer(10))
+	svc := hs.svc
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); rev.Wait() }) // before the temp dirs go
 	go rev.Run(ctx)
@@ -307,7 +320,7 @@ func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, re
 			t.Fatal("review never finished")
 		}
 		if pr, _ := svc.PR(testkit.RefA.Key()); !finish && pr.Review.State == "running" && pr.Review.Latest().Container != "" {
-			srv := httptest.NewServer(newHandler(svc))
+			srv := httptest.NewServer(newHandler(hs))
 			t.Cleanup(srv.Close)
 			return srv, svc, *pr.Review.Latest()
 		}
@@ -322,7 +335,7 @@ func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, re
 	}
 	os.WriteFile(filepath.Join(run.Dir, "out", "review.md"), []byte("# hi"), 0o644)
 	os.Symlink("/etc/hosts", filepath.Join(run.Dir, "out", "escape"))
-	srv := httptest.NewServer(newHandler(svc))
+	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	return srv, svc, run
 }
@@ -511,8 +524,9 @@ func TestHTTPPRActions(t *testing.T) {
 func TestHTTPStatusStream(t *testing.T) {
 	statusEvery = 10 * time.Millisecond
 	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "x"})
-	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
-	srv := httptest.NewServer(newHandler(svc))
+	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
+	svc := hs.svc
+	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -591,7 +605,8 @@ func handoffServer(t *testing.T) (*httptest.Server, string) {
 	gittest.Git(t, clone, "remote", "set-url", "origin", "https://github.com/ethyca/fidesplus.git")
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
 	cfg.Review.Repos = map[string]config.RepoReview{"ethyca/fidesplus": {Image: "i"}}
-	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
+	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
+	svc := hs.svc
 	var err error
 	dir := t.TempDir()
 	lm, err := lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir)
@@ -605,7 +620,7 @@ func handoffServer(t *testing.T) (*httptest.Server, string) {
 	}
 	apiTokenForTests = strings.TrimSpace(string(b))
 	t.Cleanup(func() { apiTokenForTests = "" })
-	srv := httptest.NewServer(newHandler(svc))
+	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	return srv, clone
 }
@@ -756,8 +771,9 @@ func TestHTTPHandoffResumeCancel(t *testing.T) {
 
 func TestHTTPShadowReport(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
-	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
-	srv := httptest.NewServer(newHandler(svc))
+	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
+	svc := hs.svc
+	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	if code, _ := get(t, srv.URL+"/api/lastmile/shadow"); code != 404 {
 		t.Errorf("disabled = %d", code)
@@ -822,7 +838,7 @@ func TestHTTPLastMilePages(t *testing.T) {
 
 func TestHTTPLastMilePagesDisabled(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
-	srv := httptest.NewServer(newHandler(app.NewService(cfg, tr, nil, app.NewLogBuffer(10))))
+	srv := httptest.NewServer(newHandler(newServer(cfg, tr, nil, app.NewLogBuffer(10))))
 	t.Cleanup(srv.Close)
 	for _, p := range []string{"/lastmile/shadow", "/lastmile/x"} {
 		if code, _ := get(t, srv.URL+p); code != 404 {
@@ -833,8 +849,9 @@ func TestHTTPLastMilePagesDisabled(t *testing.T) {
 
 func TestHTTPShadowPage(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
-	svc := app.NewService(cfg, tr, nil, app.NewLogBuffer(10))
-	srv := httptest.NewServer(newHandler(svc))
+	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
+	svc := hs.svc
+	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
 	var err error

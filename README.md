@@ -505,10 +505,12 @@ it: a queue, review containers running Claude Code, local stacks, run records an
 | `internal/gittest`, `internal/testkit` | test helpers |
 | `main` | wiring, CLI flags, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`) |
 
-UIs talk to `app.Service` (`Status`, `PR`, `RunNow`, `ReviewNow`, `ResetReviews`, `Wipe`, `Untrack`,
-`Retrack`, `Stack`, `RunDir`, `RunEvents`, `SubscribeRunEvents`, `OnChange`, `Logs`, `SubscribeLogs`,
-`Settings`, `SaveSettings`). It hands out copies of state, so a UI or API never races a tick or a run;
-the tracker locks, so PR actions wait for a tick in progress.
+UIs talk to `app.Service` for what combines tracker and reviewer: the tick loop (`Run`, `RunOnce`,
+`RunNow`), the status snapshot (`Status`, `PR`, `History`, `SubscribeStatus`) and PR actions
+(`ReviewNow`, `ResetReviews`, `Wipe`, `Untrack`, `Retrack`). It hands out copies of state, so a UI or
+API never races a tick or a run; the tracker locks, so PR actions wait for a tick in progress. The
+dashboard reads run files and stacks from the reviewer, sets agent overrides on the tracker, logs
+from `app.LogBuffer` and settings from the config file directly.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process. The
 window is a webview on the dashboard's URL: one UI, server-rendered. Its user agent carries
