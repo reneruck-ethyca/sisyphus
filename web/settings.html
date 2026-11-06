@@ -6,6 +6,12 @@
   <div class="muted">Saved to <code>{{.Path}}</code>. Changes apply after a restart; repos, hooks and env stay in the file.</div>
 </div>
 {{with .Err}}<p class="notice">{{.}}</p>{{end}}
+<section class="card" aria-labelledby="g-skill">
+  <div class="card-h"><h2 id="g-skill">Agent skill</h2>
+  {{with staleSkills}}<span class="muted">A newer <code>handing-off-to-tlm</code> skill is available for {{range $i, $n := .}}{{if $i}} and {{end}}{{$n}}{{end}}.</span>
+  <button type="button" id="skill-update" class="btn small end">Update skill</button>
+  {{else}}<span class="muted">The <code>handing-off-to-tlm</code> skill is up to date wherever it is installed; <code>tlm install-skill</code> installs it.</span>{{end}}</div>
+</section>
 <form id="settings">
 {{range .Groups}}{{if eq .Name "Advanced"}}<details class="fold" id="fold-advanced"><summary>Advanced
   <span class="muted">{{range $i, $f := .Fields}}{{if $i}}, {{end}}{{$f.Label}}{{end}}</span></summary>{{template "fields" .Fields}}</details>
@@ -22,6 +28,17 @@
   <button type="submit" class="btn" id="save" form="settings">Save</button>
   <button type="button" class="btn" id="restart" hidden>Restart sisyphus</button>
 </div>
+
+<script>
+  const su = document.getElementById("skill-update");
+  if (su) su.onclick = async () => {
+    su.disabled = true;
+    const r = await fetch("/api/skill/update", {method: "POST"});
+    if (r.ok) return location.reload();
+    su.disabled = false;
+    alert("Updating the skill failed: " + await r.text());
+  };
+</script>
 
 {{define "fields"}}{{range .}}<div class="field">
   <label for="f-{{.Key}}"><b>{{.Label}}</b><span class="muted">{{.Help}}</span><small>{{.Key}}</small></label>

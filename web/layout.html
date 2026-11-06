@@ -21,7 +21,7 @@
 {{/* top is the header bar; .Status is nil on pages that don't show it. */}}
 {{define "top"}}<header class="top">
   <a class="brand" href="/">sisyphus</a>
-  <nav><a href="/reviews"{{if eq .Page "reviews"}} aria-current="page"{{end}}>Reviews</a><a href="/lastmile"{{if eq .Page "lastmile"}} aria-current="page"{{end}}>Last mile{{with .Status}}{{with .NeedsHuman}}<span class="badge" aria-label="{{len .}} need you">{{len .}}</span>{{end}}{{end}}</a><a href="/history"{{if eq .Page "history"}} aria-current="page"{{end}}>History</a><a href="/logs"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a><a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings</a></nav>
+  <nav><a href="/reviews"{{if eq .Page "reviews"}} aria-current="page"{{end}}>Reviews</a><a href="/lastmile"{{if eq .Page "lastmile"}} aria-current="page"{{end}}>Last mile{{with .Status}}{{with .NeedsHuman}}<span class="badge" aria-label="{{len .}} need you">{{len .}}</span>{{end}}{{end}}</a><a href="/history"{{if eq .Page "history"}} aria-current="page"{{end}}>History</a><a href="/logs"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a><a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings{{if staleSkills}}<span class="badge dot" title="Skill update available" aria-label="skill update available"></span>{{end}}</a></nav>
   {{with .Status}}<div class="top-status">
   {{if .Running}}<span class="checked running">Checking now…</span>
   {{else if .LastRun.IsZero}}<span class="checked running">Starting…</span>
@@ -32,9 +32,7 @@
     {{pct $b.Used}} of {{pct $b.Share}}</span>{{end}}
   <button id="run" class="btn quiet small" {{if .Running}}disabled{{end}}>Check now</button>
   </div>{{end}}
-</header>
-{{with staleSkills}}<p class="notice quiet skill-notice" role="status">A newer TLM handoff skill is available for {{range $i, $n := .}}{{if $i}} and {{end}}{{$n}}{{end}}.
-  <button id="skill-update" class="btn small">Update skill</button></p>{{end}}{{end}}
+</header>{{end}}
 
 {{define "chip"}}<span class="chip {{tone .}}">{{outcome .}}</span>{{end}}
 
@@ -55,14 +53,6 @@
     fetch("/api/open", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: "url=" + encodeURIComponent(a.href)});
   });
   document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => fetch(b.dataset.open, {method: "POST"}));
-  const su = document.getElementById("skill-update");
-  if (su) su.onclick = async () => {
-    su.disabled = true;
-    const r = await fetch("/api/skill/update", {method: "POST"});
-    if (r.ok) return location.reload();
-    su.disabled = false;
-    alert("Updating the skill failed: " + await r.text());
-  };
   const run = document.getElementById("run");
   if (run) run.onclick = async () => {
     run.disabled = true;

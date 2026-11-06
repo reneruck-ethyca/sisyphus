@@ -79,7 +79,6 @@ main { padding: 24px 32px 48px; min-width: 0; max-width: 960px; display: flex; f
 section { display: flex; flex-direction: column; gap: 10px; }
 .notice { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--bad-bg); color: var(--bad); }
 .notice.quiet { background: var(--neutral-bg); color: var(--neutral); }
-.skill-notice { margin: 16px 32px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 18px; border-bottom: 1px solid var(--line2); }
 .card-h .end { margin-left: auto; }
@@ -120,6 +119,7 @@ section { display: flex; flex-direction: column; gap: 10px; }
 .tile span { font-size: 13px; color: var(--muted); }
 .badge { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--bad); color: var(--card); font-size: 11px; font-weight: 700; text-align: center; }
 .top nav a .badge { margin-left: 6px; }
+.badge.dot { display: inline-block; min-width: 0; width: 8px; height: 8px; padding: 0; background: var(--accent); vertical-align: super; }
 .y { color: var(--ok); font-weight: 600; } .n { color: var(--bad); font-weight: 600; }
 .focus { scroll-margin-top: 16px; }
 .focus > .card { border-color: var(--accent); }

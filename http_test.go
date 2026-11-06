@@ -933,8 +933,11 @@ func TestHTTPSkillUpdate(t *testing.T) {
 	os.WriteFile(path, []byte("old"), 0o644)
 	srv, _, _ := newTestServer(t) // checks the skills at startup
 
-	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "newer TLM handoff skill is available for Claude Code.") {
-		t.Fatalf("no notice on the home page")
+	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "skill update available") {
+		t.Fatalf("no dot on the Settings tab")
+	}
+	if _, body := get(t, srv.URL+"/settings"); !strings.Contains(body, "skill is available for Claude Code.") {
+		t.Fatalf("no update offer on the settings page")
 	}
 	resp, err := http.Post(srv.URL+"/api/skill/update", "", nil)
 	if err != nil || resp.StatusCode != http.StatusNoContent {
@@ -946,7 +949,7 @@ func TestHTTPSkillUpdate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(codex, "skills", skillName)); err == nil {
 		t.Error("codex got a skill it never had")
 	}
-	if _, body := get(t, srv.URL+"/"); strings.Contains(body, "newer TLM handoff skill") {
-		t.Error("notice still shown")
+	if _, body := get(t, srv.URL+"/settings"); strings.Contains(body, "skill update available") || !strings.Contains(body, "up to date") {
+		t.Error("update still offered")
 	}
 }
