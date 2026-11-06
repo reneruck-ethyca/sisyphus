@@ -152,6 +152,14 @@ func (s server) runDir(prID, runID string) (string, bool) {
 	return s.rev.RunDir(prID, runID)
 }
 
+// runEvents is a run's readable output so far, and the number of the next line.
+func (s server) runEvents(prID, runID string) ([]review.Event, int, error) {
+	if s.rev == nil {
+		return nil, 0, review.ErrNoRun
+	}
+	return s.rev.Events(prID, runID)
+}
+
 // reviewFile is what a run's agent wrote to out/review.json; nil if it wrote none.
 func (s server) reviewFile(prID, runID string) (*review.ReviewFile, error) {
 	dir, ok := s.runDir(prID, runID)
@@ -375,7 +383,7 @@ func newHandler(srv server) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		evs, next, err := svc.RunEvents(pr.ID, run.ID)
+		evs, next, err := srv.runEvents(pr.ID, run.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -387,7 +395,7 @@ func newHandler(srv server) http.Handler {
 		render(w, "index.html", d)
 	})
 	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events", func(w http.ResponseWriter, r *http.Request) {
-		streamRun(w, r, svc)
+		streamRun(w, r, srv)
 	})
 	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		serveRunFile(w, r, srv)
@@ -438,7 +446,7 @@ func newHandler(srv server) http.Handler {
 					return
 				}
 				var err error
-				if d.Events, d.Next, err = svc.RunEvents(pr.ID, id); err != nil {
+				if d.Events, d.Next, err = srv.runEvents(pr.ID, id); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
@@ -767,9 +775,13 @@ func findRun(pr app.PRView, id string) *review.Run {
 
 // streamRun sends a run's events from line ?from= on as server-sent events: the
 // backlog, then live ones. Once the run is over it sends a "done" event and ends.
-func streamRun(w http.ResponseWriter, r *http.Request, svc *app.Service) {
+func streamRun(w http.ResponseWriter, r *http.Request, srv server) {
 	from, _ := strconv.Atoi(r.URL.Query().Get("from"))
-	events, err := svc.FollowRun(r.Context(), prID(r), r.PathValue("run"), from)
+	if srv.rev == nil {
+		http.NotFound(w, r)
+		return
+	}
+	events, err := srv.rev.Follow(r.Context(), prID(r), r.PathValue("run"), from)
 	if err != nil {
 		http.NotFound(w, r)
 		return

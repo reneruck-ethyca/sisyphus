@@ -195,22 +195,6 @@ func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer) *S
 	return s
 }
 
-// RunEvents returns a review run's readable output so far, and the next line number.
-func (s *Service) RunEvents(prID, runID string) ([]review.Event, int, error) {
-	if s.rev == nil {
-		return nil, 0, review.ErrNoRun
-	}
-	return s.rev.Events(prID, runID)
-}
-
-// FollowRun streams a review run's output from line from on until the run is over (see review.Reviewer.Follow).
-func (s *Service) FollowRun(ctx context.Context, prID, runID string, from int) (<-chan review.Event, error) {
-	if s.rev == nil {
-		return nil, review.ErrNoRun
-	}
-	return s.rev.Follow(ctx, prID, runID, from)
-}
-
 // Status returns the latest snapshot. Its PRs slice is shared; don't mutate it.
 func (s *Service) Status() Status {
 	s.mu.Lock()
