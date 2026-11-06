@@ -79,6 +79,7 @@ main { padding: 24px 32px 48px; min-width: 0; max-width: 960px; display: flex; f
 section { display: flex; flex-direction: column; gap: 10px; }
 .notice { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--bad-bg); color: var(--bad); }
 .notice.quiet { background: var(--neutral-bg); color: var(--neutral); }
+.skill-notice { margin: 16px 32px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 18px; border-bottom: 1px solid var(--line2); }
 .card-h .end { margin-left: auto; }

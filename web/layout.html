@@ -32,7 +32,9 @@
     {{pct $b.Used}} of {{pct $b.Share}}</span>{{end}}
   <button id="run" class="btn quiet small" {{if .Running}}disabled{{end}}>Check now</button>
   </div>{{end}}
-</header>{{end}}
+</header>
+{{with staleSkills}}<p class="notice quiet skill-notice" role="status">A newer TLM handoff skill is available for {{range $i, $n := .}}{{if $i}} and {{end}}{{$n}}{{end}}.
+  <button id="skill-update" class="btn small">Update skill</button></p>{{end}}{{end}}
 
 {{define "chip"}}<span class="chip {{tone .}}">{{outcome .}}</span>{{end}}
 
@@ -53,6 +55,14 @@
     fetch("/api/open", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: "url=" + encodeURIComponent(a.href)});
   });
   document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => fetch(b.dataset.open, {method: "POST"}));
+  const su = document.getElementById("skill-update");
+  if (su) su.onclick = async () => {
+    su.disabled = true;
+    const r = await fetch("/api/skill/update", {method: "POST"});
+    if (r.ok) return location.reload();
+    su.disabled = false;
+    alert("Updating the skill failed: " + await r.text());
+  };
   const run = document.getElementById("run");
   if (run) run.onclick = async () => {
     run.disabled = true;

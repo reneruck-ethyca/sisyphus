@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // handoffSkill teaches coding agents when and how to use `tlm handoff`. It ships
@@ -80,4 +81,23 @@ func installSkill(agent string) (string, error) {
 		return "", fmt.Errorf("%s: %w", agent, err)
 	}
 	return what + " " + path, nil
+}
+
+// agentNames are the display names of the agents in skillHomes.
+var agentNames = map[string]string{"claude": "Claude Code", "codex": "Codex"}
+
+// staleSkills lists the agents (sorted ids) whose installed skill differs from
+// the one in this binary. Agents without the skill aren't listed: not having it
+// was someone's choice. ponytail: compares with the embedded copy each call (two
+// small reads per page), no stored hash; a hand-edited skill also reads as stale.
+func staleSkills() []string {
+	var out []string
+	for a, dir := range skillHomes() {
+		b, err := os.ReadFile(filepath.Join(dir, skillName, "SKILL.md"))
+		if err == nil && !bytes.Equal(b, handoffSkill) {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

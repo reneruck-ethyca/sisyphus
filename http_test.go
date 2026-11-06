@@ -923,3 +923,30 @@ func TestHomeNeedsYou(t *testing.T) {
 		t.Errorf("needs %d, open %d, red %d, merged %d", h.NeedsCount(), h.LMCount(), h.LMCount(lastmile.StateCIRed), len(h.Merged()))
 	}
 }
+
+func TestHTTPSkillUpdate(t *testing.T) {
+	claude, codex := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("CODEX_HOME", codex) // no skill there: not offered
+	srv, _, _ := newTestServer(t)
+	path := filepath.Join(claude, "skills", skillName, "SKILL.md")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte("old"), 0o644)
+
+	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "newer TLM handoff skill is available for Claude Code.") {
+		t.Fatalf("no notice on the home page")
+	}
+	resp, err := http.Post(srv.URL+"/api/skill/update", "", nil)
+	if err != nil || resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("update = %v %v", resp, err)
+	}
+	if b, _ := os.ReadFile(path); !bytes.Equal(b, handoffSkill) {
+		t.Error("skill not updated")
+	}
+	if _, err := os.Stat(filepath.Join(codex, "skills", skillName)); err == nil {
+		t.Error("codex got a skill it never had")
+	}
+	if _, body := get(t, srv.URL+"/"); strings.Contains(body, "newer TLM handoff skill") {
+		t.Error("notice still shown")
+	}
+}

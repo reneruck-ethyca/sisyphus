@@ -436,7 +436,8 @@ reinstall. It then offers the skill below to Claude Code and Codex if they are o
 
 `tlm install-skill` installs or updates the `handing-off-to-tlm` agent skill (`skills/handing-off-to-tlm`,
 built into the binary) in `~/.claude/skills` and `~/.codex/skills` (`CLAUDE_CONFIG_DIR` and `CODEX_HOME`
-override them). Run it again after `make build` to bring the skill up to date.
+override them). After a rebuild the dashboard notices an installed skill that differs from the
+one in the binary and offers an "Update skill" button (agents without the skill aren't offered it).
 
 `tlm` is `sisyphus tlm` (`make build` links `bin/tlm`); it talks to the running app at `http_addr`
 (`--addr` overrides it). `handoff` prints the id; everything afterwards is keyed by it. A handoff is
