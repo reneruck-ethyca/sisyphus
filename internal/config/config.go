@@ -425,7 +425,7 @@ func defaults() Config {
 		},
 		LastMile: LastMile{
 			Interval:        Duration{2 * time.Minute},
-			BotReviewer:     "EthycaBot",
+			BotReviewer:     "ethycabot",
 			Reviewers:       Reviewers{Count: 1},
 			MaxFixRounds:    3,
 			NeedsHumanLabel: "tlm:needs-human",
@@ -433,7 +433,7 @@ func defaults() Config {
 			MaxDiffLines:    400,
 			MaxMergeLines:   400,
 			RiskyPaths:      []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"},
-			BotLogins:       []string{"EthycaBot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
+			BotLogins:       []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},
 	}
 }

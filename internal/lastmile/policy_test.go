@@ -107,12 +107,12 @@ func TestSignals(t *testing.T) {
 	h := Handoff{FixRounds: map[string]int{TriggerCI: 2}, FlakeTotal: 3, ReadyAt: now.Add(-90 * time.Second),
 		Events: []Event{{Kind: "commit"}, {Kind: "reply"}, {Kind: "commit"}}}
 	s := okSnap()
-	s.Approvals = []Approval{{User: "carol"}, {User: "EthycaBot", Bot: true, Stale: true}}
+	s.Approvals = []Approval{{User: "carol"}, {User: "ethycabot", Bot: true, Stale: true}}
 	s.Unresolved, s.Behind = 1, 2
 	g := evaluate(h, s, policyCfg(), now).Signals
 	if g.Additions != 10 || g.Deletions != 5 || g.Files != 2 || g.FixRounds[TriggerCI] != 2 || g.FlakeReruns != 3 || g.AgentCommits != 2 ||
 		g.TimeInReviewSec != 90 || g.Unresolved != 1 || g.Behind != 2 || !g.ApprovalsStale ||
-		!slices.Equal(g.Approvers, []Approver{{"carol", false}, {"EthycaBot", true}}) {
+		!slices.Equal(g.Approvers, []Approver{{"carol", false}, {"ethycabot", true}}) {
 		t.Errorf("signals = %+v", g)
 	}
 	// Empty collections encode as [] and {} for the UI.

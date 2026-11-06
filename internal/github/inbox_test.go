@@ -13,7 +13,7 @@ const inboxFixture = `{"data":{"repository":{"pullRequest":{
   {"databaseId":201,"state":"COMMENTED","body":"overall","createdAt":"2026-11-05T11:00:00Z","url":"r1","author":{"login":"bob","__typename":"User"}},
   {"databaseId":202,"state":"APPROVED","body":"lgtm","createdAt":"2026-11-05T11:00:00Z","url":"r2","author":{"login":"bob","__typename":"User"}},
   {"databaseId":203,"state":"CHANGES_REQUESTED","body":"  ","createdAt":"2026-11-05T11:00:00Z","url":"r3","author":{"login":"bob","__typename":"User"}},
-  {"databaseId":204,"state":"CHANGES_REQUESTED","body":"fix it","createdAt":"2026-11-05T11:00:00Z","url":"r4","author":{"login":"EthycaBot","__typename":"User"}}]},
+  {"databaseId":204,"state":"CHANGES_REQUESTED","body":"fix it","createdAt":"2026-11-05T11:00:00Z","url":"r4","author":{"login":"ethycabot","__typename":"User"}}]},
  "comments":{"nodes":[
   {"databaseId":301,"body":"hello","createdAt":"2026-11-05T12:00:00Z","url":"c1","author":{"login":"carol","__typename":"User"}}]}
 }}}}`

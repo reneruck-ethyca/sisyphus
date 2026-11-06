@@ -149,7 +149,7 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   - commit messages generated from the agent's summary, with a `TLM:` prefix
 - **Replies are posted in one batch from the host.**
 - **Bot comments get the same treatment as human ones, with a cap.** TLM replies to review bots
-  (sisyphus, EthycaBot, others) but at most 3 replies per bot thread; after that it stops replying
+  (sisyphus, ethycabot, others) but at most 3 replies per bot thread; after that it stops replying
   in that thread and logs it. The agent is told to be critical: nitpicks, restatements and
   suggestions it disagrees with on weak grounds get `skip` (no reply posted, reason logged), not a
   polite acknowledgement. Only real fixes and real disagreements get a reply.
@@ -168,7 +168,7 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
 
 ## 6. Requesting reviewers
 
-**Who.** Every TLM PR gets `EthycaBot` (a GitHub user account, so it can be requested directly).
+**Who.** Every TLM PR gets `ethycabot` (a GitHub user account, so it can be requested directly).
 Human reviewers come from the first source that has any:
 
 1. `--reviewers` on the handoff. These replace the roster and are applied as given: no count, no
@@ -178,7 +178,7 @@ Human reviewers come from the first source that has any:
    the PR author, and keeps the cursor in its state store.
 3. nobody, with a dashboard warning
 
-**When.** EthycaBot is requested when the PR is ready for review. Humans are requested once, when CI
+**When.** ethycabot is requested when the PR is ready for review. Humans are requested once, when CI
 first goes green, so nobody is pinged on a red PR. After that, **GitHub is the source of truth**:
 - TLM records the set it requested.
 - Someone a human removed on GitHub is never re-added.
@@ -211,7 +211,7 @@ fix rounds, reviewer identity (human or bot), time spent in review, CI flake cou
 
 | M | Scope | Agent? | Done when |
 |---|---|---|---|
-| **M0** | `handoff` command, state store, open the PR (template, Jira, labels, reviewers incl. EthycaBot and roster), snapshot, dashboard rows, `notify` | No | An orchestrator hands off a branch, the PR opens, and the callback fires on merged/closed |
+| **M0** | `handoff` command, state store, open the PR (template, Jira, labels, reviewers incl. ethycabot and roster), snapshot, dashboard rows, `notify` | No | An orchestrator hands off a branch, the PR opens, and the callback fires on merged/closed |
 | **M1** | CI watch, flake rerun, fix-agent container with host-side commit and push, round limits, needs-human | Yes | A seeded CI failure gets fixed without a human, and a repeated failure escalates |
 | **M2** | Review inbox with a cursor, review-response agent, batch replies, bot-thread cap, PR body updates, re-requesting reviewers | Yes | A review round turns into one commit plus replies |
 | **M3** | Stacks: parent-merged handling, retarget, rebase, conflict agent | On conflict | A 3-PR stack lands bottom-up with no orchestrator involved |
@@ -242,11 +242,11 @@ None right now.
 - **2026-11-05:** Resolved the five open questions (now §9): policy cleared, my `gh` login as
   identity, reply to bots with a 3-reply cap per thread and a `skip` action, TLM may update the PR
   body (but not over a human's edit), fidesplus and fides-qa only. Added §6 on requesting reviewers
-  (EthycaBot always, then `--reviewers` or a global roster, GitHub as source of truth after the
+  (ethycabot always, then `--reviewers` or a global roster, GitHub as source of truth after the
   initial request, dashboard override). Extended the snapshot and the review-agent contract to match.
   New open questions on roster selection, scope and timing.
 - **2026-11-05:** Resolved the reviewer questions (§9, items 6–9): round-robin from a global roster
-  with optional per-repo overrides, humans requested after the first green CI (EthycaBot still at
+  with optional per-repo overrides, humans requested after the first green CI (ethycabot still at
   ready), `--reviewers` replaces the roster and is applied as given.
 - **2026-11-05:** M1 implemented. Refinements: agent runs are goroutines per handoff and only the tick writes
   handoffs (a run leaves its outcome for the next tick), `FixRounds` is per trigger, fingerprints already
@@ -256,7 +256,7 @@ None right now.
   no GitHub token, no stack yet).
 - **2026-11-05:** M2 implemented. Refinements: the cursor is ids (per thread, per review source, per
   conversation-comment source), not timestamps; TLM's own comments are excluded by recorded id because it posts
-  as the user's login; bot status also comes from `lastmile.bot_logins` (EthycaBot and sisyphus are user
+  as the user's login; bot status also comes from `lastmile.bot_logins` (ethycabot and sisyphus are user
   accounts). Review bodies and conversation comments are answered with one shared PR comment that links
   what it answers; inline threads under their first comment. A `fix` action without a pushed change posts
   nothing but its text. The bot cap counts only bot-started inline threads. New feedback with `address-reviews`
@@ -293,7 +293,7 @@ None right now.
   (`lastmile.repo_checks`, listed in the M1 entry above, was removed again): it would run agent-edited code on
   the host, so the agent runs the checks in its container and CI is the gate. An agent run that creates or
   changes gitignored files is rejected (new files removed), and binary changes are refused (no line count to
-  cap). `lastmile.bot_logins` defaults to `EthycaBot` only: sisyphus posts as its user, so "sisyphus" (in the M2
+  cap). `lastmile.bot_logins` defaults to `ethycabot` only: sisyphus posts as its user, so "sisyphus" (in the M2
   entry above) isn't a bot account. A stack child records its parent's head only while its branch contains it,
   so a parent's own rebase doesn't move the child's fork point.
 - **2026-11-05:** UI: the Last mile is its own tab (not a section of the overview), with the needs-human banner,

@@ -350,7 +350,7 @@ counted per trigger and capped by `max_fix_rounds`; a failure whose fingerprint 
 
 Review feedback: every tick reads the PR's review threads (GraphQL), review bodies (`COMMENTED` and
 `CHANGES_REQUESTED` with text) and conversation comments. Each author is marked human or bot: GitHub's
-`Bot` type, a `[bot]` login, or a login in `lastmile.bot_logins` (default `EthycaBot`, a user
+`Bot` type, a `[bot]` login, or a login in `lastmile.bot_logins` (default `ethycabot`, a user
 account that acts as a bot). What TLM itself posted is excluded by comment id (it posts as your login). A
 cursor in the handoff (per thread the last comment id, per source the last review and comment id) makes
 only items newer than what an agent was already handed "new"; the snapshot lists the unresolved threads,
@@ -462,7 +462,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 |---|---|---|
 | `lastmile.disabled` | `false` | no handoffs |
 | `lastmile.interval` | `2m` | between ticks over the open handoffs |
-| `lastmile.bot_reviewer` | `EthycaBot` | requested on every PR once it's ready |
+| `lastmile.bot_reviewer` | `ethycabot` | requested on every PR once it's ready |
 | `lastmile.reviewers` | `{"roster":[],"count":1}` | human reviewers when a handoff names none |
 | `lastmile.repo_reviewers` | `{}` | per `owner/name`: replaces `reviewers` for that repo |
 | `lastmile.max_fix_rounds` | `3` | default of `--max-fix-rounds` |
@@ -471,7 +471,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.flake_reruns` | `2` | flake reruns per head SHA |
 | `lastmile.max_diff_lines` | `400` | an agent change over this many lines is discarded |
 | `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
-| `lastmile.bot_logins` | `["EthycaBot"]` | user accounts whose review feedback counts as bot feedback |
+| `lastmile.bot_logins` | `["ethycabot"]` | user accounts whose review feedback counts as bot feedback |
 | `lastmile.risky_paths` | migrations, auth, `.github/**`, Dockerfiles, `infra/**`, `*.tf` | globs: touching one blocks a would-merge verdict |
 | `lastmile.max_merge_lines` | `400` | additions plus deletions above this block a would-merge verdict |
 | `lastmile.merge_freeze` | `[]` | windows `{weekday?, start, end, tz}` in which a PR would not be merged |

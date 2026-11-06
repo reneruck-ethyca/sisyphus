@@ -66,13 +66,13 @@ func TestBuildInbox(t *testing.T) {
 			th("T1", cm(101, "alice", "a"), github.InboxComment{ID: 102, Author: "x", Bot: true, Body: "b"}, cm(105, "me", "our reply")),
 			th("T2", cm(199, "alice", "old"), cm(200, "bob", "seen")),                          // nothing new
 			{ID: "T3", Resolved: true, Comments: []github.InboxComment{cm(300, "alice", "r")}}, // resolved: history
-			th("T4", cm(400, "EthycaBot", "nit"), cm(405, "me", "r1"), cm(406, "me", "r2")),
+			th("T4", cm(400, "ethycabot", "nit"), cm(405, "me", "r1"), cm(406, "me", "r2")),
 		},
 		Reviews: []github.InboxComment{cm(10, "alice", "seen"), cm(11, "alice", "new review")},
 		Issue:   []github.InboxComment{cm(20, "bob", "seen"), cm(21, "sisyphus", "summary"), cm(105, "me", "tlm")},
 	}
 	h.Posted = append(h.Posted, 405, 406)
-	box := buildInbox(in, h, []string{"EthycaBot", "sisyphus"})
+	box := buildInbox(in, h, []string{"ethycabot", "sisyphus"})
 	var ids []string
 	for _, it := range box.New {
 		ids = append(ids, it.ID)
@@ -109,7 +109,7 @@ func TestBuildInbox(t *testing.T) {
 	// With that cursor and the replies known, nothing is new.
 	h.Cursor = c
 	h.Cursor = advanceCursor(h.Cursor, box.New[1:2])
-	if box2 := buildInbox(in, h, []string{"EthycaBot", "sisyphus"}); len(box2.New) != 0 {
+	if box2 := buildInbox(in, h, []string{"ethycabot", "sisyphus"}); len(box2.New) != 0 {
 		t.Errorf("still new: %+v", box2.New)
 	}
 }
@@ -236,8 +236,8 @@ func TestReviewRejectionPostsNothing(t *testing.T) {
 }
 
 func TestBotThreadCap(t *testing.T) {
-	bot := th("T1", cm(1, "EthycaBot", "nit"), cm(2, "me", "r1"), cm(3, "EthycaBot", "again"), cm(4, "me", "r2"), cm(5, "EthycaBot", "more"), cm(6, "me", "r3"), cm(7, "EthycaBot", "still"))
-	other := th("T2", cm(11, "EthycaBot", "x"), cm(12, "me", "r"), cm(13, "EthycaBot", "y"))
+	bot := th("T1", cm(1, "ethycabot", "nit"), cm(2, "me", "r1"), cm(3, "ethycabot", "again"), cm(4, "me", "r2"), cm(5, "ethycabot", "more"), cm(6, "me", "r3"), cm(7, "ethycabot", "still"))
+	other := th("T2", cm(11, "ethycabot", "x"), cm(12, "me", "r"), cm(13, "ethycabot", "y"))
 	tasks := &fakeTasks{result: result(ReviewAction{ThreadID: "T1", Action: "reply", Reply: "no"}, ReviewAction{ThreadID: "T2", Action: "reply", Reply: "ok"})}
 	m, gh, id := reviewFixture(t, "address-reviews", tasks, github.Inbox{Threads: []github.ReviewThread{bot, other}})
 	m.set(t, id, func(h *Handoff) {
@@ -297,7 +297,7 @@ func TestReviewRoundCapAndResume(t *testing.T) {
 
 func TestFeedbackWithAddressReviewsOff(t *testing.T) {
 	tasks := &fakeTasks{result: result()}
-	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(1, "EthycaBot", "nit"))}}
+	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(1, "ethycabot", "nit"))}}
 	m, _, id := reviewFixture(t, "", tasks, in)
 	m.tickWait(t)
 	h := m.must(t, id)

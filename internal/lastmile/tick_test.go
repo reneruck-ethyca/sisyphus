@@ -164,13 +164,13 @@ func TestLifecycle(t *testing.T) {
 	// The handoff wasn't asked to be draft, so TLM makes the PR ready, asks the bot, then the humans at green.
 	h := tick()
 	if len(gh.Ready) != 1 || h.State != StateCIGreen || !h.BotRequested || !h.HumansRequested ||
-		!reflect.DeepEqual(h.Requested, []string{"EthycaBot", "carol"}) {
+		!reflect.DeepEqual(h.Requested, []string{"ethycabot", "carol"}) {
 		t.Fatalf("first green: ready %v, handoff %+v", gh.Ready, h)
 	}
-	if len(gh.Edits) != 2 || !reflect.DeepEqual(gh.Edits[0].AddReviewers, []string{"EthycaBot"}) || !reflect.DeepEqual(gh.Edits[1].AddReviewers, []string{"carol"}) {
+	if len(gh.Edits) != 2 || !reflect.DeepEqual(gh.Edits[0].AddReviewers, []string{"ethycabot"}) || !reflect.DeepEqual(gh.Edits[1].AddReviewers, []string{"carol"}) {
 		t.Errorf("edits = %+v", gh.Edits)
 	}
-	snap.Draft, snap.RequestedUsers = false, []string{"EthycaBot", "carol"}
+	snap.Draft, snap.RequestedUsers = false, []string{"ethycabot", "carol"}
 	gh.Snapshots[prRef.Key()] = snap
 	if h = tick(); h.State != StateAwaitingReview || len(gh.Edits) != 2 || h.Snapshot == nil || h.Snapshot.CI != CIGreen {
 		t.Errorf("awaiting: %+v edits %d", h, len(gh.Edits))
@@ -258,7 +258,7 @@ func TestRosterRoundRobinPersists(t *testing.T) {
 	m.cfg.LastMile.Reviewers.Roster = []string{"me", "bob", "carol"}
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
 	m.tick(context.Background())
-	if h := m.must(t, id); !reflect.DeepEqual(h.Requested, []string{"EthycaBot", "bob"}) {
+	if h := m.must(t, id); !reflect.DeepEqual(h.Requested, []string{"ethycabot", "bob"}) {
 		t.Fatalf("requested = %v", h.Requested)
 	}
 	again, err := New(m.cfg, gh, m.locks, filepath.Dir(m.path))
@@ -279,11 +279,11 @@ func TestNoReviewersWarns(t *testing.T) {
 func TestRemovedNeverReAdded(t *testing.T) {
 	m, gh, _, id := opened(t, Request{Reviewers: []string{"alice", "bob"}})
 	snap := github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")},
-		RequestedUsers: []string{"EthycaBot", "alice", "bob", "dave"}} // dave: added by a human
+		RequestedUsers: []string{"ethycabot", "alice", "bob", "dave"}} // dave: added by a human
 	gh.Snapshots[prRef.Key()] = snap
 	m.tick(context.Background())
 	// A human removes bob; alice has reviewed, which also takes her off the request list.
-	snap.RequestedUsers = []string{"EthycaBot", "dave"}
+	snap.RequestedUsers = []string{"ethycabot", "dave"}
 	snap.Reviews = []github.SnapReview{{User: "alice", State: "COMMENTED"}}
 	gh.Snapshots[prRef.Key()] = snap
 	edits := len(gh.Edits)
@@ -302,7 +302,7 @@ func TestRemovedNeverReAdded(t *testing.T) {
 	if len(gh.Edits) != edits+1 || !reflect.DeepEqual(gh.Edits[edits], github.PREdit{AddReviewers: []string{"alice", "erin"}}) {
 		t.Errorf("edits %+v", gh.Edits[edits:])
 	}
-	snap.RequestedUsers = []string{"EthycaBot", "dave", "alice", "erin"} // what GitHub shows after the edit
+	snap.RequestedUsers = []string{"ethycabot", "dave", "alice", "erin"} // what GitHub shows after the edit
 	gh.Snapshots[prRef.Key()] = snap
 	for _, list := range [][]string{{"alice", "erin"}, {"alice", "erin", "bob"}} { // drop him from the list, then name him anew
 		if _, err := m.SetReviewers(id, list); err != nil {
@@ -323,11 +323,11 @@ func TestReviewerOverrideDiff(t *testing.T) {
 	snap := github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
 	gh.Snapshots[prRef.Key()] = snap
 	m.tick(context.Background())
-	if h := m.must(t, id); !reflect.DeepEqual(h.Requested, []string{"EthycaBot", "bob"}) || h.ReviewersPending {
+	if h := m.must(t, id); !reflect.DeepEqual(h.Requested, []string{"ethycabot", "bob"}) || h.ReviewersPending {
 		t.Fatalf("handoff = %+v", h)
 	}
 
-	snap.RequestedUsers = []string{"EthycaBot", "bob", "dave"}
+	snap.RequestedUsers = []string{"ethycabot", "bob", "dave"}
 	gh.Snapshots[prRef.Key()] = snap
 	if _, err := m.SetReviewers(id, []string{"carol"}); err != nil { // after: the diff is applied
 		t.Fatal(err)
@@ -336,7 +336,7 @@ func TestReviewerOverrideDiff(t *testing.T) {
 	m.tick(context.Background())
 	h := m.must(t, id)
 	if len(gh.Edits) != edits+1 || !reflect.DeepEqual(gh.Edits[edits], github.PREdit{AddReviewers: []string{"carol"}, RemoveReviewers: []string{"bob"}}) ||
-		!reflect.DeepEqual(h.Requested, []string{"EthycaBot", "carol"}) || h.ReviewersPending {
+		!reflect.DeepEqual(h.Requested, []string{"ethycabot", "carol"}) || h.ReviewersPending {
 		t.Errorf("edits %+v, handoff %+v", gh.Edits[edits:], h)
 	}
 

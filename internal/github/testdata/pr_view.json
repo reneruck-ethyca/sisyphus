@@ -31,7 +31,7 @@
     },
     {
       "id": "PRR_2",
-      "author": {"login": "EthycaBot", "is_bot": true},
+      "author": {"login": "ethycabot", "is_bot": true},
       "authorAssociation": "NONE",
       "body": "",
       "submittedAt": "2026-11-05T10:05:00Z",

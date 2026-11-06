@@ -188,9 +188,9 @@ func TestLoadConfigLastMile(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := cfg.LastMile
-	if l.Disabled || l.Interval.Duration != 2*time.Minute || l.BotReviewer != "EthycaBot" || l.Reviewers.Count != 1 ||
+	if l.Disabled || l.Interval.Duration != 2*time.Minute || l.BotReviewer != "ethycabot" || l.Reviewers.Count != 1 ||
 		l.MaxFixRounds != 3 || l.NeedsHumanLabel != "tlm:needs-human" || l.FlakeReruns != 2 || l.MaxDiffLines != 400 || len(l.Flakes) != 0 ||
-		len(l.BotLogins) != 1 || l.BotLogins[0] != "EthycaBot" {
+		len(l.BotLogins) != 1 || l.BotLogins[0] != "ethycabot" {
 		t.Errorf("bad lastmile defaults: %+v", l)
 	}
 
@@ -200,7 +200,7 @@ func TestLoadConfigLastMile(t *testing.T) {
 		t.Fatal(err)
 	}
 	l = cfg.LastMile
-	if l.Interval.Duration != 30*time.Second || l.BotReviewer != "EthycaBot" || l.MaxFixRounds != 3 {
+	if l.Interval.Duration != 30*time.Second || l.BotReviewer != "ethycabot" || l.MaxFixRounds != 3 {
 		t.Errorf("lastmile = %+v (unset keys keep their defaults)", l)
 	}
 	if r := l.ReviewersFor("ethyca/fidesplus"); len(r.Roster) != 2 || r.Count != 1 {
