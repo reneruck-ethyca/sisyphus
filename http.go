@@ -37,7 +37,7 @@ var styleCSS, _ = webFS.ReadFile("web/style.css")
 var openInBrowser = func(url string) error { return exec.Command("open", url).Run() }
 
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
-	"skill": skillState,
+	"skill": skillsStatus,
 	"when": func(t time.Time) string {
 		if t.IsZero() {
 			return "never"
@@ -168,7 +168,7 @@ func startHTTP(addr string, svc *app.Service) (string, error) {
 }
 
 func newHandler(svc *app.Service) http.Handler {
-	markSkills()
+	markSkills() // once: the handler is built at startup
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /style.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -334,10 +334,10 @@ func newHandler(svc *app.Service) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, skillState())
+		writeJSON(w, http.StatusAccepted, skillsStatus())
 	})
 	mux.HandleFunc("GET /api/skill", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, skillState())
+		writeJSON(w, http.StatusOK, skillsStatus())
 	})
 	// The dashboard's buttons call these, so no token (as with the reviewers edit); the API is loopback.
 	for _, verb := range []string{"resume", "cancel"} {

@@ -39,7 +39,7 @@
     sl.replaceChildren(...agents.map((a) => {
       const li = document.createElement("li"), b = document.createElement("b"), s = document.createElement("span");
       b.textContent = a.name;
-      s.className = "chip " + (a.state === "stale" ? "changes" : a.state === "current" ? "ok" : "neutral");
+      s.className = "chip" + ({stale: " changes", current: " ok"}[a.state] || "");
       s.textContent = label[a.state];
       li.append(b, s);
       const btn = (text, action, quiet) => {

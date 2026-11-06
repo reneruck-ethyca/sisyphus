@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -27,21 +26,17 @@ func tlmInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	ask := func(q, def string) string {
 		_, _ = fmt.Fprintf(stdout, "%s [%s]: ", q, def)
 		line, _ := in.ReadString('\n')
-		if line = strings.TrimSpace(line); line != "" {
-			return line
-		}
-		return def
+		return strings.TrimSpace(line)
 	}
 	yes := func(q string, def bool) bool {
-		d := "y/N"
-		if def {
-			d = "Y/n"
-		}
-		a := strings.ToLower(ask(q, d))
-		if a == strings.ToLower(d) {
+		hint := map[bool]string{true: "Y/n", false: "y/N"}[def]
+		switch strings.ToLower(ask(q, hint)) {
+		case "":
 			return def
+		case "y", "yes":
+			return true
 		}
-		return a == "y" || a == "yes"
+		return false
 	}
 
 	self, err := os.Executable()
@@ -51,7 +46,11 @@ func tlmInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	if err != nil {
 		return fmt.Errorf("finding this binary: %w", err)
 	}
-	dir, err := filepath.Abs(expandHome(ask("Install tlm into", binDir())))
+	dir := binDir()
+	if d := ask("Install tlm into", dir); d != "" {
+		dir = d
+	}
+	dir, err = filepath.Abs(expandHome(dir))
 	if err != nil {
 		return err
 	}
@@ -65,15 +64,15 @@ func tlmInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	}
 
 	var errs []error
-	for _, a := range []struct{ id, name, cmd string }{{"claude", "Claude Code", "claude"}, {"codex", "Codex", "codex"}} {
-		if !agentPresent(a.id, a.cmd) {
+	for _, a := range agents {
+		if !a.present() {
 			_, _ = fmt.Fprintf(stdout, "%s: not found, skipped (tlm install-skill --for %s installs the skill anyway)\n", a.name, a.id)
 			continue
 		}
 		if !yes("Install the "+skillName+" skill for "+a.name+"?", true) {
 			continue
 		}
-		msg, err := installSkill(a.id)
+		msg, err := a.installSkill()
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -132,15 +131,6 @@ func binDir() string {
 		}
 	}
 	return filepath.Join(home, ".local", "bin")
-}
-
-// agentPresent: the agent's CLI is on PATH or its config dir exists.
-func agentPresent(id, cmd string) bool {
-	if _, err := exec.LookPath(cmd); err == nil {
-		return true
-	}
-	_, err := os.Stat(filepath.Dir(skillHomes()[id]))
-	return err == nil
 }
 
 func expandHome(p string) string {

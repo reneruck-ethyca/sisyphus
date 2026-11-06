@@ -438,7 +438,7 @@ reinstall. It then offers the skill below to Claude Code and Codex if they are o
 built into the binary) in `~/.claude/skills` and `~/.codex/skills` (`CLAUDE_CONFIG_DIR` and `CODEX_HOME`
 override them). At startup the dashboard checks for an installed skill that differs from the
 one in the binary  and marks the Settings tab with a dot; the Settings page installs, updates and uninstalls
-the skill per agent (agents without the skill aren't offered it).
+the skill per agent.
 
 `tlm` is `sisyphus tlm` (`make build` links `bin/tlm`); it talks to the running app at `http_addr`
 (`--addr` overrides it). `handoff` prints the id; everything afterwards is keyed by it. A handoff is

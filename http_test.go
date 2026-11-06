@@ -965,7 +965,7 @@ func TestHTTPSkill(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	}
-	if got := states(skillState()); got != "claude=stale codex=absent" {
+	if got := states(skillsStatus()); got != "claude=stale codex=absent" {
 		t.Fatalf("at startup: %s", got)
 	}
 	if got := states(act("claude", "install")); got != "claude=current codex=absent" {

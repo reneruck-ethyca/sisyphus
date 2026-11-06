@@ -8,33 +8,89 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sync"
 )
 
 // handoffSkill teaches coding agents when and how to use `tlm handoff`. It ships
-// in the binary, so `tlm install-skill` after a rebuild brings agents up to date.
+// in the binary; `tlm install-skill` or the Settings page installs it for an agent.
 //
 //go:embed skills/handing-off-to-tlm/SKILL.md
 var handoffSkill []byte
 
 const skillName = "handing-off-to-tlm"
 
-// skillHomes are where each agent CLI looks for personal skills, honouring
-// their config-dir overrides.
-func skillHomes() map[string]string {
+// agent is a coding-agent CLI the skill can be installed for.
+type agent struct {
+	id, name, cmd string
+	env, dir      string // the config-dir override and its default under $HOME
+}
+
+var agents = []agent{
+	{"claude", "Claude Code", "claude", "CLAUDE_CONFIG_DIR", ".claude"},
+	{"codex", "Codex", "codex", "CODEX_HOME", ".codex"},
+}
+
+func findAgent(id string) (agent, bool) {
+	i := slices.IndexFunc(agents, func(a agent) bool { return a.id == id })
+	if i < 0 {
+		return agent{}, false
+	}
+	return agents[i], true
+}
+
+// configDir is the agent's config dir, honouring its override.
+func (a agent) configDir() string {
+	if v := os.Getenv(a.env); v != "" {
+		return v
+	}
 	home, _ := os.UserHomeDir()
-	or := func(env, def string) string {
-		if v := os.Getenv(env); v != "" {
-			return v
-		}
-		return filepath.Join(home, def)
+	return filepath.Join(home, a.dir)
+}
+
+// skillDir is where the agent looks for this personal skill.
+func (a agent) skillDir() string { return filepath.Join(a.configDir(), "skills", skillName) }
+
+// present: the agent's CLI is on PATH or its config dir exists.
+func (a agent) present() bool {
+	if _, err := exec.LookPath(a.cmd); err == nil {
+		return true
 	}
-	return map[string]string{
-		"claude": filepath.Join(or("CLAUDE_CONFIG_DIR", ".claude"), "skills"),
-		"codex":  filepath.Join(or("CODEX_HOME", ".codex"), "skills"),
+	_, err := os.Stat(a.configDir())
+	return err == nil
+}
+
+// skillState says whether the agent's copy is "absent", "current" or "stale"
+// (differs from this binary's, a hand edit too).
+func (a agent) skillState() (string, error) {
+	b, err := os.ReadFile(filepath.Join(a.skillDir(), "SKILL.md"))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "absent", nil
+	case err != nil:
+		return "", err
+	case bytes.Equal(b, handoffSkill):
+		return "current", nil
 	}
+	return "stale", nil
+}
+
+// installSkill writes this binary's skill for the agent and says what it did.
+func (a agent) installSkill() (string, error) {
+	path := filepath.Join(a.skillDir(), "SKILL.md")
+	state, err := a.skillState()
+	if err == nil && state != "current" {
+		err = os.MkdirAll(a.skillDir(), 0o755)
+	}
+	if err == nil && state != "current" {
+		err = os.WriteFile(path, handoffSkill, 0o644)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", a.id, err)
+	}
+	return map[string]string{"absent": "installed ", "stale": "updated ", "current": "up to date: "}[state] + path, nil
 }
 
 // tlmInstallSkill writes the skill for each agent in --for, saying per agent
@@ -42,56 +98,32 @@ func skillHomes() map[string]string {
 func tlmInstallSkill(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("tlm install-skill", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	agents := fs.String("for", "claude,codex", "agents to install the skill for: claude, codex")
+	ids := fs.String("for", "claude,codex", "agents to install the skill for: claude, codex")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	var errs []error
-	for _, a := range commaList(*agents) {
-		msg, err := installSkill(a)
+	for _, id := range commaList(*ids) {
+		a, ok := findAgent(id)
+		if !ok {
+			errs = append(errs, fmt.Errorf("unknown agent %q (claude or codex)", id))
+			continue
+		}
+		msg, err := a.installSkill()
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		_, _ = fmt.Fprintf(stdout, "%s: %s\n", a, msg)
+		_, _ = fmt.Fprintf(stdout, "%s: %s\n", id, msg)
 	}
 	return errors.Join(errs...)
 }
-
-// installSkill writes the skill for one agent and says what it did.
-func installSkill(agent string) (string, error) {
-	dir, ok := skillHomes()[agent]
-	if !ok {
-		return "", fmt.Errorf("unknown agent %q (claude or codex)", agent)
-	}
-	path := filepath.Join(dir, skillName, "SKILL.md")
-	old, err := os.ReadFile(path)
-	what := "updated"
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		what = "installed"
-	case err != nil:
-		return "", fmt.Errorf("%s: %w", agent, err)
-	case bytes.Equal(old, handoffSkill):
-		return "up to date (" + path + ")", nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("%s: %w", agent, err)
-	}
-	if err := os.WriteFile(path, handoffSkill, 0o644); err != nil {
-		return "", fmt.Errorf("%s: %w", agent, err)
-	}
-	return what + " " + path, nil
-}
-
-// agentNames are the display names of the agents in skillHomes.
-var agentNames = map[string]string{"claude": "Claude Code", "codex": "Codex"}
 
 // agentSkill is one agent's copy of the skill as the dashboard shows it.
 type agentSkill struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
-	State string `json:"state"` // "absent", "current" or "stale" (differs from this binary's; a hand edit too)
+	State string `json:"state"` // agent.skillState
 }
 
 // skills is the marker the dashboard reads: each agent found on the machine (or
@@ -108,16 +140,13 @@ var skills struct {
 // markSkills sets the marker from the agents' skill dirs.
 func markSkills() {
 	var out []agentSkill
-	for _, a := range []struct{ id, cmd string }{{"claude", "claude"}, {"codex", "codex"}} {
-		st := "absent"
-		if b, err := os.ReadFile(filepath.Join(skillHomes()[a.id], skillName, "SKILL.md")); err == nil {
-			st = "stale"
-			if bytes.Equal(b, handoffSkill) {
-				st = "current"
-			}
+	for _, a := range agents {
+		st, err := a.skillState()
+		if err != nil {
+			st = "stale" // unreadable: offer to rewrite it
 		}
-		if st != "absent" || agentPresent(a.id, a.cmd) {
-			out = append(out, agentSkill{a.id, agentNames[a.id], st})
+		if st != "absent" || a.present() {
+			out = append(out, agentSkill{a.id, a.name, st})
 		}
 	}
 	skills.Lock()
@@ -137,7 +166,7 @@ func (s skillStatus) Stale() bool {
 	return slices.ContainsFunc(s.Agents, func(a agentSkill) bool { return a.State == "stale" })
 }
 
-func skillState() skillStatus {
+func skillsStatus() skillStatus {
 	skills.Lock()
 	defer skills.Unlock()
 	return skillStatus{Agents: slices.Clone(skills.agents), Busy: skills.busy, Error: skills.err}
@@ -145,10 +174,10 @@ func skillState() skillStatus {
 
 // startSkillAction installs (or updates) or uninstalls the skill for one agent
 // in the background, then re-reads the marker. A no-op while another runs.
-func startSkillAction(agent, action string) error {
-	dir, ok := skillHomes()[agent]
+func startSkillAction(id, action string) error {
+	a, ok := findAgent(id)
 	if !ok {
-		return fmt.Errorf("unknown agent %q", agent)
+		return fmt.Errorf("unknown agent %q", id)
 	}
 	if action != "install" && action != "uninstall" {
 		return fmt.Errorf("unknown action %q", action)
@@ -158,13 +187,13 @@ func startSkillAction(agent, action string) error {
 	if skills.busy != "" {
 		return nil
 	}
-	skills.busy, skills.err = agent+"/"+action, ""
+	skills.busy, skills.err = id+"/"+action, ""
 	go func() {
 		var err error
 		if action == "install" {
-			_, err = installSkill(agent)
+			_, err = a.installSkill()
 		} else {
-			err = os.RemoveAll(filepath.Join(dir, skillName))
+			err = os.RemoveAll(a.skillDir())
 		}
 		markSkills()
 		skills.Lock()
