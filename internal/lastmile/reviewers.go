@@ -15,13 +15,13 @@ import (
 var ErrNotFound = errors.New("no such handoff")
 
 // pick takes count logins from the roster round-robin, starting at cursor and
-// skipping the PR author. It returns them and the cursor to continue from.
-func pick(roster []string, count, cursor int, author string) ([]string, int) {
+// skipping those in skip. It returns them and the cursor to continue from.
+func pick(roster []string, count, cursor int, skip []string) ([]string, int) {
 	var out []string
 	next := cursor
 	for i := 0; i < len(roster) && len(out) < count; i++ {
 		login := roster[(cursor+i)%len(roster)]
-		if strings.EqualFold(login, author) || slices.Contains(out, login) {
+		if slices.ContainsFunc(skip, func(s string) bool { return strings.EqualFold(s, login) }) || slices.Contains(out, login) {
 			continue
 		}
 		out = append(out, login)
@@ -52,15 +52,29 @@ func union(a []string, b ...string) []string {
 	return out
 }
 
-// rosterPick picks the humans for h from its repo's roster and moves the repo's cursor.
-func (m *Manager) rosterPick(h Handoff, author string) []string {
+// humansOn is who already reviews the PR: requested, or with a standing
+// review, other than its author and the bots.
+func (m *Manager) humansOn(s Snapshot) []string {
+	have := slices.Clone(s.Requested)
+	for _, a := range s.Approvals {
+		have = union(have, a.User)
+	}
+	return slices.DeleteFunc(have, func(u string) bool {
+		return strings.EqualFold(u, s.Author) || strings.EqualFold(u, m.cfg.LastMile.BotReviewer) ||
+			isBot(false, u, m.cfg.LastMile.BotLogins)
+	})
+}
+
+// rosterPick tops the PR up from its repo's roster to the roster's count,
+// counting the humans it already has, and moves the repo's cursor.
+func (m *Manager) rosterPick(h Handoff, author string, have []string) []string {
 	r := m.cfg.LastMile.ReviewersFor(h.Repo)
-	if len(r.Roster) == 0 {
+	if len(r.Roster) == 0 || len(have) >= r.Count {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	picked, next := pick(r.Roster, r.Count, m.cursors[h.Repo], author)
+	picked, next := pick(r.Roster, r.Count-len(have), m.cursors[h.Repo], append([]string{author}, have...))
 	if m.cursors == nil {
 		m.cursors = map[string]int{}
 	}
@@ -98,14 +112,17 @@ func (m *Manager) requestReviewers(ctx context.Context, h *Handoff, ref github.P
 	}
 	switch {
 	case !h.HumansRequested && s.Ready() && s.CI == CIGreen:
-		humans := h.Reviewers
+		humans, have := h.Reviewers, m.humansOn(s)
 		if !h.ReviewersSet && len(humans) == 0 {
-			humans = m.rosterPick(*h, s.Author)
+			humans = m.rosterPick(*h, s.Author, have)
 		}
-		if len(humans) == 0 {
+		switch {
+		case len(humans) == 0 && len(have) == 0:
 			h.Warning = "no human reviewers: pass --reviewers or set lastmile.reviewers.roster"
-		} else if err := m.GH.EditPR(ctx, ref, github.PREdit{AddReviewers: humans}); err != nil {
-			return fmt.Errorf("requesting %s: %w", strings.Join(humans, ", "), err)
+		case len(humans) > 0:
+			if err := m.GH.EditPR(ctx, ref, github.PREdit{AddReviewers: humans}); err != nil {
+				return fmt.Errorf("requesting %s: %w", strings.Join(humans, ", "), err)
+			}
 		}
 		h.Requested = union(h.Requested, humans...)
 		h.HumansRequested = true

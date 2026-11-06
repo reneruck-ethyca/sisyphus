@@ -126,6 +126,13 @@ func (m *Manager) openPR(ctx context.Context, h *Handoff) error {
 			return err
 		}
 		h.LastBodyWritten = body
+	} else {
+		// An adopted PR's past discussion was had before the handoff: only what comes after is feedback.
+		in, err := m.GH.Inbox(ctx, ref)
+		if err != nil {
+			return err
+		}
+		h.Cursor = cursorAtEnd(in)
 	}
 	h.PRNumber, h.PROpened = ref.Number, m.now()
 	h.PRURL = fmt.Sprintf("https://github.com/%s/pull/%d", ref.Repo, ref.Number)

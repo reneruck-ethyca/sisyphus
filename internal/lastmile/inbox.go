@@ -18,6 +18,26 @@ type Cursor struct {
 	Comments int64            `json:"comments,omitempty"` // last conversation comment id handed over
 }
 
+// cursorAtEnd is a cursor past everything in in.
+func cursorAtEnd(in github.Inbox) Cursor {
+	var c Cursor
+	for _, t := range in.Threads {
+		for _, x := range t.Comments {
+			if c.Threads == nil {
+				c.Threads = map[string]int64{}
+			}
+			c.Threads[t.ID] = max(c.Threads[t.ID], x.ID)
+		}
+	}
+	for _, x := range in.Reviews {
+		c.Reviews = max(c.Reviews, x.ID)
+	}
+	for _, x := range in.Issue {
+		c.Comments = max(c.Comments, x.ID)
+	}
+	return c
+}
+
 // Item kinds.
 const (
 	KindThread  = "thread"

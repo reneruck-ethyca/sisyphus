@@ -94,9 +94,18 @@ func TestOpenPR(t *testing.T) {
 	m.handoffs[0].PRNumber, m.handoffs[0].State = 0, StateHandedOff
 	m.mu.Unlock()
 	gh.Existing = github.PRRef{Repo: "ethyca/fidesplus", Number: 9}
+	gh.InboxData = github.Inbox{Threads: []github.ReviewThread{{ID: "T1", Comments: []github.InboxComment{cm(3, "alice", "a"), cm(8, "me", "b")}}},
+		Reviews: []github.InboxComment{cm(4, "bob", "c")}, Issue: []github.InboxComment{cm(2, "carol", "d"), cm(6, "carol", "e")}}
 	m.tick(context.Background())
 	if got = m.must(t, h.ID); len(gh.Created) != 1 || got.PRNumber != 9 || got.State != StatePROpen {
 		t.Errorf("after restart: created %d, handoff = %+v", len(gh.Created), got)
+	}
+	// What was said before the adoption isn't feedback.
+	if want := (Cursor{Threads: map[string]int64{"T1": 8}, Reviews: 4, Comments: 6}); !reflect.DeepEqual(got.Cursor, want) {
+		t.Errorf("cursor = %+v, want %+v", got.Cursor, want)
+	}
+	if box := buildInbox(gh.InboxData, got, nil); len(box.New) != 0 {
+		t.Errorf("new after adoption = %+v", box.New)
 	}
 }
 
@@ -246,7 +255,7 @@ func TestPick(t *testing.T) {
 		{5, 0, "bob", []string{"alice", "carol"}, 0},
 	}
 	for _, c := range cases {
-		got, next := pick(roster, c.count, c.cursor, c.author)
+		got, next := pick(roster, c.count, c.cursor, []string{c.author})
 		if !slices.Equal(got, c.want) || next != c.next {
 			t.Errorf("pick(%d,%d,%q) = %v,%d; want %v,%d", c.count, c.cursor, c.author, got, next, c.want, c.next)
 		}
@@ -264,6 +273,31 @@ func TestRosterRoundRobinPersists(t *testing.T) {
 	again, err := New(m.cfg, gh, m.locks, filepath.Dir(m.path))
 	if err != nil || again.cursors["ethyca/fidesplus"] != 2 {
 		t.Errorf("cursor not persisted: %v %v", again.cursors, err)
+	}
+}
+
+func TestRosterCountsReviewersAlreadyOnPR(t *testing.T) {
+	m, gh, _, id := opened(t, Request{})
+	m.cfg.LastMile.Reviewers.Roster = []string{"bob", "carol", "dave"}
+	m.cfg.LastMile.Reviewers.Count = 2
+	snap := github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")},
+		RequestedUsers: []string{"ethycabot", "bob"}}
+	gh.Snapshots[prRef.Key()] = snap
+	m.tick(context.Background())
+	if h := m.must(t, id); !reflect.DeepEqual(h.Requested, []string{"ethycabot", "carol"}) || h.Warning != "" {
+		t.Fatalf("requested = %v, warning %q", h.Requested, h.Warning)
+	}
+
+	// Enough people already: nobody is added and there is no warning.
+	m, gh, _, id = opened(t, Request{})
+	m.cfg.LastMile.Reviewers.Roster = []string{"bob", "carol", "dave"}
+	snap.Reviews = []github.SnapReview{{User: "erin", State: "APPROVED"}}
+	gh.Snapshots[prRef.Key()] = snap
+	m.tick(context.Background())
+	if h := m.must(t, id); !h.HumansRequested || h.Warning != "" || slices.ContainsFunc(gh.Edits, func(e github.PREdit) bool {
+		return slices.ContainsFunc(e.AddReviewers, func(u string) bool { return u != "ethycabot" })
+	}) {
+		t.Errorf("handoff = %+v, edits %+v", h, gh.Edits)
 	}
 }
 
