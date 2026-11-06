@@ -928,10 +928,10 @@ func TestHTTPSkillUpdate(t *testing.T) {
 	claude, codex := t.TempDir(), t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", claude)
 	t.Setenv("CODEX_HOME", codex) // no skill there: not offered
-	srv, _, _ := newTestServer(t)
 	path := filepath.Join(claude, "skills", skillName, "SKILL.md")
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte("old"), 0o644)
+	srv, _, _ := newTestServer(t) // checks the skills at startup
 
 	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "newer TLM handoff skill is available for Claude Code.") {
 		t.Fatalf("no notice on the home page")

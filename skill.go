@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 )
 
 // handoffSkill teaches coding agents when and how to use `tlm handoff`. It ships
@@ -86,11 +87,18 @@ func installSkill(agent string) (string, error) {
 // agentNames are the display names of the agents in skillHomes.
 var agentNames = map[string]string{"claude": "Claude Code", "codex": "Codex"}
 
-// staleSkills lists the agents (sorted ids) whose installed skill differs from
-// the one in this binary. Agents without the skill aren't listed: not having it
-// was someone's choice. ponytail: compares with the embedded copy each call (two
-// small reads per page), no stored hash; a hand-edited skill also reads as stale.
-func staleSkills() []string {
+// staleSkills is the marker for agents (sorted ids) whose installed skill
+// differed from the one in this binary at startup (markStaleSkills), less those
+// updated since. Agents without the skill aren't listed: not having it was
+// someone's choice. A hand-edited skill also reads as stale.
+var staleSkills struct {
+	sync.Mutex
+	agents []string
+}
+
+// markStaleSkills sets the marker; the skill only changes with the binary, so
+// once at startup is enough.
+func markStaleSkills() {
 	var out []string
 	for a, dir := range skillHomes() {
 		b, err := os.ReadFile(filepath.Join(dir, skillName, "SKILL.md"))
@@ -99,5 +107,30 @@ func staleSkills() []string {
 		}
 	}
 	slices.Sort(out)
-	return out
+	staleSkills.Lock()
+	staleSkills.agents = out
+	staleSkills.Unlock()
+}
+
+// staleSkillAgents reads the marker.
+func staleSkillAgents() []string {
+	staleSkills.Lock()
+	defer staleSkills.Unlock()
+	return slices.Clone(staleSkills.agents)
+}
+
+// updateStaleSkills installs the binary's skill for every marked agent and
+// keeps only the ones that failed marked.
+func updateStaleSkills() error {
+	staleSkills.Lock()
+	defer staleSkills.Unlock()
+	var failed []string
+	var errs []error
+	for _, a := range staleSkills.agents {
+		if _, err := installSkill(a); err != nil {
+			failed, errs = append(failed, a), append(errs, err)
+		}
+	}
+	staleSkills.agents = failed
+	return errors.Join(errs...)
 }

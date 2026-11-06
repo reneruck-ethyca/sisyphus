@@ -39,7 +39,7 @@ var openInBrowser = func(url string) error { return exec.Command("open", url).Ru
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"staleSkills": func() []string {
 		var names []string
-		for _, a := range staleSkills() {
+		for _, a := range staleSkillAgents() {
 			names = append(names, agentNames[a])
 		}
 		return names
@@ -174,6 +174,7 @@ func startHTTP(addr string, svc *app.Service) (string, error) {
 }
 
 func newHandler(svc *app.Service) http.Handler {
+	markStaleSkills()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /style.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -333,13 +334,7 @@ func newHandler(svc *app.Service) http.Handler {
 	// Brings every out-of-date copy of the handoff skill up to this binary's; the
 	// content is fixed, so like the buttons below it needs no token.
 	mux.HandleFunc("POST /api/skill/update", func(w http.ResponseWriter, r *http.Request) {
-		var errs []error
-		for _, a := range staleSkills() {
-			if _, err := installSkill(a); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		if err := errors.Join(errs...); err != nil {
+		if err := updateStaleSkills(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
