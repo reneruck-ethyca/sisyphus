@@ -947,7 +947,7 @@ func TestHTTPSkill(t *testing.T) {
 			_, body := get(t, srv.URL+"/api/skill")
 			var st skillStatus
 			json.Unmarshal([]byte(body), &st)
-			if !st.Busy {
+			if st.Busy == "" {
 				if st.Error != "" {
 					t.Fatalf("%s %s: %s", agent, action, st.Error)
 				}

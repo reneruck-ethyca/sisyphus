@@ -54,6 +54,11 @@ button:disabled { opacity: .5; cursor: default; }
 .chip.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
 .chip.bad { background: var(--bad-bg); color: var(--bad); }
 @keyframes pulse { 50% { opacity: .3; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* A button whose action runs: same size, its label swapped for a spinner. */
+.btn.spinning { position: relative; color: transparent !important; }
+.btn.spinning::after { content: ""; position: absolute; inset: 0; margin: auto; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--muted); border-right-color: transparent; animation: spin .7s linear infinite; }
 
 .cols { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; min-height: calc(100vh - 53px); }
 aside { background: var(--side); border-right: 1px solid var(--line); padding-bottom: 16px; }

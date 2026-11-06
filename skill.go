@@ -101,7 +101,7 @@ type agentSkill struct {
 var skills struct {
 	sync.Mutex
 	agents []agentSkill
-	busy   bool   // an action runs in the background
+	busy   string // the action running in the background, as "agent/action" ("" = none)
 	err    string // why the last action failed ("" = it didn't)
 }
 
@@ -128,7 +128,7 @@ func markSkills() {
 // skillStatus is the marker as the dashboard shows it.
 type skillStatus struct {
 	Agents []agentSkill `json:"agents"`
-	Busy   bool         `json:"busy"`
+	Busy   string       `json:"busy,omitempty"` // "agent/action" while one runs
 	Error  string       `json:"error,omitempty"`
 }
 
@@ -155,10 +155,10 @@ func startSkillAction(agent, action string) error {
 	}
 	skills.Lock()
 	defer skills.Unlock()
-	if skills.busy {
+	if skills.busy != "" {
 		return nil
 	}
-	skills.busy, skills.err = true, ""
+	skills.busy, skills.err = agent+"/"+action, ""
 	go func() {
 		var err error
 		if action == "install" {
@@ -169,7 +169,7 @@ func startSkillAction(agent, action string) error {
 		markSkills()
 		skills.Lock()
 		defer skills.Unlock()
-		skills.busy = false
+		skills.busy = ""
 		if err != nil {
 			skills.err = err.Error()
 		}

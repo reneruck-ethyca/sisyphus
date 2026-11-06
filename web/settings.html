@@ -44,7 +44,8 @@
       li.append(b, s);
       const btn = (text, action, quiet) => {
         const x = document.createElement("button");
-        x.type = "button"; x.className = "btn small" + (quiet ? " quiet" : ""); x.textContent = text; x.disabled = st.busy;
+        x.type = "button"; x.className = "btn small" + (quiet ? " quiet" : ""); x.textContent = text; x.disabled = !!st.busy;
+        if (st.busy === a.id + "/" + action) { x.classList.add("spinning"); x.setAttribute("aria-label", text + ": working"); }
         x.onclick = async () => {
           const r = await fetch("/api/skill/" + a.id + "/" + action, {method: "POST"});
           r.ok ? showSkill(await r.json()) : (sm.textContent = await r.text());
@@ -56,7 +57,7 @@
       if (a.state !== "absent") btn("Uninstall", "uninstall", true);
       return li;
     }));
-    sm.textContent = st.busy ? "Working…" : st.error ? "That failed: " + st.error
+    sm.textContent = st.error ? "That failed: " + st.error
       : agents.length ? "" : "Neither Claude Code nor Codex was found on this machine.";
     sm.hidden = !sm.textContent;
     const dot = document.querySelector(".top nav .badge.dot");
