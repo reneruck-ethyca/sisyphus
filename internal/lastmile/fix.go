@@ -259,15 +259,23 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 			reason = m.cleanup(ctx, h, start, before, reason)
 		}
 	}()
-	// The container's setup (npm install into workspace node_modules, …) writes
-	// ignored files too; that is TLM's doing, so the agent is held to a snapshot
-	// taken once setup is over. If setup never finishes, the one above stands.
+	// The container's setup (npm install into workspace node_modules) rewrites
+	// ignored files too, so what it leaves under node_modules joins the baseline.
+	// Only there: setup runs the branch's install scripts, which an earlier agent
+	// round may have changed, so anything else it writes (.envrc, .venv/bin) is
+	// still held against the run.
+	// ponytail: node_modules/.bin is still trusted; protect package.json scripts if that matters.
 	afterSetup := func() error {
 		b, err := ignoredFiles(ctx, h.Worktree)
-		if err == nil {
-			before = b
+		if err != nil {
+			return err
 		}
-		return err
+		for f, st := range b {
+			if slices.Contains(strings.Split(f, "/"), "node_modules") {
+				before[f] = st
+			}
+		}
+		return nil
 	}
 	res, err := m.Tasks.RunTask(ctx, review.Task{ID: h.ID, Repo: h.Repo, Worktree: h.Worktree, Agent: h.Agent, Prompt: prompt, Context: files,
 		AfterSetup: afterSetup})
