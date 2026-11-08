@@ -32,6 +32,9 @@ type Task struct {
 	Agent    config.Agent      // zero = review.agent
 	Prompt   string            // written to /sisyphus/prompt.md
 	Context  map[string]string // file name -> content, under /sisyphus/context (read-only)
+	// AfterSetup, when set, is called once the repo's setup is done and before the
+	// agent starts; the container waits for it. An error fails the run.
+	AfterSetup func() error
 }
 
 // TaskResult is what a finished task leaves.
@@ -143,10 +146,13 @@ func (r *Reviewer) runTask(ctx context.Context, key string, run Run, t Task) (re
 		Override:    map[string]string{"GH_TOKEN": "", "GITHUB_TOKEN": ""},
 		Labels:      map[string]string{"sisyphus": "1", "sisyphus.run": run.ID, "sisyphus.task": t.ID},
 		WithContext: true,
+		Gate:        t.AfterSetup != nil,
 	})
 	if err != nil {
 		return nil, 0, err
 	}
+	ctx, fail := context.WithCancelCause(ctx)
+	defer fail(nil)
 	if r.cfg.Timeout.Duration > 0 { // unlike a review, a task is cut off: its caller holds a worktree lock
 		var stop context.CancelFunc
 		ctx, stop = context.WithTimeoutCause(ctx, r.cfg.Timeout.Duration, errors.New("task timed out (review.timeout)"))
@@ -167,7 +173,19 @@ func (r *Reviewer) runTask(ctx context.Context, key string, run Run, t Task) (re
 	}
 	defer logf.Close()
 	var claude *ClaudeResult
+	gated := false
 	lw := &lineWriter{file: logf, onLine: func(n int, line string) {
+		if t.AfterSetup != nil && !gated && line == setupDone {
+			gated = true
+			err := t.AfterSetup()
+			if err == nil {
+				err = os.WriteFile(filepath.Join(run.Dir, "out", gateFile), nil, 0o644)
+			}
+			if err != nil {
+				fail(fmt.Errorf("after setup: %w", err))
+			}
+			return
+		}
 		_, res, w := parseLine(n, line)
 		if res != nil {
 			claude = res

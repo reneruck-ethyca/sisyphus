@@ -210,6 +210,19 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([
 	return changed, nil
 }
 
+// maxListed is how many paths a reason names; a reason ends up in lastmile.json,
+// the dashboard and the notify hook's argv, so a run that touched node_modules
+// mustn't put thousands there.
+const maxListed = 20
+
+// pathList joins paths for a reason, the first maxListed of them.
+func pathList(paths []string) string {
+	if len(paths) <= maxListed {
+		return strings.Join(paths, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(paths[:maxListed], ", "), len(paths)-maxListed)
+}
+
 // pathProblem says why an agent may not leave f behind, or "". An untracked
 // directory is listed as "dir/"; with a nested repo inside, git add -A would commit
 // a gitlink and skip the per-file checks. Any .git entry is refused as well.
@@ -259,7 +272,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return "", err
 	}
 	if len(ignored) > 0 {
-		return reject("agent created or changed gitignored files (new ones removed): %s", strings.Join(ignored, ", "))
+		return reject("agent created or changed gitignored files (new ones removed): %s", pathList(ignored))
 	}
 	if res.Escalate {
 		return "agent escalated: " + res.EscalateReason, worktree.Reset(ctx, h.Worktree, head)

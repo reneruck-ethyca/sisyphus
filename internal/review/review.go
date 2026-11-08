@@ -856,6 +856,7 @@ type specReq struct {
 	Related                                   *config.Related
 	RelatedDir                                string
 	WithContext                               bool // mount Dir/context at /sisyphus/context
+	Gate                                      bool // after setup, announce setupDone and wait for /out/<gateFile>
 }
 
 func (r *Reviewer) buildSpec(ctx context.Context, q specReq) (container.Spec, error) {
@@ -953,7 +954,7 @@ func (r *Reviewer) buildSpec(ctx context.Context, q specReq) (container.Spec, er
 	}
 	return container.Spec{
 		Network: q.Network, Name: q.Name,
-		Image: repo.Image, Command: []string{"bash", "-c", r.script(repo, owned, agent)}, Env: env, EnvFiles: envFiles,
+		Image: repo.Image, Command: []string{"bash", "-c", r.script(repo, owned, agent, q.Gate)}, Env: env, EnvFiles: envFiles,
 		Mounts: mounts, Workdir: workdir, Labels: q.Labels,
 	}, nil
 }
@@ -961,10 +962,21 @@ func (r *Reviewer) buildSpec(ctx context.Context, q specReq) (container.Spec, er
 // claudeDir is Claude Code's config dir inside review containers.
 const claudeDir = "/sisyphus/claude"
 
+// setupDone is the line a gated container prints when its setup is over; it
+// then waits for the host to create /out/<gateFile>.
+const (
+	setupDone = "── sisyphus: setup done ──"
+	gateFile  = ".setup-ack"
+)
+
 // script is the container's command: own the volumes, run the repo's setup,
-// then Claude headless on the rendered prompt.
-func (r *Reviewer) script(repo config.RepoReview, owned []string, agent config.Agent) string {
-	return r.setupScript(repo, owned) + r.agentScript(agent)
+// with gate wait for the host, then the agent headless on the rendered prompt.
+func (r *Reviewer) script(repo config.RepoReview, owned []string, agent config.Agent, gate bool) string {
+	s := r.setupScript(repo, owned)
+	if gate {
+		s += fmt.Sprintf("echo %s\nuntil [ -e /out/%s ]; do sleep 0.2; done\nrm -f /out/%s\n", shellQuote(setupDone), gateFile, gateFile)
+	}
+	return s + r.agentScript(agent)
 }
 
 func (r *Reviewer) agentScript(agent config.Agent) string {

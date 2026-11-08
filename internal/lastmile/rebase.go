@@ -45,7 +45,7 @@ func rebaseInProgress(ctx context.Context, dir string) bool {
 // rebases inside a run (a goroutine tracked in m.running), so with no run in flight
 // a rebase in progress isn't ours to keep: it would wedge every later git command.
 func (m *Manager) abortStaleRebase(ctx context.Context, h *Handoff) {
-	unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
+	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
 	if err != nil {
 		return
 	}
@@ -195,7 +195,7 @@ func (m *Manager) restack(ctx context.Context, h Handoff, r restackSpec) outcome
 }
 
 func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *effects) string {
-	unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
+	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
 	if err != nil {
 		return "rebase: " + err.Error()
 	}
@@ -348,7 +348,7 @@ func (m *Manager) checkResolution(ctx context.Context, dir string, files []strin
 		return "listing ignored files: " + err.Error()
 	}
 	if len(ignored) > 0 {
-		return "agent created or changed gitignored files (new ones removed): " + strings.Join(ignored, ", ")
+		return "agent created or changed gitignored files (new ones removed): " + pathList(ignored)
 	}
 	if res.Escalate {
 		return "agent escalated: " + res.EscalateReason

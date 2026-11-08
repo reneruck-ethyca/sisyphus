@@ -878,7 +878,7 @@ func setupOutput(t *testing.T, setup string, limit time.Duration) (string, error
 		t.Skip("needs GNU timeout")
 	}
 	r := &Reviewer{cfg: config.Review{Agent: config.Agent{Vendor: "claude", Model: "opus"}, MaxTurns: 1, StepTimeout: config.Duration{Duration: limit}}}
-	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil, r.cfg.Agent), "echo '── sisyphus: claude ──'")
+	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil, r.cfg.Agent, false), "echo '── sisyphus: claude ──'")
 	out, err := exec.Command("bash", "-c", script).CombinedOutput()
 	return string(out), err
 }

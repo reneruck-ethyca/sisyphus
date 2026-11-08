@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,5 +137,48 @@ func TestSlots(t *testing.T) {
 	f.r.mu.Unlock()
 	if used, max := f.r.Slots(); used != 2 || max != 1 {
 		t.Errorf("slots = %d of %d, want a review and a task counted", used, max)
+	}
+}
+
+func TestRunTaskGatesAgentOnSetup(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		f := newFixture(t, func(*config.Review) {})
+		calls := 0
+		task := f.task("h1")
+		task.AfterSetup = func() error {
+			calls++
+			if fail {
+				return errors.New("snapshot failed")
+			}
+			return nil
+		}
+		go func() {
+			waitFor(t, "task container", func() bool { return len(f.containers()) > 0 })
+			id := f.containers()[0].ID
+			f.rt.Print(id, "npm install\n"+setupDone+"\n")
+			if fail {
+				return // the run stops the container itself
+			}
+			var out string
+			for _, m := range f.rt.Started()[0].Mounts {
+				if m.Target == "/out" {
+					out = m.Source
+				}
+			}
+			waitFor(t, "gate file", func() bool { _, err := os.Stat(filepath.Join(out, gateFile)); return err == nil })
+			f.rt.Print(id, setupDone+"\n") // a second announcement is just output
+			f.finishTask(t, 0, `{"summary":"ok"}`, 0)
+		}()
+		_, err := f.r.RunTask(context.Background(), task)
+		if fail != (err != nil) || fail && !strings.Contains(err.Error(), "after setup: snapshot failed") {
+			t.Fatalf("fail=%v: err = %v", fail, err)
+		}
+		if calls != 1 {
+			t.Fatalf("fail=%v: AfterSetup called %d times", fail, calls)
+		}
+		script := f.rt.Started()[0].Command[2]
+		if !strings.Contains(script, "until [ -e /out/"+gateFile+" ]") {
+			t.Fatalf("script has no gate:\n%s", script)
+		}
 	}
 }

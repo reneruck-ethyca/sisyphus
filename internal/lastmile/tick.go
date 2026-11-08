@@ -79,7 +79,7 @@ func (m *Manager) advance(ctx context.Context, h *Handoff) error {
 
 // lockedGit runs git in the handoff's worktree while holding its lock.
 func (m *Manager) lockedGit(ctx context.Context, h Handoff, args ...string) (string, error) {
-	unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
+	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
 	if err != nil {
 		return "", err
 	}

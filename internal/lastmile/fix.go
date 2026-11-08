@@ -227,7 +227,7 @@ type agentJob struct {
 // the worktree is put back (see cleanup).
 func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply func(raw []byte, before map[string]stamp) string) (reason string) {
 	if !j.held {
-		unlock, err := m.locks.Lock(ctx, "lastmile:"+h.ID)
+		unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
 		if err != nil {
 			return j.kind + ": " + err.Error()
 		}
@@ -259,7 +259,18 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 			reason = m.cleanup(ctx, h, start, before, reason)
 		}
 	}()
-	res, err := m.Tasks.RunTask(ctx, review.Task{ID: h.ID, Repo: h.Repo, Worktree: h.Worktree, Agent: h.Agent, Prompt: prompt, Context: files})
+	// The container's setup (npm install into workspace node_modules, …) writes
+	// ignored files too; that is TLM's doing, so the agent is held to a snapshot
+	// taken once setup is over. If setup never finishes, the one above stands.
+	afterSetup := func() error {
+		b, err := ignoredFiles(ctx, h.Worktree)
+		if err == nil {
+			before = b
+		}
+		return err
+	}
+	res, err := m.Tasks.RunTask(ctx, review.Task{ID: h.ID, Repo: h.Repo, Worktree: h.Worktree, Agent: h.Agent, Prompt: prompt, Context: files,
+		AfterSetup: afterSetup})
 	if err != nil {
 		slog.Warn("lastmile agent failed", "kind", j.kind, "id", h.ID, "err", err)
 		return j.kind + " failed: " + err.Error()
@@ -284,7 +295,7 @@ func (m *Manager) cleanup(ctx context.Context, h Handoff, start string, before m
 			slog.Warn("lastmile cleanup: reset", "id", h.ID, "err", err)
 		}
 	}
-	if names := strings.Join(changed, ", "); names != "" && !strings.Contains(reason, names) {
+	if names := pathList(changed); names != "" && !strings.Contains(reason, names) {
 		reason += "; gitignored files created or changed (new ones removed): " + names
 	}
 	return reason
