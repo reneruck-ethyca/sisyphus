@@ -97,6 +97,10 @@ func main() {
 		}
 		return
 	}
+	// From here on the state is written: one sisyphus per state dir (-shell and -eval only read it).
+	if err := lockState(filepath.Dir(cfg.StateFile)); err != nil {
+		fatal(err)
+	}
 	var rev *review.Reviewer // reviews state lives next to the tracker's
 	if !cfg.Review.Disabled {
 		if rev, err = review.New(cfg.Review, container.Docker{}, tr.Locks, filepath.Dir(cfg.StateFile)); err != nil {
