@@ -73,6 +73,9 @@ func TestDirtyFilesShowBeforeTheAssessment(t *testing.T) {
 	if d == nil || d.assessed() {
 		t.Fatalf("dirty = %+v", d)
 	}
+	if v := m.Views()[0]; v.DirtyHash == "" || v.DirtyHash != d.Hash() {
+		t.Errorf("view dirty hash = %q", v.DirtyHash)
+	}
 	want := []DirtyFile{
 		{Path: "a.txt", Code: "M", Add: 2, Del: 1},
 		{Path: "blob.bin", Code: "??", Binary: true},

@@ -9,6 +9,7 @@ type View struct {
 	Reviewing []string `json:"reviewing"`            // asked to review now; before the PR is read, the planned humans
 	Depth     int      `json:"depth"`                // how far down a stack: 0 for a root or a handoff on its own
 	WaitingOn string   `json:"waiting_on,omitempty"` // the open parent this stacked handoff sits on
+	DirtyHash string   `json:"dirty_hash,omitempty"` // Dirty.Hash, which the dirty panel's actions send back
 
 	// The agent run in flight for this handoff: its trigger (Trigger*) and start; "" = none.
 	// A finished run waiting for the next tick to apply it doesn't count.
@@ -26,6 +27,9 @@ func (m *Manager) Views() []View {
 		v := View{Handoff: h, Over: Terminal(h.State), Reviewing: h.Reviewers}
 		if h.Snapshot != nil {
 			v.Reviewing = h.Snapshot.Requested
+		}
+		if h.Dirty != nil {
+			v.DirtyHash = h.Dirty.Hash()
 		}
 		if a, ok := m.running.get(h.ID); ok && !a.done {
 			v.AgentRunning, v.AgentStarted = a.trigger, a.started

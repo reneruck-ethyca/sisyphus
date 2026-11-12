@@ -1,4 +1,4 @@
-.PHONY: help build install test lint plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
+.PHONY: help build install test lint run backend-build backend-test backend-lint web-deps web-build web-test web-dev plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
 
 LABEL := com.reneruck.sisyphus
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -10,19 +10,46 @@ export CGO_LDFLAGS := -mmacosx-version-min=13.0
 help: ## list the targets (the default)
 	@awk -F':.*## ' '/^[a-z-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# production tag: no devtools/inspector in the window.
-build: ## build bin/sisyphus (and the bin/tlm symlink)
-	go build -tags production -o bin/sisyphus .
-	ln -sf sisyphus bin/tlm
+build: web-build backend-build ## build the UI, then bin/sisyphus with it embedded
+
+test: web-test backend-test ## run the UI and backend tests
+
+lint: backend-lint ## lint (the UI's type check runs in web-build and web-test)
+
+run: build ## build and run sisyphus in the foreground
+	bin/sisyphus
 
 install: build ## put tlm on your PATH and offer the agent skill (interactive)
 	bin/sisyphus tlm install
 
-test: ## run the tests with the race detector
-	go test -race ./...
+# The backend embeds backend/web/dist as it is; without a UI build it serves a "run make build" page.
+# production tag: no devtools/inspector in the window.
+backend-build: ## build bin/sisyphus (and the bin/tlm symlink) from backend/
+	cd backend && go build -tags production -o ../bin/sisyphus .
+	ln -sf sisyphus bin/tlm
 
-lint: ## run golangci-lint
-	golangci-lint run ./...
+backend-test: ## run the backend tests with the race detector
+	cd backend && go test -race ./...
+
+backend-lint: ## run golangci-lint on the backend
+	cd backend && golangci-lint run ./...
+
+web/node_modules: web/package.json web/package-lock.json
+	cd web && npm ci
+	@touch $@
+
+web-deps: web/node_modules ## install the UI's dependencies
+
+web-build: web/node_modules ## type-check and build the UI into backend/web/dist
+	cd web && npm run build
+
+web-test: web/node_modules ## type-check and test the UI
+	cd web && npx tsc --noEmit && npm test
+
+# Hot-reloading UI against a running sisyphus (make start, or make run in another shell);
+# SISYPHUS_URL points it elsewhere.
+web-dev: web/node_modules ## serve the UI with hot reload, its /api going to a running sisyphus
+	cd web && npm run dev
 
 # Renders the LaunchAgent. PATH is captured from the installing shell so gh/git/wtp
 # resolve under launchd; plutil sets values literally (no sed escaping pitfalls).

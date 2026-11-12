@@ -39,9 +39,11 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
 ## Usage
 
 ```bash
-make build                     # bin/sisyphus (needs cgo / Xcode CLT)
-make test                      # with -race
-make lint                      # golangci-lint (.golangci.yml)
+make build                     # the UI, then bin/sisyphus with it embedded (needs cgo / Xcode CLT, Node)
+make test                      # UI tests, then backend tests with -race
+make lint                      # golangci-lint (backend/.golangci.yml)
+make web-dev                    # hot-reloading UI against a running sisyphus (SISYPHUS_URL to point elsewhere)
+make backend-build | backend-test | web-build | web-test   # one side only
 bin/sisyphus -once             # single tick, no tray or window; good for testing
 bin/sisyphus                   # menu-bar app ("SY"): status, Open window, Open dashboard, Check now, Open state file, Quit
 bin/sisyphus -config <file>    # another config file
@@ -503,7 +505,11 @@ it: a queue, review containers running Claude Code, local stacks, run records an
 | `internal/app` | `Service`: the boundary UIs talk to |
 | `internal/proc`, `internal/jsonfile` | external commands with timeouts; atomic JSON state files |
 | `internal/gittest`, `internal/testkit` | test helpers |
-| `main` | wiring, CLI flags, dashboard (`http.go`, `web/`), Wails window and menu bar (`ui.go`) |
+| `main` | wiring, CLI flags, the JSON API and UI server (`http.go`), Wails window and menu bar (`ui.go`) |
+
+The repo has two parts: `backend/` is the Go module (everything above), `web/` the dashboard (one UI so far; others could sit beside it), a
+Vite + Preact + TypeScript app. `make web-build` builds it into `backend/web/dist`, which the binary
+embeds; built without it, the backend serves a page saying to run `make build`.
 
 UIs talk to `app.Service` for what combines tracker and reviewer: the tick loop (`Run`, `RunOnce`,
 `RunNow`), the status snapshot (`Status`, `PR`, `History`, `SubscribeStatus`) and PR actions
@@ -513,23 +519,29 @@ dashboard reads run files and stacks from the reviewer, sets agent overrides on 
 from `app.LogBuffer` and settings from the config file directly.
 
 The menu-bar item and window are Wails v3 (beta, pinned in `go.mod`) (`ui.go`), one process. The
-window is a webview on the dashboard's URL: one UI, server-rendered. Its user agent carries
-`sisyphus-window`, which the pages use to send external links to `POST /api/open` (GitHub only) so
-the webview never leaves the dashboard. No Wails CLI, npm or JS bindings; `go build` is enough.
+window is a webview on the dashboard's URL: one UI. Its user agent carries `sisyphus-window`, which
+the UI uses to send external links to `POST /api/open` (GitHub only) so the webview never leaves the
+dashboard. No Wails CLI or JS bindings.
 
-The dashboard (`web/`, server-rendered) serves `/`, `/prs/{owner}/{repo}/{number}`, a run at
-`…/runs/{run}` with its files under `…/runs/{run}/` (`log`, `run.json`, `out/`, …; served sandboxed with
-CSP `sandbox` and `nosniff`, so HTML a reviewer writes can't script the dashboard), `/logs` and
-`/settings`. Only loopback `Host`s and same-origin POSTs are accepted. The JSON API:
+The UI routes `/`, `/reviews`, `/prs/{owner}/{repo}/{number}` (and `…/runs/{run}`), `/history/…`,
+`/lastmile` (and `/{id}`, `/shadow`), `/logs` and `/settings` itself: the backend answers every
+non-`/api` path with its `index.html`. It renders from `GET /api/status/stream`, so pages update in
+place. A run's files are under `/api/…/runs/{run}/files/` (`log`, `run.json`, `out/`, …; served
+sandboxed with CSP `sandbox` and `nosniff`, so HTML a reviewer writes can't script the dashboard).
+Only loopback `Host`s and same-origin POSTs are accepted. The JSON API:
 
 | | |
 |---|---|
-| `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}` | status snapshots |
-| `GET /api/status/stream` | the status on every change (server-sent events); pages reload on it |
+| `GET /api/status`, `GET /api/prs/{owner}/{repo}/{number}` | status snapshots; the status carries what needs you and the PR groups |
+| `GET /api/status/stream` | the status on every change (server-sent events); the UI renders from it |
 | `POST /api/open` (`url=`), `POST …/runs/{run}/open` | open a GitHub link in the browser; a run's directory in Finder |
 | `POST /api/run` | tick now |
 | `POST /api/prs/{owner}/{repo}/{number}/review` | Review now |
 | `POST /api/prs/{owner}/{repo}/{number}/reset` \| `wipe` \| `untrack` \| `track` | [PR actions](#pr-actions); `track` undoes untrack |
-| `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events` | a run's parsed events (server-sent events: backlog, then live) |
+| `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/log` | a run's parsed events so far, and the line its stream carries on from |
+| `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events?from=` | a run's parsed events (server-sent events: backlog, then live) |
+| `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/review`, `…/files/{path}` | what the agent wrote (`out/review.json`, or null); the run's files |
+| `GET /api/prs/{owner}/{repo}/{number}/stack` | the PR's local stack on Docker (null: none configured) |
+| `GET /api/history` | PRs no longer tracked, with their runs |
 | `GET /api/logs`, `GET /api/logs/stream` | last 1000 ops log lines; live (server-sent events) |
 | `GET`/`PUT /api/settings`, `POST /api/restart` | settings; re-exec to apply them |

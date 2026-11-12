@@ -1,15 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"cmp"
 	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"net"
@@ -17,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,107 +27,14 @@ import (
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
-//go:embed web/*.html web/style.css
-var webFS embed.FS
-
-var styleCSS, _ = webFS.ReadFile("web/style.css")
+// ui is the built frontend (web/ at the repo root, built into web/dist). The
+// placeholder keeps the backend building and testing without it.
+//
+//go:embed all:web/dist
+var uiFS embed.FS
 
 // openInBrowser opens a URL with the system handler; a var so tests don't.
 var openInBrowser = func(url string) error { return exec.Command("open", url).Run() }
-
-var pages = template.Must(template.New("").Funcs(template.FuncMap{
-	"skill": skillsStatus,
-	"when": func(t time.Time) string {
-		if t.IsZero() {
-			return "never"
-		}
-		return t.Local().Format("2006-01-02 15:04:05")
-	},
-	"stamp": func(t time.Time) string { return t.Local().Format("2 Jan, 15:04") },
-	// ago is a <time> the page's script keeps current ("2 min ago"); the exact time is its tooltip.
-	"ago": func(t time.Time) template.HTML {
-		if t.IsZero() {
-			return "never"
-		}
-		return template.HTML(fmt.Sprintf(`<time data-rel datetime="%s" title="%s">%s</time>`,
-			t.UTC().Format(time.RFC3339), t.Local().Format("2 Jan 2006, 15:04:05"), rel(t)))
-	},
-	// runPath links a review run's page.
-	"runPath": func(prID, run string) string {
-		repo, n, _ := strings.Cut(prID, "#")
-		return "/prs/" + repo + "/" + n + "/runs/" + run
-	},
-	"outcome":       func(r review.Run) string { l, _ := app.Outcome(r); return l },
-	"tone":          func(r review.Run) string { _, t := app.Outcome(r); return t },
-	"reason":        app.ReasonLabel,
-	"dur":           app.RunDuration,
-	"stateTone":     app.HandoffTone,
-	"stateIcon":     app.HandoffIcon,
-	"stateEvent":    app.SplitStateEvent,
-	"short":         func(sha string) string { return sha[:min(len(sha), 8)] },
-	"pct":           func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
-	"warnAt":        func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
-	"base":          path.Base,
-	"gh":            githubURL,
-	"secs":          humanSeconds,
-	"reviewerChips": reviewerChips,
-	"join":          strings.Join,
-	// dict passes several values to a template: dict "Key" value ...
-	"dict": func(kv ...any) map[string]any {
-		m := map[string]any{}
-		for i := 0; i+1 < len(kv); i += 2 {
-			m[kv[i].(string)] = kv[i+1]
-		}
-		return m
-	},
-	"top": func(page string) topbar { return topbar{Page: page} },
-	"md":  inlineMarkdown,
-	// checked is a bool setting's checkbox state; Invert fields show the other way round.
-	"checked": func(f config.Field) bool { v, _ := f.Value.(bool); return v != f.Invert },
-	"outputs": func(evs []review.Event) (n int) {
-		for _, e := range evs {
-			if e.Kind == "output" {
-				n++
-			}
-		}
-		return n
-	},
-}).ParseFS(webFS, "web/*.html"))
-
-var (
-	mdCode = regexp.MustCompile("`([^`\n]+)`")
-	mdBold = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
-)
-
-// inlineMarkdown escapes a review's text, then renders its `code` and **bold**;
-// the rest of the markdown stays as written (the page keeps its line breaks).
-func inlineMarkdown(s string) template.HTML {
-	h := mdCode.ReplaceAllString(template.HTMLEscapeString(s), "<code>$1</code>")
-	return template.HTML(mdBold.ReplaceAllString(h, "<b>$1</b>"))
-}
-
-// rel says how long ago (or from now) t is, like the pages' rel() script does.
-func rel(t time.Time) string {
-	d := time.Since(t)
-	a, v := d.Abs(), ""
-	switch {
-	case a < time.Minute:
-		if d < 0 {
-			return "in a moment"
-		}
-		return "just now"
-	case a < time.Hour:
-		v = fmt.Sprintf("%d min", int(a.Minutes()+.5))
-	case a < 24*time.Hour:
-		v = fmt.Sprintf("%d h", int(a.Hours()+.5))
-	default:
-		v = fmt.Sprintf("%d d", int(a.Hours()/24+.5))
-	}
-	if d < 0 {
-		return "in " + v
-	}
-	return v + " ago"
-}
 
 // server is what the handlers use: svc for status and actions that need both
 // tracker and reviewer, the rest directly.
@@ -145,8 +49,6 @@ type server struct {
 func newServer(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *app.LogBuffer) server {
 	return server{svc: app.NewService(cfg, tr, rev), tracker: tr, rev: rev, logs: logs, configPath: cfg.Path}
 }
-
-var errReviewsDisabled = errors.New("reviews are disabled")
 
 func (s server) runDir(prID, runID string) (string, bool) {
 	if s.rev == nil {
@@ -174,7 +76,7 @@ func (s server) reviewFile(prID, runID string) (*review.ReviewFile, error) {
 
 func (s server) stack(ctx context.Context, pr app.PRView) (*review.StackStatus, error) {
 	if s.rev == nil {
-		return nil, errReviewsDisabled
+		return nil, nil // no reviews, no stack
 	}
 	return s.rev.StackStatus(ctx, pr.Tracked)
 }
@@ -182,12 +84,13 @@ func (s server) stack(ctx context.Context, pr app.PRView) (*review.StackStatus, 
 // settings is the config file's editable fields, read now so it shows saved changes not yet applied.
 type settings struct {
 	Path   string         `json:"path"`
+	Groups []string       `json:"groups"` // the sections fields fall in, in page order
 	Fields []config.Field `json:"fields"`
 }
 
 func (s server) settings() (settings, error) {
 	fs, err := config.Settings(s.configPath)
-	return settings{Path: s.configPath, Fields: fs}, err
+	return settings{Path: s.configPath, Groups: config.Groups, Fields: fs}, err
 }
 
 // startHTTP serves the dashboard and JSON API on addr, or on a free loopback
@@ -213,16 +116,9 @@ func newHandler(srv server) http.Handler {
 	svc := srv.svc
 	markSkills() // once: the handler is built at startup
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /style.css", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		w.Write(styleCSS)
-	})
-	mux.HandleFunc("GET /icon.png", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		w.Write(trayIcon)
-	})
+	mux.Handle("GET /", spa(uiDist()))
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, svc.Status())
+		writeJSON(w, http.StatusOK, app.Board{Status: svc.Status()}.View())
 	})
 	mux.HandleFunc("GET /api/status/stream", func(w http.ResponseWriter, r *http.Request) {
 		streamStatus(w, r, svc)
@@ -419,29 +315,54 @@ func newHandler(srv server) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 	})
 
-	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}", func(w http.ResponseWriter, r *http.Request) {
-		pr, ok := svc.PR(prID(r))
-		run := findRun(pr, r.PathValue("run"))
-		if !ok || run == nil {
+	// A run's output so far, and Next, the line its live stream (…/events?from=Next) carries on from.
+	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/log", func(w http.ResponseWriter, r *http.Request) {
+		evs, next, err := srv.runEvents(prID(r), r.PathValue("run"))
+		if errors.Is(err, review.ErrNoRun) {
 			http.NotFound(w, r)
 			return
 		}
-		evs, next, err := srv.runEvents(pr.ID, run.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		d := dashboard{Board: app.Board{Status: svc.Status()}, PR: &pr, Run: run, Events: evs, Next: next}
-		if d.ReviewFile, err = srv.reviewFile(pr.ID, run.ID); err != nil {
-			slog.Warn("review file", "pr", pr.ID, "run", run.ID, "err", err)
+		if evs == nil {
+			evs = []review.Event{}
 		}
-		render(w, "index.html", d)
+		writeJSON(w, http.StatusOK, runLog{Events: evs, Next: next})
+	})
+	// What the run's agent wrote to out/review.json; null when it wrote none.
+	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/review", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := srv.runDir(prID(r), r.PathValue("run")); !ok {
+			http.NotFound(w, r)
+			return
+		}
+		rf, err := srv.reviewFile(prID(r), r.PathValue("run"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, rf)
 	})
 	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events", func(w http.ResponseWriter, r *http.Request) {
 		streamRun(w, r, srv)
 	})
-	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}/runs/{run}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/runs/{run}/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		serveRunFile(w, r, srv)
+	})
+	// The PR's local review stack; null when none is configured for its repo.
+	mux.HandleFunc("GET /api/prs/{owner}/{repo}/{number}/stack", func(w http.ResponseWriter, r *http.Request) {
+		pr, ok := svc.PR(prID(r))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		st, err := srv.stack(r.Context(), pr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, srv.logs.Recent())
@@ -449,70 +370,12 @@ func newHandler(srv server) http.Handler {
 	mux.HandleFunc("GET /api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
 		streamLogs(w, r, srv.logs)
 	})
-	mux.HandleFunc("GET /lastmile", func(w http.ResponseWriter, r *http.Request) {
-		st := svc.Status()
-		render(w, "lastmile.html", lastmilePage{Top: topbar{Page: "lastmile", Status: &st}, Board: app.Board{Status: st}})
-	})
-	mux.HandleFunc("GET /lastmile/shadow", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
-		shadowPage(w, r, svc, lm)
-	}))
-	mux.HandleFunc("GET /lastmile/{id}", func(w http.ResponseWriter, r *http.Request) {
-		st := svc.Status()
-		for _, v := range st.Handoffs {
-			if v.ID == r.PathValue("id") {
-				events := slices.Clone(v.Events)
-				slices.Reverse(events) // newest first
-				render(w, "handoff.html", handoffPage{Top: topbar{Page: "lastmile", Status: &st}, V: v, Events: events})
-				return
-			}
-		}
-		http.Error(w, "no such handoff", http.StatusNotFound)
-	})
-	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "logs.html", logsPage{Top: topbar{Page: "logs"}, Entries: srv.logs.Recent()})
-	})
-	history := func(w http.ResponseWriter, r *http.Request) {
-		d := dashboard{Board: app.Board{Status: svc.Status()}, History: svc.History()}
-		if r.PathValue("number") != "" {
-			i := slices.IndexFunc(d.History, func(h app.HistoryRow) bool { return h.ID == prID(r) })
-			if i < 0 {
-				http.NotFound(w, r)
-				return
-			}
-			d.Hist = &d.History[i]
-			pr := d.Hist.PRView()
-			d.PR = &pr
-			show := pr.Review.Latest()
-			if id := r.PathValue("run"); id != "" {
-				if d.Run = findRun(pr, id); d.Run == nil {
-					http.NotFound(w, r)
-					return
-				}
-				var err error
-				if d.Events, d.Next, err = srv.runEvents(pr.ID, id); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				show = d.Run
-			}
-			if show != nil {
-				var err error
-				if d.ReviewFile, err = srv.reviewFile(pr.ID, show.ID); err != nil {
-					slog.Warn("review file", "pr", pr.ID, "run", show.ID, "err", err)
-				}
-			}
-		}
-		render(w, "index.html", d)
-	}
-	mux.HandleFunc("GET /history", history)
-	mux.HandleFunc("GET /history/{owner}/{repo}/{number}", history)
-	mux.HandleFunc("GET /history/{owner}/{repo}/{number}/runs/{run}", history)
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, svc.History())
-	})
-	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
-		st, err := srv.settings()
-		render(w, "settings.html", settingsPage{st, err})
+		h := svc.History()
+		if h == nil {
+			h = []app.HistoryRow{}
+		}
+		writeJSON(w, http.StatusOK, h)
 	})
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		st, err := srv.settings()
@@ -539,36 +402,6 @@ func newHandler(srv server) http.Handler {
 		w.WriteHeader(http.StatusAccepted)
 		restartSoon()
 	})
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		h := homePage{dashboard: dashboard{Board: app.Board{Status: svc.Status()}}}
-		if lm := svc.LastMile(); lm != nil {
-			if rep, err := lm.ShadowReport(lastmile.ShadowQuery{}); err == nil { // unreadable: the card is left out
-				h.Shadow = &rep
-			}
-		}
-		render(w, "home.html", h)
-	})
-	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
-		render(w, "index.html", dashboard{Board: app.Board{Status: svc.Status()}})
-	})
-	mux.HandleFunc("GET /prs/{owner}/{repo}/{number}", func(w http.ResponseWriter, r *http.Request) {
-		pr, ok := svc.PR(prID(r))
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		d := dashboard{Board: app.Board{Status: svc.Status()}, PR: &pr}
-		if d.Stack, d.StackErr = srv.stack(r.Context(), pr); d.StackErr != nil {
-			slog.Warn("stack status", "pr", pr.ID, "err", d.StackErr)
-		}
-		if last := pr.Review.Latest(); last != nil {
-			var err error
-			if d.ReviewFile, err = srv.reviewFile(pr.ID, last.ID); err != nil {
-				slog.Warn("review file", "pr", pr.ID, "run", last.ID, "err", err)
-			}
-		}
-		render(w, "index.html", d)
-	})
 	// The PR page's … menu: reset (reviews), wipe (+ stack), untrack (+ tracking); track undoes untrack.
 	actions := map[string]func(context.Context, string) error{
 		"reset": svc.ResetReviews, "wipe": svc.Wipe, "untrack": svc.Untrack, "track": svc.Retrack}
@@ -585,80 +418,6 @@ func newHandler(srv server) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return localOnly(http.NewCrossOriginProtection().Handler(mux))
-}
-
-// dashboard is the two-column page: every PR on the left, PR (if any) on the
-// right, and one of its review runs (if any) streaming below.
-type dashboard struct {
-	app.Board
-	PR     *app.PRView
-	Run    *review.Run
-	Events []review.Event
-	Next   int // first log line the live stream should send
-
-	Stack    *review.StackStatus // the PR page's local stack; nil = none configured
-	StackErr error
-
-	ReviewFile *review.ReviewFile // what the shown (or latest) run's agent wrote; nil = nothing
-
-	History []app.HistoryRow // non-nil on the history pages, which list it instead of the tracked PRs
-	Hist    *app.HistoryRow  // the history entry shown, if any; PR is its view
-}
-
-func (d dashboard) Archive() bool { return d.History != nil }
-
-// topbar is the header: the dashboard shows Status in it, other pages don't.
-type topbar struct {
-	Page   string
-	Status *app.Status
-}
-
-// NeedsHuman feeds the Last mile tab's badge.
-func (t topbar) NeedsHuman() []lastmile.View {
-	if t.Status == nil {
-		return nil
-	}
-	return app.Board{Status: *t.Status}.NeedsHuman()
-}
-
-func (d dashboard) Top() topbar {
-	if d.Archive() {
-		return topbar{Status: &d.Status, Page: "history"}
-	}
-	return topbar{Status: &d.Status, Page: "reviews"}
-}
-
-// homePage is the landing dashboard: what needs you, then reviews, the last mile, capacity and the shadow report.
-type homePage struct {
-	dashboard
-	Shadow *lastmile.ShadowReport // nil = the last mile is off or its log unreadable
-}
-
-// Top has no tab current: the brand is the way here.
-func (h homePage) Top() topbar { return topbar{Status: &h.Status} }
-
-func (h homePage) Title() string { return "Home" }
-
-type lastmilePage struct {
-	Top topbar
-	app.Board
-}
-
-// handoffPage is one handoff's page; Events are newest first.
-type handoffPage struct {
-	Top    topbar
-	V      lastmile.View
-	Events []lastmile.Event
-}
-
-// shadowData is the shadow merge report page. Focus is the report narrowed to the ?handoff= or ?pr= PR.
-type shadowData struct {
-	Top        topbar
-	Report     lastmile.ShadowReport
-	MeanSec    int64
-	Focus      *lastmile.ShadowReport
-	FocusID    string // the handoff the narrowed report is about, the page's #anchor
-	FocusTitle string
 }
 
 const errLastMileDisabled = "the last mile is disabled (lastmile.disabled)"
@@ -690,132 +449,6 @@ func writeLastMile(w http.ResponseWriter, r *http.Request, status int, v any, er
 	default:
 		writeJSON(w, status, v)
 	}
-}
-
-// shadowPage renders the report; with ?handoff=id or ?pr=owner/repo%23n it adds that PR's verdict history.
-func shadowPage(w http.ResponseWriter, r *http.Request, svc *app.Service, lm *lastmile.Manager) {
-	rep, err := lm.ShadowReport(lastmile.ShadowQuery{})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	st := svc.Status()
-	d := shadowData{Top: topbar{Page: "lastmile", Status: &st}, Report: rep, MeanSec: int64(rep.MeanTimeInReviewSec)}
-	q := lastmile.ShadowQuery{PR: r.URL.Query().Get("pr"), Handoff: r.URL.Query().Get("handoff")}
-	if q != (lastmile.ShadowQuery{}) {
-		f, err := lm.ShadowReport(q)
-		var invalid lastmile.InvalidError
-		switch {
-		case errors.As(err, &invalid):
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		d.Focus, d.FocusTitle = &f, cmp.Or(q.PR, q.Handoff)
-		if len(f.PRs) > 0 {
-			d.FocusID = f.PRs[0].HandoffID
-			d.FocusTitle = fmt.Sprintf("%s #%d", f.PRs[0].Repo, f.PRs[0].PR)
-		}
-	}
-	render(w, "shadow.html", d)
-}
-
-// githubURL passes a link to a GitHub page and drops any other: PR URLs come from GitHub, but the page doesn't trust them.
-func githubURL(u string) string {
-	if strings.HasPrefix(u, "https://github.com/") {
-		return u
-	}
-	return ""
-}
-
-// humanSeconds says a duration in its largest two-ish units, "5 h", "2 d".
-func humanSeconds(s int64) string {
-	d := time.Duration(s) * time.Second
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%d s", s)
-	case d < time.Hour:
-		return fmt.Sprintf("%d min", int(d.Minutes()))
-	case d < 48*time.Hour:
-		return fmt.Sprintf("%.1f h", d.Hours())
-	}
-	return fmt.Sprintf("%.1f d", d.Hours()/24)
-}
-
-type reviewerChip struct{ Login, Class string }
-
-// reviewerChips tells who is asked to review: those TLM requested plain, ones a human added "human",
-// and those a human removed "gone" (TLM won't re-add them).
-func reviewerChips(v lastmile.View) []reviewerChip {
-	var out []reviewerChip
-	for _, l := range v.Reviewing {
-		c := reviewerChip{Login: l}
-		if !slices.Contains(v.Requested, l) && v.Snapshot != nil {
-			c.Class = "human"
-		}
-		out = append(out, c)
-	}
-	for _, l := range v.Removed {
-		if !slices.Contains(v.Reviewing, l) {
-			out = append(out, reviewerChip{Login: l, Class: "gone"})
-		}
-	}
-	return out
-}
-
-type logsPage struct {
-	Top     topbar
-	Entries []app.LogEntry
-}
-
-func (d dashboard) Title() string {
-	switch {
-	case d.Run != nil:
-		return "Run " + d.Run.ID
-	case d.PR != nil:
-		return d.PR.ID
-	case d.Archive():
-		return "History"
-	}
-	return "Status"
-}
-
-type settingsPage struct {
-	settings
-	Err error
-}
-
-func (settingsPage) Top() topbar { return topbar{Page: "settings"} }
-
-type fieldGroup struct {
-	Name   string
-	Fields []config.Field
-}
-
-// Groups is the fields by section, in config.Groups order.
-func (s settingsPage) Groups() []fieldGroup {
-	var out []fieldGroup
-	for _, g := range config.Groups {
-		fg := fieldGroup{Name: g}
-		for _, f := range s.Fields {
-			if f.Group == g {
-				fg.Fields = append(fg.Fields, f)
-			}
-		}
-		out = append(out, fg)
-	}
-	return out
-}
-
-func findRun(pr app.PRView, id string) *review.Run {
-	for i := range pr.Review.Runs {
-		if pr.Review.Runs[i].ID == id {
-			return &pr.Review.Runs[i]
-		}
-	}
-	return nil
 }
 
 // streamRun sends a run's events from line ?from= on as server-sent events: the
@@ -874,7 +507,7 @@ func streamStatus(w http.ResponseWriter, r *http.Request, svc *app.Service) {
 	changed, cancel := svc.SubscribeStatus()
 	defer cancel()
 	sse := newSSE(w)
-	for sse.send("", svc.Status()) {
+	for sse.send("", app.Board{Status: svc.Status()}.View()) {
 		select {
 		case <-changed:
 		case <-r.Context().Done():
@@ -975,17 +608,39 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// render buffers so a template error becomes a 500, not half a page.
-func render(w http.ResponseWriter, name string, data any) {
-	var buf bytes.Buffer
-	if err := pages.ExecuteTemplate(&buf, name, data); err != nil {
-		slog.Error("render", "page", name, "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	buf.WriteTo(w)
+
+
+// runLog is a run's readable output so far; Next is where its live stream carries on.
+type runLog struct {
+	Events []review.Event `json:"events"`
+	Next   int            `json:"next"`
 }
 
-// MeanSec is the shadow report's mean time in review, for the secs helper.
-func (h homePage) MeanSec() int64 { return int64(h.Shadow.MeanTimeInReviewSec) }
+func uiDist() fs.FS {
+	dist, _ := fs.Sub(uiFS, "web/dist")
+	return dist
+}
+
+// spa serves the built UI: its files as they are, and index.html for every
+// other path, which the UI routes itself. Unknown /api paths stay 404s.
+func spa(dist fs.FS) http.Handler {
+	files := http.FileServerFS(dist)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		if st, err := fs.Stat(dist, strings.TrimPrefix(path.Clean(r.URL.Path), "/")); err == nil && !st.IsDir() {
+			files.ServeHTTP(w, r)
+			return
+		}
+		index, err := fs.ReadFile(dist, "index.html")
+		if err != nil {
+			http.Error(w, "the UI isn't built: run `make build` at the repo root", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(index)
+	})
+}

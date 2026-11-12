@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/lastmile"
@@ -127,82 +126,13 @@ func upToDate(tr tracker.Tracked, rs review.PRStatus) bool {
 	return rs.State == "" && last != nil && last.Status == review.Succeeded && last.Job.PR.HeadSHA == tr.HeadSHA
 }
 
-// HandoffTone is the chip colour of a handoff state.
-func HandoffTone(state string) string {
-	switch state {
-	case lastmile.StateCIRed, lastmile.StateConflict, lastmile.StateNeedsHuman:
-		return ToneBad
-	case lastmile.StateCIGreen, lastmile.StateApproved, lastmile.StateMerged:
-		return ToneOK
-	case lastmile.StatePROpen:
-		return ToneOpen
-	}
-	return ToneNeutral
-}
-
-// HandoffIcon is a one-glyph cue for a handoff state, matching its tone.
-func HandoffIcon(state string) string {
-	switch state {
-	case lastmile.StateMerged:
-		return "✓✓"
-	case lastmile.StateCIGreen, lastmile.StateApproved, lastmile.StateMergeable:
-		return "✓"
-	case lastmile.StateCIRed, lastmile.StateConflict:
-		return "✗"
-	case lastmile.StateNeedsHuman:
-		return "!"
-	case lastmile.StateClosed, lastmile.StateCancelled:
-		return "⊘"
-	case lastmile.StateCIRunning, lastmile.StateAwaitingReview:
-		return "…"
-	}
-	return "→"
-}
-
-// StateEvent is a "state" timeline event split into the state entered and why.
-type StateEvent struct{ State, Reason string }
-
-// SplitStateEvent splits a "state" event's text, written as "state" or "state: reason".
-func SplitStateEvent(text string) StateEvent {
-	st, why, _ := strings.Cut(text, ": ")
-	return StateEvent{st, why}
-}
-
-var reasons = map[string]string{review.ReasonNew: "PR first seen", review.ReasonCommits: "new commits",
-	review.ReasonReplies: "new replies", review.ReasonManual: "run by you"}
-
-// ReasonLabel says why a review run started.
-func ReasonLabel(r string) string { return cmp.Or(reasons[r], r) }
-
-// RunDuration is how long a run took, or has been running.
-func RunDuration(r review.Run) string {
-	end := r.Finished
-	if r.Status == review.Running || end.IsZero() {
-		end = time.Now()
-	}
-	d := end.Sub(r.Started).Round(time.Second)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%d s", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%d min %d s", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
-}
-
-// PRView shows a history entry with the tracked PRs' page.
-func (h HistoryRow) PRView() PRView {
-	return PRView{ID: h.ID, Review: review.PRStatus{Runs: h.Runs}, Tracked: tracker.Tracked{
-		PRRef: h.PRRef, URL: h.URL, Title: h.Title, Author: h.Author, TrackedAt: h.TrackedAt}}
-}
-
 // Board is the dashboard pages' reading of a Status: what needs you, the PR groups and the counts.
 type Board struct{ Status }
 
 // PRGroup is one heading of the PR list.
 type PRGroup struct {
-	Label string
-	PRs   []PRView
+	Label string   `json:"label"`
+	PRs   []PRView `json:"prs"`
 }
 
 var groupLabels = []struct{ key, label string }{
@@ -263,9 +193,6 @@ func (b Board) Queued() (n int) {
 	return n
 }
 
-// Recent is the latest few review runs.
-func (b Board) Recent() []Activity { return b.Activity[:min(len(b.Activity), 3)] }
-
 // AgentsRunning lists the handoffs with an agent run in flight, oldest run first.
 func (b Board) AgentsRunning() []lastmile.View {
 	out := slices.DeleteFunc(slices.Clone(b.Handoffs), func(v lastmile.View) bool { return v.AgentRunning == "" })
@@ -273,19 +200,28 @@ func (b Board) AgentsRunning() []lastmile.View {
 	return out
 }
 
-// LMCount counts the open handoffs in any of the states; none = every open one.
-func (b Board) LMCount(states ...string) (n int) {
-	for _, v := range b.Handoffs {
-		if len(states) == 0 && !v.Over || slices.Contains(states, v.State) {
-			n++
-		}
-	}
-	return n
-}
-
 // Merged is the last few merged handoffs, newest first.
 func (b Board) Merged() []lastmile.View {
 	out := slices.DeleteFunc(slices.Clone(b.Handoffs), func(v lastmile.View) bool { return v.State != lastmile.StateMerged })
 	slices.SortFunc(out, func(a, b lastmile.View) int { return b.Updated.Compare(a.Updated) })
 	return out[:min(len(out), 3)]
+}
+
+// BoardView is a Board as the UI reads it: the status, and what needs you and
+// the PR groups worked out from it.
+type BoardView struct {
+	Status
+	Groups        []PRGroup       `json:"groups"`
+	NeedsHuman    []lastmile.View `json:"needs_human"`
+	Failing       []PRView        `json:"failing"`
+	AwaitingYou   []PRView        `json:"awaiting_you"`
+	NeedsCount    int             `json:"needs_count"`
+	AgentsRunning []lastmile.View `json:"agents_running"`
+	Merged        []lastmile.View `json:"merged"`
+	Queued        int             `json:"queued"`
+}
+
+func (b Board) View() BoardView {
+	return BoardView{Status: b.Status, Groups: b.Groups(), NeedsHuman: b.NeedsHuman(), Failing: b.Failing(), AwaitingYou: b.AwaitingYou(),
+		NeedsCount: b.NeedsCount(), AgentsRunning: b.AgentsRunning(), Merged: b.Merged(), Queued: b.Queued()}
 }

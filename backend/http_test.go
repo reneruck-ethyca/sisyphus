@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/app"
@@ -70,7 +71,7 @@ func TestHTTPPR(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &pr); code != 200 || err != nil || pr.ID != testkit.RefA.Key() {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
-	for _, path := range []string{"/api/prs/ethyca/a/2", "/prs/ethyca/a/2"} {
+	for _, path := range []string{"/api/prs/ethyca/a/2", "/api/prs/ethyca/a/2/stack"} {
 		if code, _ := get(t, srv.URL+path); code != 404 {
 			t.Errorf("%s = %d, want 404", path, code)
 		}
@@ -129,10 +130,6 @@ func TestHTTPRun(t *testing.T) {
 
 func TestHTTPSettings(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	code, body := get(t, srv.URL+"/settings")
-	if code != 200 || !strings.Contains(body, `name="review.agent.model"><option selected>opus</option>`) || strings.Contains(body, `http-equiv="refresh"`) {
-		t.Fatalf("/settings = %d: %s", code, body)
-	}
 	put := func(body string) int {
 		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/settings", strings.NewReader(body))
 		resp, err := http.DefaultClient.Do(req)
@@ -149,7 +146,7 @@ func TestHTTPSettings(t *testing.T) {
 		t.Fatalf("bad save = %d", c)
 	}
 	var st settings
-	if _, body := get(t, srv.URL+"/api/settings"); json.Unmarshal([]byte(body), &st) != nil {
+	if _, body := get(t, srv.URL+"/api/settings"); json.Unmarshal([]byte(body), &st) != nil || !slices.Equal(st.Groups, config.Groups) {
 		t.Fatalf("/api/settings: %s", body)
 	}
 	for _, f := range st.Fields {
@@ -169,26 +166,6 @@ func TestHTTPSettings(t *testing.T) {
 	case <-restarted:
 	case <-time.After(5 * time.Second):
 		t.Fatal("didn't restart")
-	}
-}
-
-func TestHTTPPages(t *testing.T) {
-	srv, _, _ := newTestServer(t)
-	for path, want := range map[string][]string{
-		"/reviews": {`href="/prs/ethyca/a/1"`, "Fix &lt;things&gt;", "Starting…", "<h1>Overview</h1>", `class="chip neutral">Not reviewed`, `<a href="/reviews" aria-current="page">`},
-		"/":        {"<h1>Home</h1>", `href="/reviews"`, "Needs you", "Budget and capacity", "Reviews are off"},
-		"/prs/ethyca/a/1": {"ethyca/a #1", "Fix &lt;things&gt;", "https://github.com/ethyca/a/pull/1", `aria-current="page"`,
-			`href="https://github.com/octocat" target="_blank" rel="noopener"`, `href="https://github.com/ethyca/a/pull/1" target="_blank" rel="noopener"`},
-	} {
-		code, body := get(t, srv.URL+path)
-		if code != 200 {
-			t.Fatalf("%s = %d: %s", path, code, body)
-		}
-		for _, w := range want {
-			if !strings.Contains(body, w) {
-				t.Errorf("%s missing %q", path, w)
-			}
-		}
 	}
 }
 
@@ -217,33 +194,21 @@ func TestHTTPLogs(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &entries); code != 200 || err != nil || len(entries) != 1 || entries[0].Msg != "fetching <PR>" {
 		t.Fatalf("%d %v %s", code, err, body)
 	}
-	code, body = get(t, srv.URL+"/logs")
-	if code != 200 || !strings.Contains(body, "fetching &lt;PR&gt;") || strings.Contains(body, `http-equiv="refresh"`) {
-		t.Fatalf("logs page %d: %s", code, body)
-	}
 }
 
 func TestHTTPHistory(t *testing.T) {
 	srv, svc, _ := newTestServer(t)
-	code, body := get(t, srv.URL+"/history")
-	if code != 200 || strings.Contains(body, "Fix &lt;things&gt;") { // still tracked
-		t.Fatalf("history page %d: %s", code, body)
+	if code, body := get(t, srv.URL+"/api/history"); code != 200 || body != "[]\n" { // still tracked
+		t.Fatalf("history %d: %s", code, body)
 	}
 	if err := svc.Untrack(context.Background(), testkit.RefA.Key()); err != nil {
 		t.Fatal(err)
 	}
-	code, body = get(t, srv.URL+"/api/history")
+	code, body := get(t, srv.URL+"/api/history")
 	var rows []app.HistoryRow
 	if err := json.Unmarshal([]byte(body), &rows); code != 200 || err != nil || len(rows) != 1 ||
 		rows[0].Reason != "untracked by hand" || rows[0].Title != "Fix <things>" {
 		t.Fatalf("%d %v %s", code, err, body)
-	}
-	code, body = get(t, srv.URL+"/history/ethyca/a/1")
-	if code != 200 || !strings.Contains(body, "untracked by hand") || !strings.Contains(body, "archive-banner") {
-		t.Fatalf("history PR page %d: %s", code, body)
-	}
-	if code, _ = get(t, srv.URL+"/history/ethyca/a/2"); code != 404 {
-		t.Fatalf("unknown history PR = %d", code)
 	}
 }
 
@@ -342,13 +307,12 @@ func reviewServer(t *testing.T, finish bool) (*httptest.Server, *app.Service, re
 
 func TestHTTPReviewRuns(t *testing.T) {
 	srv, _, run := newReviewServer(t)
-	base := srv.URL + "/prs/ethyca/a/1/runs/" + run.ID
+	api := "/api/prs/ethyca/a/1/runs/" + run.ID
+	base := srv.URL + api + "/files"
 	for path, want := range map[string]string{
-		"/prs/ethyca/a/1":                `href="/prs/ethyca/a/1/runs/` + run.ID + `"`,
-		"/prs/ethyca/a/1/runs/" + run.ID: `Found &lt;b&gt;one&lt;/b&gt; bug.`,
-		"/":                              `class="chip neutral">Not posted`,
-		"/prs/ethyca/a/1/runs/" + run.ID + "/log":           "review <log>\n",
-		"/prs/ethyca/a/1/runs/" + run.ID + "/out/review.md": "# hi",
+		api + "/review":              "null", // the agent wrote no review.json
+		api + "/files/log":           "review <log>\n",
+		api + "/files/out/review.md": "# hi",
 	} {
 		code, body := get(t, srv.URL+path)
 		if code != 200 || !strings.Contains(body, want) {
@@ -367,23 +331,6 @@ func TestHTTPReviewRuns(t *testing.T) {
 		if code, body := get(t, base+path); code == 200 {
 			t.Errorf("%s served: %.80s", path, body)
 		}
-	}
-}
-
-func TestHTTPRunPageRendersEvents(t *testing.T) {
-	srv, _, run := newReviewServer(t)
-	_, body := get(t, srv.URL+"/prs/ethyca/a/1/runs/"+run.ID)
-	for _, want := range []string{`id="setup">review &lt;log&gt;`, `class="ev text"`, `class="ev result"`,
-		"success · 3 turns · 1m1s · $0.50", `data-live="false"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("run page missing %q", want)
-		}
-	}
-	if strings.Contains(body, `http-equiv="refresh"`) {
-		t.Error("run page must not auto-reload")
-	}
-	if code, _ := get(t, srv.URL+"/prs/ethyca/a/1/runs/nope"); code != 404 {
-		t.Errorf("unknown run = %d", code)
 	}
 }
 
@@ -413,7 +360,7 @@ func TestHTTPRunEventStream(t *testing.T) {
 }
 
 func TestHTTPShowsRunningContainer(t *testing.T) {
-	srv, svc, run := reviewServer(t, false)
+	_, svc, run := reviewServer(t, false)
 	st := svc.Status()
 	if len(st.Reviewing) != 1 {
 		t.Fatalf("reviewing = %+v", st.Reviewing)
@@ -422,27 +369,15 @@ func TestHTTPShowsRunningContainer(t *testing.T) {
 	if a.PR != testkit.RefA.Key() || a.Run != run.ID || a.Container != run.Container || !strings.HasPrefix(a.Name, "sisyphus-ethyca-a-1-") {
 		t.Fatalf("active review = %+v", a)
 	}
-	if _, reviews := get(t, srv.URL+"/reviews"); !strings.Contains(reviews, `<a href="/reviews" aria-current="page">Reviews</a>`) {
-		t.Error("/reviews doesn't mark the Reviews tab current")
-	}
-	_, body := get(t, srv.URL+"/reviews")
-	for _, want := range []string{`class="chip live">Reviewing`, `href="/prs/ethyca/a/1/runs/` + run.ID + `"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("overview missing %q", want)
-		}
-	}
-	if _, body := get(t, srv.URL+"/prs/ethyca/a/1/runs/"+run.ID); !strings.Contains(body, a.Name) {
-		t.Errorf("run page missing container %q", a.Name)
+	if pr, _ := svc.PR(testkit.RefA.Key()); pr.Verdict != "Reviewing" || pr.Review.Latest().ID != run.ID {
+		t.Errorf("PR = %s, latest run %+v", pr.Verdict, pr.Review.Latest())
 	}
 }
 
 func TestHTTPShowsNoContainerWhenIdle(t *testing.T) {
-	srv, svc, _ := newReviewServer(t)
+	_, svc, _ := newReviewServer(t)
 	if r := svc.Status().Reviewing; len(r) != 0 {
 		t.Fatalf("reviewing = %+v", r)
-	}
-	if _, body := get(t, srv.URL+"/reviews"); !strings.Contains(body, "No review running.") {
-		t.Error("idle overview should say no review is running")
 	}
 }
 
@@ -511,10 +446,6 @@ func TestHTTPPRActions(t *testing.T) {
 	}
 	if st := svc.Status(); len(st.PRs) != 0 || len(st.Ignored) != 1 {
 		t.Fatalf("after untrack: PRs %d, ignored %+v", len(st.PRs), st.Ignored)
-	}
-	_, body := get(t, srv.URL+"/reviews")
-	if !strings.Contains(body, `data-action="track"`) {
-		t.Fatal("dashboard doesn't offer to track the PR again")
 	}
 	if code := post("track"); code != http.StatusNoContent || len(svc.Status().Ignored) != 0 {
 		t.Fatalf("track: %d, ignored %+v", code, svc.Status().Ignored)
@@ -739,9 +670,6 @@ func TestHTTPHandoffReviewers(t *testing.T) {
 	if code, _ := put("/api/handoffs/nope/reviewers", `[]`); code != 404 {
 		t.Errorf("unknown = %d", code)
 	}
-	if code, body := get(t, srv.URL+"/lastmile"); code != 200 || !strings.Contains(body, h.ID) || !strings.Contains(body, "handed-off") {
-		t.Errorf("page = %d %s", code, body)
-	}
 	if code, body := get(t, srv.URL+"/api/status"); code != 200 || !strings.Contains(body, `"handoffs"`) || !strings.Contains(body, h.ID) {
 		t.Errorf("status = %d", code)
 	}
@@ -805,150 +733,13 @@ garbage
 	}
 }
 
-func TestHTTPLastMilePages(t *testing.T) {
-	srv, clone := handoffServer(t)
-	evil := `<script>alert(1)</script>`
-	_, body := post(t, srv.URL+"/api/handoffs", `{"worktree": `+strconv.Quote(clone)+`, "base": "main", "title": `+strconv.Quote(evil)+`}`)
-	var h lastmile.Handoff
-	if err := json.Unmarshal([]byte(body), &h); err != nil || h.ID == "" {
-		t.Fatalf("handoff: %v %s", err, body)
-	}
-	for _, p := range []string{"/lastmile", "/lastmile/" + h.ID, "/lastmile/shadow", "/lastmile/shadow?handoff=" + h.ID + "#" + h.ID} {
-		code, page := get(t, srv.URL+p)
-		if code != 200 {
-			t.Errorf("%s = %d %s", p, code, page)
-		}
-		if strings.Contains(page, evil) {
-			t.Errorf("%s renders the title unescaped", p)
-		}
-	}
-	if _, page := get(t, srv.URL+"/lastmile/"+h.ID); !strings.Contains(page, "&lt;script&gt;alert(1)") || !strings.Contains(page, "Shadow merge for this PR") || !strings.Contains(page, "/lastmile/shadow?handoff="+h.ID) {
-		t.Errorf("detail page: %s", page)
-	}
-	if _, page := get(t, srv.URL+"/lastmile"); !strings.Contains(page, "/lastmile/"+h.ID) || !strings.Contains(page, "/lastmile/shadow") {
-		t.Errorf("list page does not link the detail and the report: %s", page)
-	}
-	if code, _ := get(t, srv.URL+"/lastmile/nope"); code != 404 {
-		t.Errorf("unknown handoff = %d", code)
-	}
-	if code, _ := get(t, srv.URL+"/lastmile/shadow?pr=bad"); code != 400 {
-		t.Errorf("bad pr = %d", code)
-	}
-}
-
 func TestHTTPLastMilePagesDisabled(t *testing.T) {
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
 	srv := httptest.NewServer(newHandler(newServer(cfg, tr, nil, app.NewLogBuffer(10))))
 	t.Cleanup(srv.Close)
-	for _, p := range []string{"/lastmile/shadow", "/lastmile/x"} {
+	for _, p := range []string{"/api/lastmile/shadow", "/api/handoffs/x"} {
 		if code, _ := get(t, srv.URL+p); code != 404 {
 			t.Errorf("%s = %d", p, code)
-		}
-	}
-}
-
-func TestHTTPShadowPage(t *testing.T) {
-	cfg, tr := testkit.Tracker(t, &github.Fake{})
-	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
-	svc := hs.svc
-	srv := httptest.NewServer(newHandler(hs))
-	t.Cleanup(srv.Close)
-	dir := t.TempDir()
-	var err error
-	lm, err := lastmile.New(cfg, &lastmile.FakeGitHub{}, tr.Locks, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc.UseLastMile(lm)
-	log := `{"time":"2026-11-05T10:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"head":"abcdef123","would_merge":false,"blockers":["<b>x</b>"],"signals":{"additions":3}}
-{"time":"2026-11-05T11:00:00Z","handoff_id":"h1","repo":"o/r","pr":1,"outcome":"merged","merged_by":"carol","last_verdict":null}
-`
-	os.WriteFile(filepath.Join(dir, "lastmile-shadow.jsonl"), []byte(log), 0o600)
-	code, page := get(t, srv.URL+"/lastmile/shadow?pr=o/r%231")
-	if code != 200 || !strings.Contains(page, `id="h1"`) || !strings.Contains(page, "id=\"pr-h1\"") || !strings.Contains(page, "verdict history") ||
-		!strings.Contains(page, "&lt;b&gt;x&lt;/b&gt;") || strings.Contains(page, "<b>x</b>") || !strings.Contains(page, "https://github.com/o/r/pull/1") {
-		t.Errorf("shadow page = %d %s", code, page)
-	}
-}
-
-// A handoff deep in its life renders: snapshot, failures, verdict, events, a needs-human banner.
-func TestHandoffPageFull(t *testing.T) {
-	now := time.Now()
-	evil := `<img src=x onerror=alert(1)>`
-	h := lastmile.Handoff{ID: "h-1", Repo: "o/r", Title: evil, State: lastmile.StateNeedsHuman, PrevState: lastmile.StateCIRed, Reason: evil,
-		PRNumber: 7, PRURL: "javascript:alert(1)", FixRounds: map[string]int{"ci": 2}, MaxFixRounds: 3, Requested: []string{"a"}, Removed: []string{"b"},
-		Events: []lastmile.Event{{Time: now, Kind: "state", Text: evil}},
-		Shadow: &lastmile.Verdict{At: now, Head: "abcdef123", Blockers: []string{evil}},
-		Snapshot: &lastmile.Snapshot{Head: "abcdef123", Author: "x", CI: "red", Checks: []github.Check{{Name: "t", Conclusion: "FAILURE", URL: "https://github.com/o/r/actions/1"}},
-			Failures: []lastmile.Failure{{Name: "t", Fingerprint: "f"}}, Approvals: []lastmile.Approval{{User: "a", CommitSHA: "old", Stale: true}}, Requested: []string{"a", "c"}}}
-	v := lastmile.View{Handoff: h, Reviewing: []string{"a", "c"}}
-	var buf bytes.Buffer
-	if err := pages.ExecuteTemplate(&buf, "handoff.html", handoffPage{V: v, Events: h.Events}); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	for _, bad := range []string{evil, "javascript:"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("page contains %q", bad)
-		}
-	}
-	for _, want := range []string{"Would merge", "stale", "+c", "gone", `chip bad">needs-human`} {
-		if !strings.Contains(out, want) {
-			t.Errorf("page lacks %q", want)
-		}
-	}
-}
-
-// A needs-human handoff with a dirty worktree shows the files panel instead of the notice and the head buttons.
-func TestHandoffPageDirty(t *testing.T) {
-	evil := `<img src=x onerror=alert(1)>`
-	for _, dismissed := range []bool{false, true} {
-		h := lastmile.Handoff{ID: "h-1", Repo: "o/r", State: lastmile.StateNeedsHuman, Reason: "uncommitted changes", PRNumber: 7, Branch: "feature/x",
-			Dirty: &lastmile.Dirty{Status: "?? x", Dismissed: dismissed, Message: "Add x", Files: []lastmile.DirtyFile{
-				{Path: "a.go", Code: "M", Add: 3, Del: 1}, {Path: evil, Code: "??", Binary: true}}}}
-		var buf bytes.Buffer
-		if err := pages.ExecuteTemplate(&buf, "handoff.html", handoffPage{V: lastmile.View{Handoff: h}}); err != nil {
-			t.Fatal(err)
-		}
-		out := buf.String()
-		if strings.Contains(out, evil) || strings.Contains(out, `class="notice`) {
-			t.Errorf("dismissed=%v: unescaped path or the red notice", dismissed)
-		}
-		for _, want := range []string{`id="dirty-panel"`, `data-path="a.go"`, "+3", "−1", "binary", `data-suggest="Add x"`, "Pushes to #7", "Resume as is", `id="dirty-agent"`, `id="dirty-task"`} {
-			if !strings.Contains(out, want) {
-				t.Errorf("dismissed=%v: page lacks %q", dismissed, want)
-			}
-		}
-		if got := strings.Contains(out, "2 uncommitted files block TLM"); got != dismissed {
-			t.Errorf("dismissed=%v: banner shown %v", dismissed, got)
-		}
-	}
-}
-
-// The landing dashboard lists what needs you from handoffs and review verdicts, and escapes what GitHub supplies.
-func TestHTTPHome(t *testing.T) {
-	evil := `<script>alert(1)</script>`
-	now := time.Now()
-	h := homePage{dashboard: dashboard{Board: app.Board{Status: app.Status{Reviews: true, SlotsUsed: 2, SlotsMax: 3,
-		PRs: []app.PRView{
-			{ID: "o/r#1", Tracked: tracker.Tracked{PRRef: github.PRRef{Repo: "o/r", Number: 1}, Title: evil, URL: "https://github.com/o/r/pull/1", Author: "carol"},
-				Group: app.GroupReviewed, Tone: app.ToneChanges, Verdict: "Changes requested", VerdictAt: now},
-			{ID: "o/r#2", Tracked: tracker.Tracked{PRRef: github.PRRef{Repo: "o/r", Number: 2}, Title: "Broken", URL: "javascript:alert(1)"},
-				Group: app.GroupAttention, Tone: app.ToneBad, Verdict: "Failed", VerdictAt: now}},
-		Handoffs: []lastmile.View{
-			{Handoff: lastmile.Handoff{ID: "h1", Title: evil, State: lastmile.StateNeedsHuman, Reason: evil, PRNumber: 7, Repo: "o/r", PRURL: "https://evil.example/x"}},
-			{Handoff: lastmile.Handoff{ID: "h2", Title: "Fixing", State: lastmile.StateCIRed}, AgentRunning: lastmile.TriggerCI, AgentStarted: now}},
-	}}}}
-	rec := httptest.NewRecorder()
-	render(rec, "home.html", h)
-	page := rec.Body.String()
-	if strings.Contains(page, evil) || strings.Contains(page, "javascript:") || strings.Contains(page, "evil.example") {
-		t.Errorf("untrusted text or link rendered:\n%s", page)
-	}
-	for _, want := range []string{"&lt;script&gt;", `href="/lastmile/h1"`, `href="/prs/o/r/1"`, "Changes requested", "needs-human", `chip live">ci<`, `href="/lastmile"`,
-		"2 of 3", "3 items", "Your review"} {
-		if !strings.Contains(page, want) {
-			t.Errorf("home missing %q", want)
 		}
 	}
 }
@@ -962,9 +753,6 @@ func TestHTTPSkill(t *testing.T) {
 	os.WriteFile(path(claude), []byte("old"), 0o644)
 	srv, _, _ := newTestServer(t) // checks the skills at startup
 
-	if _, body := get(t, srv.URL+"/"); !strings.Contains(body, "skill update available") {
-		t.Fatalf("no dot on the Settings tab")
-	}
 	act := func(agent, action string) skillStatus {
 		t.Helper()
 		resp, err := http.Post(srv.URL+"/api/skill/"+agent+"/"+action, "", nil)
@@ -1019,5 +807,45 @@ func TestHTTPSkill(t *testing.T) {
 		if resp, _ := http.Post(srv.URL+"/api/skill/"+p, "", nil); resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("%s = %d, want 400", p, resp.StatusCode)
 		}
+	}
+}
+
+// A finished run's log: its events so far, and where a live stream would carry on.
+func TestHTTPRunLog(t *testing.T) {
+	srv, _, run := newReviewServer(t)
+	code, body := get(t, srv.URL+"/api/prs/ethyca/a/1/runs/"+run.ID+"/log")
+	var l runLog
+	if err := json.Unmarshal([]byte(body), &l); code != 200 || err != nil || l.Next == 0 {
+		t.Fatalf("%d %v %s", code, err, body)
+	}
+	var kinds []string
+	for _, e := range l.Events {
+		kinds = append(kinds, e.Kind)
+	}
+	if !slices.Contains(kinds, "output") || !slices.Contains(kinds, "text") || !slices.Contains(kinds, "result") {
+		t.Errorf("kinds = %q", kinds)
+	}
+	if code, _ := get(t, srv.URL+"/api/prs/ethyca/a/1/runs/nope/log"); code != 404 {
+		t.Errorf("unknown run = %d", code)
+	}
+}
+
+// The UI's files are served as they are; any other page path gets index.html for the UI to route.
+func TestHTTPServesUI(t *testing.T) {
+	dist := fstest.MapFS{"index.html": {Data: []byte("<!doctype html>ui")}, "assets/app.js": {Data: []byte("js()")}}
+	srv := httptest.NewServer(spa(dist))
+	t.Cleanup(srv.Close)
+	for path, want := range map[string]string{"/": "ui", "/prs/o/r/1": "ui", "/lastmile/h1": "ui", "/assets/app.js": "js()"} {
+		if code, body := get(t, srv.URL+path); code != 200 || !strings.Contains(body, want) {
+			t.Errorf("%s = %d %q", path, code, body)
+		}
+	}
+	if code, _ := get(t, srv.URL+"/api/nope"); code != 404 {
+		t.Errorf("unknown API path = %d", code)
+	}
+	empty := httptest.NewServer(spa(fstest.MapFS{}))
+	t.Cleanup(empty.Close)
+	if code, body := get(t, empty.URL+"/"); code != http.StatusServiceUnavailable || !strings.Contains(body, "make build") {
+		t.Errorf("unbuilt UI = %d %q", code, body)
 	}
 }
