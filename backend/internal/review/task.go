@@ -75,7 +75,7 @@ func (r *Reviewer) RunTask(ctx context.Context, t Task) (TaskResult, error) {
 	}()
 
 	now := time.Now()
-	runID := now.UTC().Format("20060102-150405.000")
+	runID := newRunID(now)
 	run := Run{ID: runID, Image: repo.Image, Started: now, Status: Running,
 		Job: Job{PR: tracker.Tracked{PRRef: github.PRRef{Repo: t.Repo}, Worktree: t.Worktree}, Agent: t.Agent, Reason: "task"},
 		Dir: filepath.Join(r.dir, "tasks", t.ID, runID)}
@@ -161,7 +161,7 @@ func (r *Reviewer) runTask(ctx context.Context, key string, run Run, t Task) (re
 	bg := context.WithoutCancel(ctx)
 	cid, err := r.rt.Start(ctx, spec)
 	if err != nil {
-		r.removeRun(bg, run.ID) // `docker run` failing doesn't mean nothing started
+		r.removeRun(bg, spec.Labels) // `docker run` failing doesn't mean nothing started
 		return nil, 0, err
 	}
 	defer r.removeContainer(bg, run.ID, cid)

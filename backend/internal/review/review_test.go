@@ -468,7 +468,7 @@ func TestRuntimeRetryDoesNotMultiply(t *testing.T) {
 // worktree lock, instead of marking every running review lost.
 func TestReattachWaitsForRuntime(t *testing.T) {
 	f := newFixture(t)
-	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1"}, true, 0, "")
+	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1", "sisyphus.pr": refA.Key()}, true, 0, "")
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
 		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "r1")}}
 	f.rt.SetUnavailable(errors.New("docker not running"))
@@ -491,7 +491,7 @@ func TestReattachWaitsForRuntime(t *testing.T) {
 // run's timeout has passed by the time we look.
 func TestReattachExitedPastDeadline(t *testing.T) {
 	f := newFixture(t)
-	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1"}, false, 0, "done\n"+okResult)
+	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1", "sisyphus.pr": refA.Key()}, false, 0, "done\n"+okResult)
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
 		Started: time.Now().Add(-2 * time.Hour), Dir: filepath.Join(f.dir, "runs", "r1")}}
 	os.MkdirAll(filepath.Join(f.dir, "runs", "r1"), 0o755)
@@ -1203,5 +1203,29 @@ func TestLostRunKeepsNewerQueuedJob(t *testing.T) {
 	f.r.lose(Run{ID: "r1", Job: f.r.newJob(f.tr, ReasonNew)}, errors.New("gone"))
 	if q := f.r.st.Queue; len(q) != 1 || q[0].PR.HeadSHA != "b" {
 		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// Run IDs are timestamps, so two PRs' runs can share one: re-attaching to one
+// PR's run must not pick up, or remove, the other PR's container.
+func TestReattachIgnoresOtherPRsRunWithSameID(t *testing.T) {
+	f := newFixture(t)
+	refB := github.PRRef{Repo: "ethyca/b", Number: 2}
+	trB := f.tr
+	trB.PRRef = refB
+	idA := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1", "sisyphus.pr": refA.Key()}, true, 0, "")
+	idB := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1", "sisyphus.pr": refB.Key()}, true, 0, "")
+	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: idA,
+		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "a", "r1")}}
+	f.r.st.Runs[refB.Key()] = []Run{{ID: "r1", Job: Job{PR: trB, Reason: "new"}, Status: Running, Container: idB,
+		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "b", "r1")}}
+	f.r.Reattach(context.Background())
+	f.succeed(idA, "")
+	waitFor(t, "A's run to finish", func() bool { return f.runs()[0].Status != Running })
+	if rs := f.runs(); rs[0].Status != Succeeded {
+		t.Fatalf("run = %+v", rs[0])
+	}
+	if !slices.ContainsFunc(f.containers(), func(c container.Info) bool { return c.ID == idB }) {
+		t.Fatal("removed PR b's container")
 	}
 }

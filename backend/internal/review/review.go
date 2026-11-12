@@ -494,7 +494,7 @@ func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func
 		giveUp(context.Cause(runCtx))
 		return
 	}
-	infos, err := r.rt.List(runCtx, map[string]string{"sisyphus.run": run.ID})
+	infos, err := r.rt.List(runCtx, map[string]string{"sisyphus.run": run.ID, "sisyphus.pr": id})
 	if err != nil {
 		giveUp(fmt.Errorf("couldn't re-attach after restart: %w", err))
 		return
@@ -522,15 +522,16 @@ func (r *Reviewer) sweepOrphans(ctx context.Context) {
 		return
 	}
 	r.mu.Lock()
-	running := map[string]bool{}
-	for _, runs := range r.st.Runs {
+	running := map[string]bool{} // by PR (or task) and run: run IDs are unique only per PR
+	for key, runs := range r.st.Runs {
 		for _, run := range runs {
-			running[run.ID] = run.Status == Running
+			running[key+" "+run.ID] = run.Status == Running
 		}
 	}
 	r.mu.Unlock()
 	for _, c := range cs {
-		if !running[c.Labels["sisyphus.run"]] {
+		key := cmp.Or(c.Labels["sisyphus.pr"], taskPrefix+c.Labels["sisyphus.task"])
+		if !running[key+" "+c.Labels["sisyphus.run"]] {
 			slog.Warn("removing orphaned review container", "container", c.ID, "run", c.Labels["sisyphus.run"])
 			r.removeContainer(ctx, c.Labels["sisyphus.run"], c.ID)
 		}
@@ -694,7 +695,7 @@ func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 		}
 		r.st.Queue = slices.Delete(r.st.Queue, i, i+1)
 		now := time.Now()
-		runID := now.UTC().Format("20060102-150405.000")
+		runID := newRunID(now)
 		run := Run{ID: runID, Job: j, Image: r.cfg.Repos[j.PR.Repo].Image, Started: now, Status: Running,
 			Dir: filepath.Join(r.dir, "runs", prPath(id), runID)}
 		r.appendRunLocked(run) // saved with the dequeue, so a crash here is seen as "lost"
@@ -711,6 +712,24 @@ func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 		r.spawn(func() { r.execute(ctx, s.runCtx, s.run) })
 	}
 	return recheck
+}
+
+var lastRunID struct {
+	sync.Mutex
+	at time.Time
+}
+
+// newRunID is a readable, URL- and path-safe UTC timestamp, a millisecond past
+// the last one issued if need be, so this process never hands out one twice.
+func newRunID(now time.Time) string {
+	lastRunID.Lock()
+	defer lastRunID.Unlock()
+	at := now.UTC().Truncate(time.Millisecond)
+	if !at.After(lastRunID.at) {
+		at = lastRunID.at.Add(time.Millisecond)
+	}
+	lastRunID.at = at
+	return at.Format("20060102-150405.000")
 }
 
 func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
@@ -759,7 +778,7 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 	if err != nil {
 		if appCtx.Err() == nil {
 			// `docker run` failing doesn't mean the daemon didn't start it.
-			r.removeRun(context.WithoutCancel(appCtx), run.ID)
+			r.removeRun(context.WithoutCancel(appCtx), spec.Labels)
 		}
 		fail(err)
 		return
@@ -787,8 +806,11 @@ func (r *Reviewer) endEarly(appCtx, runCtx context.Context, run Run, err error, 
 	r.finish(run, Errored, 0, retryable{err}, unlock)
 }
 
-func (r *Reviewer) removeRun(ctx context.Context, runID string) {
-	cs, err := r.rt.List(ctx, map[string]string{"sisyphus.run": runID})
+// removeRun removes the containers carrying a run's labels (its PR's or task's
+// too: run IDs alone aren't unique across them).
+func (r *Reviewer) removeRun(ctx context.Context, labels map[string]string) {
+	runID := labels["sisyphus.run"]
+	cs, err := r.rt.List(ctx, labels)
 	if err != nil {
 		slog.Warn("listing review containers", "run", runID, "err", err)
 	}
