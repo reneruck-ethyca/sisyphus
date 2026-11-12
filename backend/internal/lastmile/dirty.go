@@ -126,7 +126,11 @@ func (m *Manager) checkDirty(ctx context.Context, h *Handoff) {
 			slog.Warn("lastmile dirty-worktree files", "id", h.ID, "err", err)
 			return
 		}
-		h.Dirty = &Dirty{Status: st, At: m.now(), Files: files}
+		d := &Dirty{Status: st, At: m.now(), Files: files}
+		if h.Dirty != nil {
+			d.WIP = h.Dirty.WIP // still the human's, until a lost run unwraps it
+		}
+		h.Dirty = d
 	}
 	if m.Assess == nil || h.Dirty.assessed() {
 		return

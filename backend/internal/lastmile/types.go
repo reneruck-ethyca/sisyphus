@@ -164,6 +164,7 @@ type Handoff struct {
 type RunMark struct {
 	Trigger string    `json:"trigger"` // Trigger*
 	Started time.Time `json:"started"`
+	Head    string    `json:"head"` // the worktree's HEAD when it started
 }
 
 // Event is one line of a handoff's log.

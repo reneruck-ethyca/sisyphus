@@ -72,11 +72,8 @@ func (m *Manager) advance(ctx context.Context, h *Handoff) (finished bool, err e
 		return false, m.openPR(ctx, h)
 	}
 	a, running := m.running.get(h.ID)
-	if !running && h.Run != nil { // the run was lost to a restart
-		if h.Run.Trigger == TriggerConflict {
-			m.abortStaleRebase(ctx, h)
-		}
-		h.Run = nil
+	if !running && h.Run != nil {
+		m.lostRun(ctx, h)
 	}
 	if running {
 		if !a.done {

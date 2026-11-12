@@ -42,8 +42,8 @@ func rebaseInProgress(ctx context.Context, dir string) bool {
 }
 
 // abortStaleRebase backs out a rebase a conflict run lost to a restart left in the
-// worktree: it would wedge every later git command. Only then: a rebase with no such
-// run behind it is a human's (resolving a needs-human conflict) and stays.
+// worktree (see lostRun): it would wedge every later git command. Only then: a rebase
+// with no such run behind it is a human's (resolving a needs-human conflict) and stays.
 func (m *Manager) abortStaleRebase(ctx context.Context, h *Handoff) {
 	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
 	if err != nil {

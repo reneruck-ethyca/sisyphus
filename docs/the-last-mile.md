@@ -158,10 +158,14 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
   sisyphus on the same state dir refuses to start (`sisyphus.lock`), since every instance rewrites
   the whole state files; running several instances is reneruck-ethyca/sisyphus#1.
-- **A run in flight is marked on the handoff** (`run`: trigger, start), stored when the run starts. The run
-  itself lives in memory, so a mark with no run behind it means a restart lost the run. Only a lost conflict
-  run's rebase is aborted on the next tick; any other rebase in progress is a human's (resolving a needs-human
-  conflict) and stays.
+- **A run in flight is marked on the handoff** (`run`: trigger, start, starting head), stored when the run
+  starts. The run itself lives in memory, so a mark with no run behind it means a restart lost the run, and the
+  next tick cleans up as after a failed run: a lost conflict run's rebase is aborted (any other rebase in
+  progress is a human's, resolving a needs-human conflict, and stays), the tree goes back to the starting head
+  unless a commit moved it on, and a lost dirty-agent run's WIP commit is unwrapped. Gitignored files whose
+  ctime is past the run's start (outside `node_modules/`) are named in a needs-human reason but not removed:
+  without the pre-run stamps a planted file can't be told from a changed one. With none, the handoff just
+  carries on. A lost fix round's failures don't count as seen (they're recorded when a round ends).
   A finished run's outcome stays in memory until the tick that applies it is stored: a tick discarded because
   the handoff changed meanwhile (an assessment, a dashboard action) leaves it for the next tick to apply.
 - **Replies are posted in one batch from the host.**
@@ -179,7 +183,8 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   the reviewer, at least at first.
 - **Stopping rules:**
   - `--max-fix-rounds` per trigger type
-  - a failure seen twice with the same fingerprint (job plus error signature) → needs-human
+  - a failure seen twice with the same fingerprint (job plus error signature) → needs-human; a fingerprint
+    counts once a fix round on it has ended
   - a reviewer re-raising a thread TLM already "fixed" → needs-human
 - **Escalation:** a `tlm:needs-human` label, the `needs-human` notify event, and a dashboard banner.
 - **Dirty worktree panel:** while a handoff is needs-human, each tick checks its worktree with `git status
@@ -209,9 +214,9 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
     commit, the usual write path only judges the agent's own edits. Pushed (both commits, or the WIP alone if
     the agent changed nothing) → the handoff resumes. Otherwise the WIP commit is unwrapped (`reset --mixed
     HEAD~1`, only while it's the unpushed head), the changes are uncommitted again, and the reason says so.
-    `dirty.wip` records the commit for the run's length; a tick that finds it as a clean worktree's head (the
-    run was lost to a restart) unwraps it. While the run lasts the page shows "agent running" in place of
-    the panel.
+    `dirty.wip` records the commit for the run's length and survives the panel's rebuilds; a run lost to a
+    restart is cleaned up like any lost run (above), which unwraps it. While the run lasts the page shows
+    "agent running" in place of the panel.
 
   `GET …/dirty/diff?path=` (path must be a listed file) is `git diff HEAD -- path` for a tracked file, the
   content of an untracked regular file, cut at 200 KB, or "binary file". Actions run under the worktree lock
@@ -449,3 +454,10 @@ None right now.
   leave, resume), pushed work stayed in needs-human and the run's events were lost. The run is now dropped only
   after the commit. The dirty assessment likewise wrote its whole copy of `dirty` back, erasing a `wip` set by an
   agent run that started meanwhile; it now merges only summary, message and error, and only into the same status.
+- **2026-11-12:** A run lost to a restart is cleaned up (§5). Runs live in memory, so a restart mid-run skipped
+  the cleanup and the ignored-file check (files the agent planted stayed, and the next run took them as its
+  baseline), left the round's fingerprints counted (the same red checks escalated at once as "same failure
+  twice"), and, for a dirty-agent run that had already edited files, rebuilt `dirty` without `wip`, stranding
+  the human's changes in an unpushed commit a later panel commit would push unseen. The `run` mark gains the
+  starting head; a lost run gets the failed run's cleanup, with ignored files judged by ctime since the pre-run
+  stamps are gone. Fingerprints are recorded when a fix round ends, and `wip` is kept when `dirty` is rebuilt.

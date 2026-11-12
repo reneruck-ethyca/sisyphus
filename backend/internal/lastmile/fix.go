@@ -35,6 +35,7 @@ type effects struct {
 	body      *string  // the PR body TLM wrote
 	requested []string // reviewers TLM re-requested
 	rounds    int      // conflict agent runs, counted in FixRounds
+	failures  []string // fingerprints a fix round was spent on
 	unstack   bool     // the child now sits on the parent's old base: it is a plain handoff
 }
 
@@ -61,6 +62,7 @@ func (e effects) apply(h *Handoff) {
 		h.LastBodyWritten = *e.body
 	}
 	h.Requested = union(h.Requested, e.requested...)
+	h.FixedFailures = append(slices.Clone(h.FixedFailures), e.failures...)
 	for range e.rounds {
 		h.FixRounds = bump(h.FixRounds, TriggerConflict)
 	}
@@ -144,7 +146,8 @@ func (m *Manager) launch(ctx context.Context, h *Handoff, trigger string, work f
 		cancel()
 		return false
 	}
-	h.Run = &RunMark{Trigger: trigger, Started: run.started}
+	head, _ := worktree.HeadSHA(ctx, h.Worktree)
+	h.Run = &RunMark{Trigger: trigger, Started: run.started, Head: head}
 	m.markRun(h.ID, h.Run)
 	snap := *h
 	m.wg.Add(1)
@@ -193,6 +196,67 @@ func (m *Manager) agentFinished(ctx context.Context, h *Handoff, a agentRun) {
 	}
 }
 
+// lostRun cleans up after a run a restart cut short, as cleanup does after a failed
+// one: a conflict run's rebase is aborted, the tree goes back to the run's starting
+// head unless a commit moved it on, and a dirty run's WIP commit is unwrapped. Ignored
+// files changed since the run started are named, not removed: with no stamps from
+// before it, a planted file can't be told from a changed one.
+func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
+	r := *h.Run
+	if r.Trigger == TriggerConflict {
+		m.abortStaleRebase(ctx, h)
+	}
+	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
+	if err != nil {
+		return // the mark stays: the next tick tries again
+	}
+	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == r.Head {
+		if err := worktree.Reset(ctx, h.Worktree, head); err != nil {
+			slog.Warn("lastmile lost run: reset", "id", h.ID, "err", err)
+		}
+	}
+	changed, err := ignoredSince(ctx, h.Worktree, r.Started)
+	if err != nil {
+		slog.Warn("lastmile lost run: ignored files", "id", h.ID, "err", err)
+	}
+	unlock()
+	h.Run = nil
+	reason := "agent run lost to a restart"
+	if names := pathList(changed); names != "" {
+		reason += "; gitignored files created or changed since it started (not removed): " + names
+	}
+	switch {
+	case r.Trigger == TriggerDirty:
+		if m.unwrapWIP(ctx, *h, r.Head) {
+			reason += "; your changes are uncommitted again"
+		}
+		m.dirtyAgentFinished(ctx, h, reason)
+	case len(changed) > 0:
+		h.EscalatedBy = r.Trigger
+		m.escalate(ctx, h, reason)
+	default:
+		logEvent(h, m.now(), "agent", reason+"; starting over")
+	}
+}
+
+// ignoredSince names the gitignored files whose ctime is past t, less what setup
+// writes under node_modules (see runAgent).
+func ignoredSince(ctx context.Context, dir string, t time.Time) ([]string, error) {
+	files, err := ignoredFiles(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	since := t.Add(-time.Second).UnixNano() // a second's slack: the kernel's file clock can lag time.Now
+	var changed []string
+	for f, st := range files {
+		if st.ctime > since && !slices.Contains(strings.Split(f, "/"), "node_modules") {
+			changed = append(changed, f)
+		}
+	}
+	slices.Sort(changed)
+	return changed, nil
+}
+
 // redState decides what a red PR with fix-ci on does: rerun flakes, stop on a
 // rule, or start the fix agent. It returns the state to show, and whether the
 // handoff goes to needs-human.
@@ -213,9 +277,6 @@ func (m *Manager) redState(ctx context.Context, h *Handoff, s Snapshot) (state, 
 		}
 	}
 	h.FixRounds = bump(h.FixRounds, TriggerCI)
-	for _, f := range s.Failures {
-		h.FixedFailures = append(h.FixedFailures, f.Fingerprint)
-	}
 	m.launch(ctx, h, TriggerCI, func(ctx context.Context, snap Handoff) outcome { return m.fixCI(ctx, snap, s) })
 	return StateCIRed, "fix agent running", nil
 }
@@ -400,6 +461,9 @@ func hasHeadings(next, old string) bool {
 // fixCI runs the fix agent and, if it produced a change, the host write path.
 func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
 	var fx effects
+	for _, f := range s.Failures { // counted when the round ends: a run lost to a restart spent nothing
+		fx.failures = append(fx.failures, f.Fingerprint)
+	}
 	view := s
 	view.Failures = slices.Clone(s.Failures)
 	for i := range view.Failures {

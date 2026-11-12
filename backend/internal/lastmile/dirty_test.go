@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/reneruck/sisyphus/internal/gittest"
 )
@@ -346,10 +347,15 @@ func TestDirtyAgentLostRunIsUnwrapped(t *testing.T) {
 	gittest.Git(t, wt, "add", "wip.txt")
 	gittest.Git(t, wt, "commit", "-qm", "wip")
 	wip := gittest.Git(t, wt, "rev-parse", "HEAD")
-	if _, err := m.update(id, func(h *Handoff) error { d := *h.Dirty; d.WIP = wip; h.Dirty = &d; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	m.tickWait(t) // a restart lost the run: the commit is unwrapped
+	m.set(t, id, func(h *Handoff) {
+		d := *h.Dirty
+		d.WIP = wip
+		h.Dirty = &d
+		h.Run = &RunMark{Trigger: TriggerDirty, Started: time.Now(), Head: wip}
+	})
+	writeFile(t, wt, "wip.txt", "agent was here") // the run had started editing
+	writeFile(t, wt, "agent.txt", "junk")
+	m.tickWait(t) // a restart lost the run: its edits go, the commit is unwrapped
 	m.tickWait(t) // and the dirt seen again
 	if gittest.Git(t, wt, "rev-parse", "HEAD") != head || gittest.Git(t, wt, "status", "--porcelain") != "?? wip.txt" {
 		t.Error("not unwrapped")
