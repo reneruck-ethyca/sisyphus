@@ -79,6 +79,7 @@ type Run struct {
 	Claude    *ClaudeResult `json:"claude,omitempty"`    // Claude's final result line, once it has one
 	Usage     []Span        `json:"usage,omitempty"`     // the 5-hour windows it used, by Claude's rate-limit readings
 	Posted    *Posted       `json:"posted,omitempty"`    // what sisyphus posted to GitHub
+	Posting   bool          `json:"posting,omitempty"`   // posting started: after a crash, don't post again
 	Stack     *StackRun     `json:"stack,omitempty"`     // the local stack it ran against
 	PostNote  string        `json:"post_note,omitempty"` // what came of posting, in a line (succeeded runs)
 	Overdue   bool          `json:"overdue,omitempty"`   // still running past review.timeout (set by Status)
@@ -1297,7 +1298,12 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		var posted *Posted
 		var err error
 		if r.cfg.Post && r.GitHub != nil {
-			posted, err = r.post(bg, run)
+			if run.Posting { // GitHub may have it already; posting twice is worse than not at all
+				err = errors.New("posting was interrupted by a restart; check GitHub before posting again")
+			} else {
+				r.record(id, run.ID, func(x *Run) { x.Posting = true })
+				posted, err = r.post(bg, run)
+			}
 		}
 		note := postNote(posted, err, r.cfg.Post && r.GitHub != nil)
 		r.record(id, run.ID, func(x *Run) { x.Posted, x.PostNote = posted, note })

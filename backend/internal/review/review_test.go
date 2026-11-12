@@ -1229,3 +1229,22 @@ func TestReattachIgnoresOtherPRsRunWithSameID(t *testing.T) {
 		t.Fatal("removed PR b's container")
 	}
 }
+
+// A crash while posting leaves the run "running": re-attached, it must not
+// post the review a second time.
+func TestReattachDoesNotRepostInterruptedPost(t *testing.T) {
+	gh := &fakeGH{}
+	f := newFixture(t, func(c *config.Review) { c.Post = true })
+	f.r.GitHub = gh
+	dir := filepath.Join(f.dir, "runs", "r1")
+	os.MkdirAll(filepath.Join(dir, "out"), 0o755)
+	os.WriteFile(filepath.Join(dir, "out", "review.json"), []byte(`{"event":"COMMENT","body":"hi"}`), 0o644)
+	id := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "r1", "sisyphus.pr": refA.Key()}, false, 0, "done\n"+okResult)
+	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "new"}, Status: Running, Container: id,
+		Started: time.Now(), Dir: dir, Posting: true}}
+	f.r.Reattach(context.Background())
+	waitFor(t, "run to finish", func() bool { return f.runs()[0].Status != Running })
+	if reviews, _ := gh.posted(); len(reviews) != 0 || !strings.Contains(f.runs()[0].PostNote, "interrupted") {
+		t.Fatalf("posted %q, run %+v", reviews, f.runs()[0])
+	}
+}

@@ -129,7 +129,7 @@ func (r *Reviewer) post(ctx context.Context, run Run) (*Posted, error) {
 			payload["comments"] = f.Comments
 		}
 		url, err := r.createReview(ctx, ref, run.Dir, "post.json", payload)
-		if err != nil {
+		if err != nil && refused.MatchString(err.Error()) {
 			// e.g. an inline comment outside the diff, or approving your own PR.
 			url, err = r.createReview(ctx, ref, run.Dir, "post-fallback.json", map[string]any{
 				"commit_id": run.Job.PR.HeadSHA, "event": "COMMENT", "body": signed(folded(f, err))})
@@ -165,6 +165,10 @@ func (r *Reviewer) createReview(ctx context.Context, ref github.PRRef, dir, name
 // githubReason keeps only GitHub's own reason from a gh error (status and
 // message), not the command line, local paths or anything else from the host.
 var githubReason = regexp.MustCompile(`[^:]*\(HTTP \d+\)|HTTP \d+[^\n]*`)
+
+// refused matches a 4xx from GitHub: the review surely wasn't created, so a
+// fallback comment can't double-post (a 5xx or timeout may have created it).
+var refused = regexp.MustCompile(`HTTP 4\d\d`)
 
 // folded turns a review GitHub refused into one comment's text.
 func folded(f ReviewFile, why error) string {
