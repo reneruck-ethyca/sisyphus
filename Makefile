@@ -10,7 +10,9 @@ export CGO_LDFLAGS := -mmacosx-version-min=13.0
 help: ## list the targets (the default)
 	@awk -F':.*## ' '/^[a-z-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: web-build backend-build ## build the UI, then bin/sisyphus with it embedded
+# The backend embeds the UI build, so it must come second, also under make -j.
+build: web-build ## build the UI, then bin/sisyphus with it embedded
+	@$(MAKE) --no-print-directory backend-build
 
 test: web-test backend-test ## run the UI and backend tests
 
