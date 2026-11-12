@@ -211,11 +211,11 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 		return // the mark stays: the next tick tries again
 	}
 	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == r.Head {
-		if err := worktree.Reset(ctx, h.Worktree, head); err != nil {
+		if err := reset(ctx, *h, head); err != nil {
 			slog.Warn("lastmile lost run: reset", "id", h.ID, "err", err)
 		}
 	}
-	changed, err := ignoredSince(ctx, h.Worktree, r.Started)
+	changed, err := ignoredSince(ctx, h.Worktree, r.Started, h.Untracked)
 	if err != nil {
 		slog.Warn("lastmile lost run: ignored files", "id", h.ID, "err", err)
 	}
@@ -241,8 +241,8 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 
 // ignoredSince names the gitignored files whose ctime is past t, less what setup
 // writes under node_modules (see runAgent).
-func ignoredSince(ctx context.Context, dir string, t time.Time) ([]string, error) {
-	files, err := ignoredFiles(ctx, dir)
+func ignoredSince(ctx context.Context, dir string, t time.Time, extra []string) ([]string, error) {
+	files, err := ignoredFiles(ctx, dir, extra...)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 			return j.kind + ": " + err.Error()
 		}
 		defer unlock()
-		if st, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain"); err != nil || st != "" {
+		if st, err := status(ctx, h); err != nil || st != "" {
 			return "worktree has uncommitted changes; the " + j.kind + " would mix them in"
 		}
 	}
@@ -330,7 +330,7 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 	if err != nil {
 		return j.kind + " prompt: " + err.Error()
 	}
-	before, err := ignoredFiles(ctx, h.Worktree)
+	before, err := ignoredFiles(ctx, h.Worktree, h.Untracked...)
 	if err != nil {
 		return "listing ignored files: " + err.Error()
 	}
@@ -380,7 +380,7 @@ func (m *Manager) cleanup(ctx context.Context, h Handoff, start string, before m
 		slog.Warn("lastmile cleanup: ignored files", "id", h.ID, "err", err)
 	}
 	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == start {
-		if err := worktree.Reset(ctx, h.Worktree, start); err != nil {
+		if err := reset(ctx, h, start); err != nil {
 			slog.Warn("lastmile cleanup: reset", "id", h.ID, "err", err)
 		}
 	}

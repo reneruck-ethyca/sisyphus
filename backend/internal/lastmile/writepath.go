@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -93,7 +94,7 @@ type AgentResult struct {
 // changedFiles lists what the worktree differs from HEAD in: tracked changes
 // (staged or not, renames as delete plus add) and untracked files that
 // .gitignore doesn't hide.
-func changedFiles(ctx context.Context, dir string) ([]string, error) {
+func changedFiles(ctx context.Context, dir string, skip []string) ([]string, error) {
 	var files []string
 	for _, args := range [][]string{
 		{"diff", "--name-only", "-z", "--no-renames", "HEAD"},
@@ -104,13 +105,45 @@ func changedFiles(ctx context.Context, dir string) ([]string, error) {
 			return nil, err
 		}
 		for _, f := range strings.Split(out, "\x00") {
-			if f != "" {
+			if f != "" && !slices.Contains(skip, f) {
 				files = append(files, f)
 			}
 		}
 	}
 	return files, nil
 }
+
+// status is git status --porcelain less the untracked files the handoff came with:
+// TLM's one test of a clean worktree (design §2).
+func status(ctx context.Context, h Handoff) (string, error) {
+	out, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain", "-z", "-uall")
+	if err != nil {
+		return "", err
+	}
+	var keep []string
+	for _, e := range strings.Split(out, "\x00") {
+		if p, ok := strings.CutPrefix(e, "?? "); e != "" && (!ok || !slices.Contains(h.Untracked, p)) {
+			keep = append(keep, e)
+		}
+	}
+	return strings.Join(keep, "\n"), nil
+}
+
+// reset is worktree.Reset sparing the untracked files the handoff came with.
+// ponytail: a name ending in a space isn't escaped, so git clean would remove it.
+func reset(ctx context.Context, h Handoff, sha string) error {
+	if _, err := proc.Run(ctx, h.Worktree, "git", "reset", "--hard", "--quiet", sha); err != nil {
+		return err
+	}
+	args := []string{"clean", "-ffd", "--quiet"}
+	for _, f := range h.Untracked {
+		args = append(args, "-e", "/"+globEscape.Replace(f))
+	}
+	_, err := proc.Run(ctx, h.Worktree, "git", args...)
+	return err
+}
+
+var globEscape = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`)
 
 // changedLines counts added plus removed lines of the change, untracked files
 // included, limited to files when given. A binary file has no line count to cap,
@@ -175,13 +208,13 @@ type stamp struct {
 // later unseen (a .venv binary, an .envrc).
 // ponytail: walks everything ignored on each agent run, node_modules included; fine
 // next to an agent run's minutes. Caches mounted as volumes are never written here.
-func ignoredFiles(ctx context.Context, dir string) (map[string]stamp, error) {
+func ignoredFiles(ctx context.Context, dir string, extra ...string) (map[string]stamp, error) {
 	out, err := proc.Run(ctx, dir, "git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
 	if err != nil {
 		return nil, err
 	}
 	files := map[string]stamp{}
-	for _, f := range strings.Split(out, "\x00") {
+	for _, f := range append(strings.Split(out, "\x00"), extra...) {
 		if f == "" {
 			continue
 		}
@@ -196,7 +229,7 @@ func ignoredFiles(ctx context.Context, dir string) (map[string]stamp, error) {
 // ignoredChanges removes the ignored files the run created and names every one
 // it created or changed; a changed one can't be put back, so a human looks.
 func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([]string, error) {
-	after, err := ignoredFiles(ctx, dir)
+	after, err := ignoredFiles(ctx, dir, slices.Collect(maps.Keys(before))...) // a handoff's untracked files are in before too
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +303,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return "", err
 	}
 	reject := func(format string, a ...any) (string, error) {
-		return fmt.Sprintf(format, a...), worktree.Reset(ctx, h.Worktree, head)
+		return fmt.Sprintf(format, a...), reset(ctx, h, head)
 	}
 	ignored, err := ignoredChanges(ctx, h.Worktree, ignoredBefore)
 	if err != nil {
@@ -280,9 +313,9 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return reject("agent created or changed gitignored files (new ones removed): %s", pathList(ignored))
 	}
 	if res.Escalate {
-		return "agent escalated: " + res.EscalateReason, worktree.Reset(ctx, h.Worktree, head)
+		return "agent escalated: " + res.EscalateReason, reset(ctx, h, head)
 	}
-	files, err := changedFiles(ctx, h.Worktree)
+	files, err := changedFiles(ctx, h.Worktree, h.Untracked)
 	if err != nil {
 		return "", err
 	}
@@ -294,7 +327,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 			return reject("%s", why)
 		}
 	}
-	lines, binary, err := changedLines(ctx, h.Worktree, nil)
+	lines, binary, err := changedLines(ctx, h.Worktree, files)
 	if err != nil {
 		return "", err
 	}
@@ -306,7 +339,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 	}
 	// ponytail: no host-side lint/test run over the change: it would execute code the agent
 	// wrote on the host. The agent runs the repo's checks in its container; CI is the gate.
-	if _, err := proc.Run(ctx, h.Worktree, "git", "add", "-A"); err != nil {
+	if _, err := proc.Run(ctx, h.Worktree, "git", append([]string{"--literal-pathspecs", "add", "-A", "--"}, files...)...); err != nil {
 		return reject("git add failed: %v", err)
 	}
 	args := hostGit(ctx, h.Worktree)

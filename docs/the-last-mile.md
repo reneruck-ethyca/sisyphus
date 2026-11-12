@@ -68,7 +68,11 @@ tlm handoff \
 ```
 
 **Before accepting, TLM checks:**
-- the worktree is clean
+- the worktree is clean: no tracked changes. Untracked files are allowed (wtp hooks copy untracked config,
+  like a `.claude` symlink, into new worktrees) and recorded as the handoff's `untracked`. They are the human's
+  for good: every "clean" check (agent runs, rebases, the dirty panel) leaves them out, no commit (agent,
+  panel, "agent" action) includes them, stash and cleanup resets leave them in place, they aren't sent to the
+  assessment model, and an agent changing one is held against its run like a gitignored file
 - the branch has commits ahead of `--base`
 - the repo is in `review.repos`, so an image and setup exist
 - no other handoff already owns the branch
@@ -461,3 +465,8 @@ None right now.
   the human's changes in an unpushed commit a later panel commit would push unseen. The `run` mark gains the
   starting head; a lost run gets the failed run's cleanup, with ignored files judged by ctime since the pre-run
   stamps are gone. Fingerprints are recorded when a fix round ends, and `wip` is kept when `dirty` is rebuilt.
+- **2026-11-12:** One rule for a clean worktree (§2). Handoff acceptance ignored untracked files, but agent runs
+  and rebases refused any, so a handoff with wtp-copied config escalated on its first agent run, the dirty panel
+  listed the files, and the panel's agent action committed and pushed them unticked. The untracked files present
+  at handoff are now recorded (`untracked`) and excluded wherever TLM judges, commits, stashes or cleans the
+  worktree; they're stamped with the ignored files, so an agent changing one is still caught.

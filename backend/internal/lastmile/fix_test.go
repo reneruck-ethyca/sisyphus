@@ -486,6 +486,33 @@ func TestLostRunIsCleanedUp(t *testing.T) {
 	}
 }
 
+func TestHandoffUntrackedFilesStayTheHumans(t *testing.T) {
+	m, clone, _ := fixture(t)
+	writeFile(t, clone, ".env.local", "SECRET=1") // a wtp hook copied it in; not gitignored
+	gh := m.GH.(*FakeGitHub)
+	gh.NextPR, gh.Snapshots = prRef, map[string]github.PRSnapshot{}
+	h, err := m.Handoff(context.Background(), Request{Worktree: clone, Base: "main", Autonomy: "fix-ci"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.tick(context.Background()) // opens the PR
+	m.Tasks = &fakeTasks{result: okFix, edit: func(dir string) { writeFile(t, dir, "a.txt", "fixed") }}
+	gh.Logs = map[int64]string{22: "FAILED test_a - AssertionError\n"}
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), Author: "me", BaseRef: "main",
+		Checks: []github.Check{failCheck("unit", "22")}}
+	m.tickWait(t)
+	m.tick(context.Background())
+	if got := m.must(t, h.ID); got.State != StateCIRunning {
+		t.Fatalf("handoff = %s %q", got.State, got.Reason)
+	}
+	if files := gittest.Git(t, clone, "show", "--name-only", "--format=", "HEAD"); files != "a.txt" {
+		t.Errorf("committed %q", files)
+	}
+	if b, _ := os.ReadFile(filepath.Join(clone, ".env.local")); string(b) != "SECRET=1" {
+		t.Errorf(".env.local = %q", b)
+	}
+}
+
 func TestAgentsNeedReviews(t *testing.T) {
 	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{failCheck("unit", "22")}}

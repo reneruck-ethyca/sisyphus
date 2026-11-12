@@ -108,6 +108,7 @@ type Handoff struct {
 	Agent        config.Agent `json:"agent"`
 	MaxFixRounds int          `json:"max_fix_rounds"`
 	Requester    string       `json:"requester,omitempty"`
+	Untracked    []string     `json:"untracked,omitempty"` // untracked files at handoff (config wtp copied in): never TLM's to judge, commit or remove
 
 	// ReviewersSet says Reviewers is the user's choice even when empty (a dashboard edit
 	// to "nobody"); otherwise an empty Reviewers means "use the roster".

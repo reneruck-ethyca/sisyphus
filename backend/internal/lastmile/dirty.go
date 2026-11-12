@@ -102,7 +102,7 @@ func (m *Manager) checkDirty(ctx context.Context, h *Handoff) {
 	if h.Worktree == "" {
 		return
 	}
-	st, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain")
+	st, err := status(ctx, *h)
 	if err != nil {
 		return
 	}
@@ -121,7 +121,7 @@ func (m *Manager) checkDirty(ctx context.Context, h *Handoff) {
 	}
 	// Files == nil is the old, options-based format: rebuild it.
 	if h.Dirty == nil || h.Dirty.Status != st || h.Dirty.Files == nil {
-		files, err := dirtyFiles(ctx, h.Worktree)
+		files, err := dirtyFiles(ctx, h.Worktree, h.Untracked)
 		if err != nil {
 			slog.Warn("lastmile dirty-worktree files", "id", h.ID, "err", err)
 			return
@@ -205,8 +205,8 @@ func oneLine(s string, n int) string {
 }
 
 // dirtyFiles lists every uncommitted file (untracked directories expanded) with
-// its line counts.
-func dirtyFiles(ctx context.Context, dir string) ([]DirtyFile, error) {
+// its line counts, less the untracked files in skip.
+func dirtyFiles(ctx context.Context, dir string, skip []string) ([]DirtyFile, error) {
 	st, err := proc.Run(ctx, dir, "git", "status", "--porcelain", "-z", "-uall")
 	if err != nil {
 		return nil, err
@@ -242,6 +242,9 @@ func dirtyFiles(ctx context.Context, dir string) ([]DirtyFile, error) {
 		f := DirtyFile{Path: e[3:], Code: statusCode(e[:2])}
 		if e[0] == 'R' || e[0] == 'C' {
 			i++ // -z puts a rename's old path in the next entry
+		}
+		if f.Code == "??" && slices.Contains(skip, f.Path) {
+			continue
 		}
 		if f.Code == "??" {
 			f.Add, f.Binary = untrackedLines(filepath.Join(dir, f.Path))
@@ -522,7 +525,11 @@ func (m *Manager) unwrapWIP(ctx context.Context, h Handoff, wip string) bool {
 // doesn't resume: the page then offers the usual Resume.
 func (m *Manager) DirtyStash(ctx context.Context, id, hash string) (Handoff, error) {
 	return m.dirtyAct(ctx, id, hash, "stash all", func(h Handoff) error {
-		_, err := proc.Run(ctx, h.Worktree, "git", append(hostGit(ctx, h.Worktree), "stash", "push", "-q", "-u", "-m", "tlm: "+h.Branch+" WIP")...)
+		args := append(hostGit(ctx, h.Worktree), "stash", "push", "-q", "-u", "-m", "tlm: "+h.Branch+" WIP", "--", ".")
+		for _, f := range h.Untracked {
+			args = append(args, ":(exclude,literal)"+f)
+		}
+		_, err := proc.Run(ctx, h.Worktree, "git", args...)
 		return err
 	}, nil)
 }
@@ -549,7 +556,7 @@ func (m *Manager) dirtyAct(ctx context.Context, id, hash, what string, fn func(H
 	if err != nil {
 		return h, err
 	}
-	st, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain")
+	st, err := status(ctx, h)
 	if err == nil && st != h.Dirty.Status {
 		err = ErrStale
 	}
@@ -591,7 +598,7 @@ func (m *Manager) dirtyAct(ctx context.Context, id, hash, what string, fn func(H
 // checks, minus the line cap: it's the human's work. Unlike commitAgentWork it
 // never resets the worktree; a failure unstages, or uncommits, and stops.
 func (m *Manager) commitHuman(ctx context.Context, dir, msg string, paths []string, push bool) error {
-	all, err := changedFiles(ctx, dir)
+	all, err := changedFiles(ctx, dir, nil) // paths are the panel's, which has no baseline files
 	if err != nil {
 		return err
 	}
@@ -645,19 +652,19 @@ func dirtyPrompt(ctx context.Context, h Handoff, status string) string {
 	if len(diff) > maxAssessDiff {
 		diff, cut = diff[:maxAssessDiff], ", cut short"
 	}
-	return fmt.Sprintf(assessPrompt, h.Branch, h.Title, h.Reason, log, status, cut, diff, untrackedText(ctx, h.Worktree))
+	return fmt.Sprintf(assessPrompt, h.Branch, h.Title, h.Reason, log, status, cut, diff, untrackedText(ctx, h.Worktree, h.Untracked))
 }
 
 // untrackedText is the content of small untracked text files, which git diff
 // doesn't show. Only regular files: a symlink could point anywhere on the host.
-func untrackedText(ctx context.Context, dir string) string {
+func untrackedText(ctx context.Context, dir string, skip []string) string {
 	out, err := proc.Run(ctx, dir, "git", "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
 		return ""
 	}
 	var sb strings.Builder
 	for _, f := range strings.Split(out, "\x00") {
-		if f == "" {
+		if f == "" || slices.Contains(skip, f) {
 			continue
 		}
 		fi, err := os.Lstat(filepath.Join(dir, f))

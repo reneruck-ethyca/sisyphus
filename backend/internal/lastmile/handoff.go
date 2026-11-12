@@ -214,6 +214,11 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff, stackParent string) e
 	if status != "" {
 		return invalid("worktree isn't clean: commit or discard its changes first")
 	}
+	others, err := git("ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return err
+	}
+	h.Untracked = slices.DeleteFunc(strings.Split(others, "\x00"), func(f string) bool { return f == "" })
 	ahead, err := git("rev-list", "--count", baseRef+"..HEAD")
 	if err != nil {
 		return err

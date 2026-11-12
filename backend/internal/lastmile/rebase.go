@@ -201,7 +201,7 @@ func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *
 	}
 	defer unlock()
 	dir := h.Worktree
-	if st, err := proc.Run(ctx, dir, "git", "status", "--porcelain"); err != nil || st != "" {
+	if st, err := status(ctx, h); err != nil || st != "" {
 		return "rebase: worktree has uncommitted changes"
 	}
 	pre, err := worktree.HeadSHA(ctx, dir)
@@ -213,7 +213,7 @@ func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *
 		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
 		_, _ = proc.Run(c, dir, "git", "rebase", "--abort")
-		if err := worktree.Reset(c, dir, pre); err != nil {
+		if err := reset(c, h, pre); err != nil {
 			slog.Warn("lastmile rebase rollback failed", "id", h.ID, "err", err)
 		}
 	}
@@ -321,7 +321,7 @@ func (m *Manager) resolveStop(ctx context.Context, h Handoff, r restackSpec, rb,
 			if why := decode("conflict agent", raw, &out); why != "" {
 				return why
 			}
-			if why := m.checkResolution(ctx, dir, files, out, before); why != "" {
+			if why := m.checkResolution(ctx, dir, files, h.Untracked, out, before); why != "" {
 				return why
 			}
 			add := append([]string{"--literal-pathspecs", "add", "--"}, files...)
@@ -342,7 +342,7 @@ var markers = regexp.MustCompile(`(?m)^(<<<<<<<|>>>>>>>|=======\r?$)`)
 // checkResolution holds the agent's edits to the write path's rules (design §5): it
 // edited only the files in conflict, none is protected, nested or a link, and no
 // conflict marker is left. A non-empty result is why the resolution is refused.
-func (m *Manager) checkResolution(ctx context.Context, dir string, files []string, res AgentResult, before map[string]stamp) string {
+func (m *Manager) checkResolution(ctx context.Context, dir string, files, untracked []string, res AgentResult, before map[string]stamp) string {
 	ignored, err := ignoredChanges(ctx, dir, before)
 	if err != nil {
 		return "listing ignored files: " + err.Error()
@@ -363,7 +363,7 @@ func (m *Manager) checkResolution(ctx context.Context, dir string, files []strin
 		edited = append(edited, strings.Split(out, "\x00")...)
 	}
 	for _, f := range edited {
-		if f != "" && !slices.Contains(files, f) {
+		if f != "" && !slices.Contains(files, f) && !slices.Contains(untracked, f) {
 			return "agent edited a file that wasn't in conflict: " + f
 		}
 	}
