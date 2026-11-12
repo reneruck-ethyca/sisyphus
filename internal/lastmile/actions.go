@@ -39,33 +39,45 @@ func (m *Manager) Resume(ctx context.Context, id string) (Handoff, error) {
 		if h.State != StateNeedsHuman {
 			return invalid("handoff %s is %s, not needs-human", id, h.State)
 		}
-		if h.EscalatedBy == "" { // escalated for no counted reason: start every trigger afresh
-			h.FixRounds = nil
-		} else {
-			delete(h.FixRounds, h.EscalatedBy)
-		}
-		// The review counter went with delete(FixRounds, EscalatedBy) above; the cursor stays, so
-		// what the human dealt with isn't handed to an agent again.
-		if h.EscalatedBy == TriggerCI || h.EscalatedBy == "" {
-			h.FixedFailures = nil // else the failure that sent it here would escalate again at once
-		}
-		h.EscalatedBy, h.PrevState, h.Error = "", "", ""
-		m.setState(h, StatePROpen, "")
+		m.unescalate(h)
 		return nil
 	})
 	if err != nil {
 		return h, err
 	}
-	if h.PRNumber != 0 {
-		err := m.GH.EditPR(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, github.PREdit{RemoveLabels: []string{m.cfg.LastMile.NeedsHumanLabel}})
-		if err != nil { // the label may be gone already; the state is what matters
-			slog.Warn("lastmile removing needs-human label failed", "id", id, "err", err)
-		}
-	}
+	m.dropNeedsHumanLabel(ctx, h)
 	slog.Info("lastmile resumed", "id", id)
 	m.changed()
 	m.Kick()
 	return h, nil
+}
+
+// unescalate takes h out of needs-human: the round counter of the trigger that
+// escalated starts again, and the next tick reads the PR afresh from pr-open.
+func (m *Manager) unescalate(h *Handoff) {
+	if h.EscalatedBy == "" { // escalated for no counted reason: start every trigger afresh
+		h.FixRounds = nil
+	} else {
+		delete(h.FixRounds, h.EscalatedBy)
+	}
+	// The review counter went with delete(FixRounds, EscalatedBy) above; the cursor stays, so
+	// what the human dealt with isn't handed to an agent again.
+	if h.EscalatedBy == TriggerCI || h.EscalatedBy == "" {
+		h.FixedFailures = nil // else the failure that sent it here would escalate again at once
+	}
+	h.EscalatedBy, h.PrevState, h.Error = "", "", ""
+	h.Dirty = nil
+	m.setState(h, StatePROpen, "")
+}
+
+func (m *Manager) dropNeedsHumanLabel(ctx context.Context, h Handoff) {
+	if h.PRNumber == 0 {
+		return
+	}
+	err := m.GH.EditPR(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, github.PREdit{RemoveLabels: []string{m.cfg.LastMile.NeedsHumanLabel}})
+	if err != nil { // the label may be gone already; the state is what matters
+		slog.Warn("lastmile removing needs-human label failed", "id", h.ID, "err", err)
+	}
 }
 
 // Cancel ends TLM's care of a handoff, freeing its branch. GitHub is left as it is.

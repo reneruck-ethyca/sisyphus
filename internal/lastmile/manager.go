@@ -30,8 +30,13 @@ type Manager struct {
 	// app uses it to refresh the dashboard.
 	OnChange func()
 
-	running runs           // agent runs in flight, by handoff id
-	wg      sync.WaitGroup // their goroutines
+	// Assess asks a model about a dirty worktree (dirty.go); nil turns that off.
+	Assess    func(ctx context.Context, prompt string) (string, error)
+	assessing sync.Map // handoff ids with an assessment in flight
+
+	running runs            // agent runs in flight, by handoff id
+	life    context.Context // Run's context, for runs started outside a tick; guarded by mu
+	wg      sync.WaitGroup  // their goroutines
 
 	mu       sync.Mutex     // guards handoffs, cursors and the file
 	handoffs []Handoff      // oldest first

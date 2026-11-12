@@ -36,6 +36,7 @@ func Terminal(state string) bool {
 const (
 	TriggerCI       = "ci"
 	TriggerReview   = "review"
+	TriggerDirty    = "dirty"    // a human handed a dirty worktree to an agent from the dashboard
 	TriggerConflict = "conflict" // rebases, clean or not; the rounds counted are the conflict agent's runs
 )
 
@@ -148,6 +149,7 @@ type Handoff struct {
 	Events []Event `json:"events,omitempty"` // the last maxEvents things that happened, oldest first
 
 	Snapshot *Snapshot `json:"snapshot,omitempty"` // the PR as of the last tick
+	Dirty    *Dirty    `json:"dirty,omitempty"`    // needs-human with uncommitted changes in the worktree: what, and advice on them
 	Shadow   *Verdict  `json:"shadow,omitempty"`   // the merge policy's latest verdict (design §7); refreshed when it changes, else hourly
 	ReadyAt  time.Time `json:"ready_at,omitempty"` // the PR was first seen out of draft: where time in review starts
 

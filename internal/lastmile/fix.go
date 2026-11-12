@@ -165,6 +165,10 @@ func (m *Manager) agentFinished(ctx context.Context, h *Handoff) {
 	a, _ := m.running.get(h.ID)
 	m.running.drop(h.ID)
 	a.fx.apply(h)
+	if a.trigger == TriggerDirty {
+		m.dirtyAgentFinished(ctx, h, a.reason)
+		return
+	}
 	if a.reason != "" {
 		h.EscalatedBy = a.trigger
 		m.escalate(ctx, h, a.reason)

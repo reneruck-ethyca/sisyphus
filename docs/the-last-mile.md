@@ -147,6 +147,17 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   - a diff-size cap
   - the repo's fast lint and tests (optional)
   - commit messages generated from the agent's summary, with a `TLM:` prefix
+- **Gitignored files are the agent's only from setup on.** The container runs the repo's setup
+  (`uv sync`, `npm install`, …) before the agent, and those installs write ignored files into the
+  worktree (npm workspaces' nested `node_modules`). The host snapshots ignored files once setup has
+  finished (the container waits for it) and adds what setup left under `node_modules/` to the
+  baseline. Everything else setup writes is still held against the run: setup runs the branch's
+  install scripts, which an earlier agent round may have changed. A reason names at most 20 paths and counts the rest.
+- **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
+  flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
+  to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
+  sisyphus on the same state dir refuses to start (`sisyphus.lock`), since every instance rewrites
+  the whole state files; running several instances is reneruck-ethyca/sisyphus#1.
 - **Replies are posted in one batch from the host.**
 - **Bot comments get the same treatment as human ones, with a cap.** TLM replies to review bots
   (sisyphus, ethycabot, others) but at most 3 replies per bot thread; after that it stops replying
@@ -165,6 +176,48 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   - a failure seen twice with the same fingerprint (job plus error signature) → needs-human
   - a reviewer re-raising a thread TLM already "fixed" → needs-human
 - **Escalation:** a `tlm:needs-human` label, the `needs-human` notify event, and a dashboard banner.
+- **Dirty worktree panel:** while a handoff is needs-human, each tick checks its worktree with `git status
+  --porcelain`. On a new status sisyphus lists the files itself, on that same tick: path, porcelain code
+  (M, A, D, R, ??), and `+added −removed` from `git diff --numstat HEAD`, or for an untracked file its line
+  count, binary when its first 8 KB hold a NUL; untracked directories are expanded (`-uall`), at most 500
+  rows. A clean worktree or `resume` clears it. A stored `dirty` with no `files` (the earlier, options-based
+  format) counts as new and is rebuilt.
+
+  No model is in the action path. The page shows a files-first panel in place of the needs-human notice and
+  the head's Resume/Cancel buttons (these become links at its foot): a table of the files, each ticked by
+  default, each path expanding to its diff; a commit message box; and three actions, each taking the status
+  hash the page was rendered for and answering 409 if the worktree's status has moved on since:
+  - `POST /api/handoffs/{id}/dirty/commit {hash, paths, message}`: every path must be a listed file, at least
+    one; the message is trimmed, non-empty, at most 2000 bytes. Runs the write path's checks (protected
+    paths, nested repos, symlinks, binaries; not the line cap, it's the human's work) before staging anything,
+    adds and commits only those paths with hooks off, pushes, resumes. Unlike an agent's commit it never resets
+    the worktree: a failure unstages, or uncommits after a failed push, and leaves the files as they were.
+  - `POST …/dirty/stash {hash}`: `git stash push -u -m "tlm: <branch> WIP"`. No resume; the page then offers
+    the usual Resume.
+  - `POST …/dirty/leave {hash}`: sets `dismissed`, collapsing the panel to a one-line banner until the status
+    changes.
+  - `POST …/dirty/agent {hash, message, task}`: hands the dirt to an agent. Every listed file is committed
+    locally with the message (the same checks as commit, not pushed), and a fix-agent run starts from that
+    "WIP commit" with the human's task (empty: finish it, make the tests pass, drop what doesn't belong). The
+    agent's prompt shows the WIP commit, the branch's diff and the task. Since the run starts at the WIP
+    commit, the usual write path only judges the agent's own edits. Pushed (both commits, or the WIP alone if
+    the agent changed nothing) → the handoff resumes. Otherwise the WIP commit is unwrapped (`reset --mixed
+    HEAD~1`, only while it's the unpushed head), the changes are uncommitted again, and the reason says so.
+    `dirty.wip` records the commit for the run's length; a tick that finds it as a clean worktree's head (the
+    run was lost to a restart) unwraps it. While the run lasts the page shows "agent running" in place of
+    the panel.
+
+  `GET …/dirty/diff?path=` (path must be a listed file) is `git diff HEAD -- path` for a tracked file, the
+  content of an untracked regular file, cut at 200 KB, or "binary file". Actions run under the worktree lock
+  and each is a `dirty` timeline event. Like resume and cancel, none take a token yet.
+
+  Haiku only writes text, off the tick, once per distinct status (`claude -p --json-schema`, no tools, no
+  settings): the porcelain list, the last five commits, `git diff HEAD` (cut at 40 KB) and small untracked
+  text files (regular files only, ≤8 KB each, ≤20 KB in all) go in, marked as data, not instructions. It
+  answers `{summary, message}`: ≤60 words on what the changes are and a ≤72-character commit subject. The
+  panel works without it: "Analysing…" while it runs, "Couldn't summarise" on an error. Its subject fills the
+  message box only when the human hasn't typed in it; the draft and the ticks survive the page's reloads in
+  `sessionStorage`, keyed by handoff and status hash.
 
 ## 6. Requesting reviewers
 
@@ -175,8 +228,10 @@ Human reviewers come from the first source that has any:
    filtering.
 2. the roster: a global `lastmile.reviewers.roster: [alice, bob, …]` with
    `lastmile.reviewers.count: 1`, optionally overridden per repo. TLM picks round-robin, skipping
-   the PR author, and keeps the cursor in its state store.
-3. nobody, with a dashboard warning
+   the PR author, and keeps the cursor in its state store. Humans already on the PR (requested, or
+   with a standing review) count toward the count and aren't picked again, so an adopted PR is only
+   topped up.
+3. nobody, with a dashboard warning (not when the PR already has humans)
 
 **When.** ethycabot is requested when the PR is ready for review. Humans are requested once, when CI
 first goes green, so nobody is pinged on a red PR. After that, **GitHub is the source of truth**:
@@ -325,3 +380,55 @@ None right now.
   its state and Install / Update / Uninstall buttons. Actions run in the background (`POST
   /api/skill/{agent}/{install|uninstall}`, `GET /api/skill`); the open page follows them, other pages pick the
   result up on their next load. The marker is re-read after each action.
+- **2026-11-06:** Handing off a branch that already has an open PR: the PR is adopted as before, and
+  now (a) its existing reviews, comments and threads are history, not feedback: the review cursor
+  starts past them, and (b) humans already requested or with a standing review count toward the
+  roster count. Adopting still marks a draft PR ready unless the handoff asked for `--draft` (kept
+  on purpose). Title, body and labels of an adopted PR are left as they are.
+- **2026-11-06:** Gitignored-file check moved after container setup. A review round on fidesplus#7136
+  went to needs-human because the setup's `npm install` in `clients/` rewrote workspace `node_modules`
+  (about 15k files), which counted as the agent's change and were deleted. The snapshot is now taken
+  when setup reports done; the container waits for it. Reasons list at most 20 paths (the full list
+  had made the handoff 2.4 MB). The worktree lock gained an flock under the state dir after several
+  sisyphus processes ran overlapping agents on one worktree.
+- **2026-11-08:** A second sisyphus on the same state dir now exits at startup (flock on
+  `<state dir>/sisyphus.lock`; `-shell` and `-eval` are exempt). Running several instances is tracked
+  in reneruck-ethyca/sisyphus#1.
+- **2026-11-08:** The post-setup baseline covers only `node_modules/`, after a security review: taking
+  setup's writes wholesale would let an install script an agent committed earlier plant `.envrc` or
+  `.venv/bin` files unflagged. `node_modules/.bin` stays trusted; protecting `package.json` scripts
+  would close that.
+- **2026-11-09:** Advice on dirty worktrees (§5, "Dirty worktree advice"). fidesplus#7136 sat in needs-human
+  with "worktree has uncommitted changes", and the page gave no hint what the changes were or that `resume`
+  would only bounce back. Handoffs gain `dirty` (status, advice, error); the assessment runs off the tick,
+  host-side, once per distinct `git status`, and only for needs-human handoffs. The handoff page also says
+  what `resume` does, and the timeline shows state changes as coloured chips.
+- **2026-11-09:** Dirty worktree advice becomes options the human can run (§5). Free-text advice told people
+  which git commands to type, built from an untrusted diff. `dirty` now holds `{summary, kind, options}` from
+  a JSON schema; the model only picks an action from a closed set and its parameters, sisyphus validates
+  them, builds the command and runs it on a click, with a status hash so a changed worktree gets 409 rather
+  than a stale action. Human commits get their own path, `commitHuman`, because `commitAgentWork` resets the
+  worktree on a refusal, which would destroy the work the human wanted committed. `changedLines` takes a
+  pathspec so the binary check can cover just the files being committed. Small untracked files now reach
+  the model too; Haiku couldn't see them before. No `agent` action yet, and the endpoint has no token, like
+  resume and cancel.
+- **2026-11-09:** The dirty-worktree options give way to a deterministic, files-first panel (§5). The model
+  no longer picks actions: sisyphus lists the files and line counts itself and offers commit (of the ticked
+  files, with the human's message), stash all, and leave it; Haiku only writes an optional summary and a
+  suggested commit subject. Why: no model in the action path, so nothing it writes can steer what runs; the
+  panel appears on the tick that sees the dirt instead of after the model answers; and the option schema,
+  its validation, the gitignore and discard actions and the command previews go, which makes the code
+  smaller. `dirty` gains `files` and `message` and loses `kind` and `options`; the action endpoint becomes
+  `dirty/commit|stash|leave` plus `dirty/diff`, all keyed by the status hash.
+- **2026-11-09:** A tick waits while GitHub hasn't caught up with a push. Committing from the dirty-worktree
+  panel on fidesplus#7136 pushed `56b56f1`, Resume kicked a tick four seconds later, GitHub still reported
+  `f3f1233`, and the review agent started against it and escalated ("worktree is at …, the PR at …"). Now,
+  when the worktree's HEAD equals `origin/<branch>` and descends from the PR's head, the tick does nothing
+  and tries again next time. Any other mismatch still escalates.
+- **2026-11-09:** Dirty worktree → agent (`dirty/agent`). Cleaning up a worktree by hand was the only way out
+  of "uncommitted changes" short of committing untested work. The agent needs a clean tree, because
+  `runAgent` counts everything that differs from HEAD as the agent's and resets to it on failure; so the
+  human's changes become a local WIP commit first and the run starts from there, and a failure unwraps it.
+  The run uses the `dirty` trigger; it isn't counted against `max_fix_rounds`, since a human starts each one.
+  `Resume`'s state reset is shared with the run's success path (`unescalate`). Model and container are the
+  handoff's agent, as for fix rounds. Token auth on the dashboard's actions stays out of scope.

@@ -124,6 +124,7 @@ func main() {
 		if rev != nil { // a nil *Reviewer in the interface would not be nil
 			lm.Tasks = rev
 		}
+		lm.Assess = lastmile.ClaudeAssess
 		svc.UseLastMile(lm)
 	}
 	slog.Info("sisyphus starting", "user", cfg.User, "org", cfg.Org, "interval", cfg.Interval.Duration, "state", cfg.StateFile)

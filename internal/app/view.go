@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/lastmile"
@@ -18,6 +19,7 @@ const (
 	ToneNeutral = "neutral" // commented, not posted, cancelled
 	ToneLive    = "live"    // reviewing or queued
 	ToneBad     = "bad"     // needs a person
+	ToneOpen    = "open"    // PR open, TLM has it in hand
 )
 
 // A tracked PR's sync health (PRView.Health).
@@ -132,8 +134,38 @@ func HandoffTone(state string) string {
 		return ToneBad
 	case lastmile.StateCIGreen, lastmile.StateApproved, lastmile.StateMerged:
 		return ToneOK
+	case lastmile.StatePROpen:
+		return ToneOpen
 	}
 	return ToneNeutral
+}
+
+// HandoffIcon is a one-glyph cue for a handoff state, matching its tone.
+func HandoffIcon(state string) string {
+	switch state {
+	case lastmile.StateMerged:
+		return "✓✓"
+	case lastmile.StateCIGreen, lastmile.StateApproved, lastmile.StateMergeable:
+		return "✓"
+	case lastmile.StateCIRed, lastmile.StateConflict:
+		return "✗"
+	case lastmile.StateNeedsHuman:
+		return "!"
+	case lastmile.StateClosed, lastmile.StateCancelled:
+		return "⊘"
+	case lastmile.StateCIRunning, lastmile.StateAwaitingReview:
+		return "…"
+	}
+	return "→"
+}
+
+// StateEvent is a "state" timeline event split into the state entered and why.
+type StateEvent struct{ State, Reason string }
+
+// SplitStateEvent splits a "state" event's text, written as "state" or "state: reason".
+func SplitStateEvent(text string) StateEvent {
+	st, why, _ := strings.Cut(text, ": ")
+	return StateEvent{st, why}
 }
 
 var reasons = map[string]string{review.ReasonNew: "PR first seen", review.ReasonCommits: "new commits",

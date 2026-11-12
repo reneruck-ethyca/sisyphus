@@ -395,3 +395,25 @@ func TestCommitKeepsConcurrentReviewerEdit(t *testing.T) {
 		t.Errorf("handoff = %+v", h)
 	}
 }
+
+func TestTickWaitsForGitHubToSeeAPush(t *testing.T) {
+	tasks := &fakeTasks{result: okFix}
+	m, gh, id, head := redFixture(t, tasks)
+	wt := m.must(t, id).Worktree
+	os.WriteFile(filepath.Join(wt, "pushed.txt"), []byte("x"), 0o644)
+	gittest.Git(t, wt, "add", "pushed.txt")
+	gittest.Git(t, wt, "commit", "-qm", "pushed by a human")
+	gittest.Git(t, wt, "push", "-q")
+	m.tickWait(t)
+	m.tickWait(t)
+	if h := m.must(t, id); h.State == StateNeedsHuman || tasks.n() != 0 {
+		t.Fatalf("acted on GitHub's stale head %.8s: %s %q, %d runs", head, h.State, h.Reason, tasks.n())
+	}
+	snap := gh.Snapshots[prRef.Key()]
+	snap.HeadSHA = gittest.Git(t, wt, "rev-parse", "HEAD")
+	gh.Snapshots[prRef.Key()] = snap
+	m.tickWait(t)
+	if tasks.n() != 1 {
+		t.Fatalf("no fix run once GitHub caught up: %d", tasks.n())
+	}
+}

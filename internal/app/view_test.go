@@ -123,7 +123,7 @@ func TestHandoffTone(t *testing.T) {
 	for state, want := range map[string]string{
 		lastmile.StateCIRed: ToneBad, lastmile.StateConflict: ToneBad, lastmile.StateNeedsHuman: ToneBad,
 		lastmile.StateCIGreen: ToneOK, lastmile.StateApproved: ToneOK, lastmile.StateMerged: ToneOK,
-		lastmile.StatePROpen: ToneNeutral, lastmile.StateClosed: ToneNeutral,
+		lastmile.StatePROpen: ToneOpen, lastmile.StateClosed: ToneNeutral,
 	} {
 		if got := HandoffTone(state); got != want {
 			t.Errorf("%s: %s, want %s", state, got, want)

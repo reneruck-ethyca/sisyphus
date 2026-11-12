@@ -113,9 +113,14 @@ func changedFiles(ctx context.Context, dir string) ([]string, error) {
 }
 
 // changedLines counts added plus removed lines of the change, untracked files
-// included. A binary file has no line count to cap, so it's refused (binary).
+// included, limited to files when given. A binary file has no line count to cap,
+// so it's refused (binary).
 func changedLines(ctx context.Context, dir string, files []string) (n int, binary string, err error) {
-	out, err := proc.Run(ctx, dir, "git", "diff", "--numstat", "--no-renames", "HEAD")
+	var spec []string
+	if files != nil {
+		spec = append([]string{"--"}, files...)
+	}
+	out, err := proc.Run(ctx, dir, "git", append([]string{"diff", "--numstat", "--no-renames", "HEAD"}, spec...)...)
 	if err != nil {
 		return 0, "", err
 	}
@@ -131,7 +136,7 @@ func changedLines(ctx context.Context, dir string, files []string) (n int, binar
 		d, _ := strconv.Atoi(f[1])
 		n += a + d
 	}
-	tracked, err := proc.Run(ctx, dir, "git", "ls-files", "-z", "--others", "--exclude-standard")
+	tracked, err := proc.Run(ctx, dir, "git", append([]string{"ls-files", "-z", "--others", "--exclude-standard"}, spec...)...)
 	if err != nil {
 		return 0, "", err
 	}
@@ -289,7 +294,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 			return reject("%s", why)
 		}
 	}
-	lines, binary, err := changedLines(ctx, h.Worktree, files)
+	lines, binary, err := changedLines(ctx, h.Worktree, nil)
 	if err != nil {
 		return "", err
 	}

@@ -899,6 +899,32 @@ func TestHandoffPageFull(t *testing.T) {
 	}
 }
 
+// A needs-human handoff with a dirty worktree shows the files panel instead of the notice and the head buttons.
+func TestHandoffPageDirty(t *testing.T) {
+	evil := `<img src=x onerror=alert(1)>`
+	for _, dismissed := range []bool{false, true} {
+		h := lastmile.Handoff{ID: "h-1", Repo: "o/r", State: lastmile.StateNeedsHuman, Reason: "uncommitted changes", PRNumber: 7, Branch: "feature/x",
+			Dirty: &lastmile.Dirty{Status: "?? x", Dismissed: dismissed, Message: "Add x", Files: []lastmile.DirtyFile{
+				{Path: "a.go", Code: "M", Add: 3, Del: 1}, {Path: evil, Code: "??", Binary: true}}}}
+		var buf bytes.Buffer
+		if err := pages.ExecuteTemplate(&buf, "handoff.html", handoffPage{V: lastmile.View{Handoff: h}}); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if strings.Contains(out, evil) || strings.Contains(out, `class="notice`) {
+			t.Errorf("dismissed=%v: unescaped path or the red notice", dismissed)
+		}
+		for _, want := range []string{`id="dirty-panel"`, `data-path="a.go"`, "+3", "−1", "binary", `data-suggest="Add x"`, "Pushes to #7", "Resume as is", `id="dirty-agent"`, `id="dirty-task"`} {
+			if !strings.Contains(out, want) {
+				t.Errorf("dismissed=%v: page lacks %q", dismissed, want)
+			}
+		}
+		if got := strings.Contains(out, "2 uncommitted files block TLM"); got != dismissed {
+			t.Errorf("dismissed=%v: banner shown %v", dismissed, got)
+		}
+	}
+}
+
 // The landing dashboard lists what needs you from handoffs and review verdicts, and escapes what GitHub supplies.
 func TestHTTPHome(t *testing.T) {
 	evil := `<script>alert(1)</script>`

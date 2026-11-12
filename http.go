@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -64,6 +65,8 @@ var pages = template.Must(template.New("").Funcs(template.FuncMap{
 	"reason":        app.ReasonLabel,
 	"dur":           app.RunDuration,
 	"stateTone":     app.HandoffTone,
+	"stateIcon":     app.HandoffIcon,
+	"stateEvent":    app.SplitStateEvent,
 	"short":         func(sha string) string { return sha[:min(len(sha), 8)] },
 	"pct":           func(f float64) string { return fmt.Sprintf("%.0f%%", f*100) },
 	"warnAt":        func(share float64) float64 { return share * 0.75 }, // the budget meter turns red past this
@@ -371,6 +374,46 @@ func newHandler(srv server) http.Handler {
 			writeLastMile(w, r, http.StatusOK, h, err)
 		}))
 	}
+	// The dirty-worktree panel's actions; hash is the Dirty.Hash the page was rendered for (409 if it moved on).
+	mux.HandleFunc("POST /api/handoffs/{id}/dirty/{action}", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		var body struct {
+			Hash    string   `json:"hash"`
+			Paths   []string `json:"paths"`
+			Message string   `json:"message"`
+			Task    string   `json:"task"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		id := r.PathValue("id")
+		var h lastmile.Handoff
+		var err error
+		switch r.PathValue("action") {
+		case "commit":
+			h, err = lm.DirtyCommit(r.Context(), id, body.Hash, body.Paths, body.Message)
+		case "stash":
+			h, err = lm.DirtyStash(r.Context(), id, body.Hash)
+		case "agent":
+			h, err = lm.DirtyAgent(r.Context(), id, body.Hash, body.Message, body.Task)
+		case "leave":
+			h, err = lm.DirtyLeave(r.Context(), id, body.Hash)
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		writeLastMile(w, r, http.StatusOK, h, err)
+	}))
+	mux.HandleFunc("GET /api/handoffs/{id}/dirty/diff", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		diff, err := lm.DirtyDiff(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"))
+		if err != nil {
+			writeLastMile(w, r, http.StatusOK, nil, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff") // it's the worktree's content, maybe HTML
+		_, _ = io.WriteString(w, diff)
+	}))
 	mux.HandleFunc("POST /api/run", func(w http.ResponseWriter, r *http.Request) {
 		svc.RunNow()
 		w.WriteHeader(http.StatusAccepted)
@@ -640,6 +683,8 @@ func writeLastMile(w http.ResponseWriter, r *http.Request, status int, v any, er
 		http.NotFound(w, r)
 	case errors.As(err, &invalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, lastmile.ErrStale):
+		http.Error(w, err.Error(), http.StatusConflict)
 	case err != nil:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	default:

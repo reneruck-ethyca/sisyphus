@@ -51,6 +51,7 @@ button:disabled { opacity: .5; cursor: default; }
 .chip.ok { background: var(--ok-bg); color: var(--ok); }
 .chip.changes { background: var(--changes-bg); color: var(--changes); }
 .chip.live { background: var(--live-bg); color: var(--live); }
+.chip.open { background: var(--live-bg); color: var(--live); }
 .chip.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
 .chip.bad { background: var(--bad-bg); color: var(--bad); }
 @keyframes pulse { 50% { opacity: .3; } }
@@ -271,3 +272,44 @@ main.home section { min-width: 0; }
   .list.hl > li > .src { display: none; }
   .list.hl > li > .t { grid-column: 2; }
 }
+
+/* Handoff detail: status column on the right, history on the left; side comes first in the DOM so it stacks on top on phones. */
+main.wide { max-width: 1220px; width: 100%; margin: 0 auto; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 24px; align-items: start; }
+.split > div { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.split > .side { grid-column: 2; grid-row: 1; }
+.split > .mainc { grid-column: 1; grid-row: 1; }
+@media (max-width: 960px) {
+  .split { grid-template-columns: 1fr; }
+  .split > .side, .split > .mainc { grid-column: 1; grid-row: auto; }
+}
+/* Dirty-worktree panel: the files on the left, what to do about them on the right. */
+.dirty { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px; border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.dirty p { margin: 0; }
+.dirty-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.dirty-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 760px) { .dirty-cols { grid-template-columns: 1fr; } }
+.dirty table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dirty th, .dirty td { padding: 4px 6px; border-bottom: 1px solid var(--line2); text-align: left; vertical-align: baseline; }
+.dirty th { color: var(--muted); font-weight: 600; }
+.dirty td:first-child, .dirty th:first-child { width: 1%; }
+.dirty td.num { text-align: right; white-space: nowrap; font: 12px ui-monospace, monospace; }
+.dirty-path { padding: 0; border: 0; background: none; color: var(--fg); text-align: left; font: 12.5px ui-monospace, monospace; overflow-wrap: anywhere; }
+.dirty-path:hover { color: var(--accent); text-decoration: underline; }
+.badge { display: inline-block; min-width: 24px; padding: 0 4px; border-radius: 4px; text-align: center; font: 600 11px/1.6 ui-monospace, monospace; }
+.badge.m { background: var(--live-bg); color: var(--live); }
+.badge.a { background: var(--ok-bg); color: var(--ok); }
+.badge.d { background: var(--bad-bg); color: var(--bad); }
+.dirty .diffrow td { padding: 0 0 8px; }
+.dirty pre.diff { margin: 0; max-height: 420px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--code); font: 12px/1.45 ui-monospace, monospace; white-space: pre; }
+.diff .add { color: var(--ok); } .diff .del { color: var(--bad); }
+.dirty-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dirty textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: 13px ui-monospace, monospace; resize: vertical; }
+.dirty .note { font-size: 12px; }
+.dirty-f { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding-top: 10px; border-top: 1px solid var(--line2); font-size: 13px; }
+.analysing { animation: pulse 1.4s ease-in-out infinite; }
+.dirty-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; border-radius: 10px; background: var(--bad-bg); color: var(--bad); font-size: 13px; }
+.dirty-banner > span:first-child { font-weight: 600; }
+.dirty-agent { display: flex; flex-direction: column; gap: 6px; }
+.dirty-agent[open] > summary { margin-bottom: 6px; }
+.dirty-agent label { display: block; font-size: 13px; }

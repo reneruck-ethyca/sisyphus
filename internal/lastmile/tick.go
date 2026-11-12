@@ -13,10 +13,14 @@ import (
 
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/proc"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 // Run ticks every lastmile.interval and on Kick until ctx is done.
 func (m *Manager) Run(ctx context.Context) {
+	m.mu.Lock()
+	m.life = ctx
+	m.mu.Unlock()
 	t := time.NewTicker(m.cfg.LastMile.Interval.Duration)
 	defer t.Stop()
 	for {
@@ -168,6 +172,10 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 		h.ReadyAt = m.now()
 	}
 	if h.State == StateNeedsHuman { // a person has it; only merged and closed are watched
+		m.checkDirty(ctx, h)
+		return nil
+	}
+	if m.githubLagging(ctx, *h, s.Head) {
 		return nil
 	}
 
@@ -307,5 +315,27 @@ func (m *Manager) commit(before, after Handoff) bool {
 	if err := m.saveLocked(); err != nil {
 		slog.Error("lastmile save failed", "err", err)
 	}
+	return true
+}
+
+// githubLagging says the worktree holds a push GitHub doesn't report yet: HEAD
+// is what origin has for the branch and descends from the PR's head. Acting on
+// the stale head now would only trip runAgent's head check, so the tick waits.
+func (m *Manager) githubLagging(ctx context.Context, h Handoff, prHead string) bool {
+	if h.Worktree == "" || prHead == "" {
+		return false
+	}
+	local, err := worktree.HeadSHA(ctx, h.Worktree)
+	if err != nil || local == prHead {
+		return false
+	}
+	pushed, err := proc.Run(ctx, h.Worktree, "git", "rev-parse", "--verify", "-q", "refs/remotes/origin/"+h.Branch)
+	if err != nil || pushed != local {
+		return false
+	}
+	if _, err := proc.Run(ctx, h.Worktree, "git", "merge-base", "--is-ancestor", prHead, local); err != nil {
+		return false
+	}
+	slog.Info("lastmile waiting for GitHub to see the push", "id", h.ID, "local", local[:min(len(local), 12)], "pr", prHead[:min(len(prHead), 12)])
 	return true
 }

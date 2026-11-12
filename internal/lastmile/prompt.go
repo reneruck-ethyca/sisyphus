@@ -188,3 +188,60 @@ type conflictPromptData struct {
 	Diff                string
 	DiffTruncated       bool
 }
+
+// wipPrompt is what the agent finishing a human's work in progress is told. The
+// task is the human's own words from the dashboard.
+var wipPrompt = template.Must(template.New("wip").Parse(`You are finishing work in progress on a pull request branch that was handed off to an automation.
+
+## The pull request
+
+Title: {{.Title}}
+Branch: {{.Branch}} (base: {{.Base}})
+
+{{.Body}}
+
+## The work in progress
+
+Someone left these changes uncommitted. They are now the last commit on the branch (git show HEAD):
+
+` + "```diff" + `
+{{.WIP}}
+` + "```" + `
+
+## The change so far (git diff origin/{{.Base}}...HEAD, the commit above included{{if .DiffTruncated}}, truncated{{end}})
+
+` + "```diff" + `
+{{.Diff}}
+` + "```" + `
+
+## Your task
+
+{{.Task}}
+
+## Rules
+
+- Edit files in the working directory only. Do not run git. Do not run gh or call GitHub. Do not commit, push or stage.
+- Build on the work in progress; don't undo it unless the task says so. Do not touch CI workflows, migrations or lockfiles.
+- If the task can't be done from here, or the work in progress looks wrong for this pull request, do not guess: set "escalate" to true and say why. Nothing is pushed then.
+- When you are done, write /out/result.json:
+
+` + "```json" + `
+{"summary": "one line, imperative, what you changed",
+ "confidence": "low|medium|high",
+ "escalate": false,
+ "escalate_reason": ""}
+` + "```" + `
+`))
+
+func renderWIPPrompt(d wipPromptData) (string, error) {
+	var sb strings.Builder
+	err := wipPrompt.Execute(&sb, d)
+	return sb.String(), err
+}
+
+type wipPromptData struct {
+	Title, Body, Branch, Base string
+	WIP, Task                 string
+	Diff                      string
+	DiffTruncated             bool
+}
