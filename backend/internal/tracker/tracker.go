@@ -325,6 +325,9 @@ func (t *Tracker) forget(ctx context.Context, id, reason string) error {
 	if tr == nil {
 		return nil
 	}
+	// Stop its queued and running reviews first: waiting out a review here would
+	// hold t.mu for its whole run, and let it post for a PR being forgotten.
+	t.Events.Dropped(*tr, reason)
 	unlock, err := t.Locks.Lock(ctx, id)
 	if err != nil {
 		return fmt.Errorf("waiting for %s's worktree: %w", id, err)

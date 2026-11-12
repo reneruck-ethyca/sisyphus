@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -457,4 +458,25 @@ func TestTickClassifiesBeforeAnnouncing(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	rec.want(t, "tracked a")
+}
+
+// releaser stands in for a review that lets go of the worktree once dropped.
+type releaser struct {
+	nopEvents
+	release func()
+}
+
+func (r releaser) Dropped(Tracked, string) { r.release() }
+
+// Untracking a PR under review stops the review instead of waiting for it to
+// end (holding the tracker lock all the while, and letting it post).
+func TestUntrackStopsReviewInsteadOfWaiting(t *testing.T) {
+	tr := newTestTracker(t, &github.Fake{}, &Tracked{PRRef: refA})
+	unlock, _ := tr.Locks.TryLock(refA.Key())
+	tr.Events = releaser{release: sync.OnceFunc(unlock)}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := tr.Untrack(ctx, refA.Key()); err != nil {
+		t.Fatal(err)
+	}
 }
