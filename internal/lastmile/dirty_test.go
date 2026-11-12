@@ -153,6 +153,20 @@ func TestDirtyCommitSomePathsPushesAndResumes(t *testing.T) {
 	}
 }
 
+// A file named like a pathspec glob commits only itself, not every file it would match.
+func TestDirtyCommitTakesPathsLiterally(t *testing.T) {
+	m, id, wt := dirtyFixture(t, map[string]string{"*.txt": "glob-named", "other.txt": "not this"})
+	if _, err := m.DirtyCommit(context.Background(), id, hashOf(t, m, id), []string{"*.txt"}, "m"); err != nil {
+		t.Fatal(err)
+	}
+	if got := gittest.Git(t, wt, "log", "-1", "--format=", "--name-only"); got != "*.txt" {
+		t.Errorf("committed = %q", got)
+	}
+	if st := gittest.Git(t, wt, "status", "--porcelain"); st != "?? other.txt" {
+		t.Errorf("status = %q", st)
+	}
+}
+
 func TestDirtyCommitRefusesBadInput(t *testing.T) {
 	m, id, wt := dirtyFixture(t, map[string]string{"wip.txt": "x"})
 	hash := hashOf(t, m, id)

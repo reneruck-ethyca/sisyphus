@@ -120,7 +120,7 @@ func changedLines(ctx context.Context, dir string, files []string) (n int, binar
 	if files != nil {
 		spec = append([]string{"--"}, files...)
 	}
-	out, err := proc.Run(ctx, dir, "git", append([]string{"diff", "--numstat", "--no-renames", "HEAD"}, spec...)...)
+	out, err := proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "diff", "--numstat", "--no-renames", "HEAD"}, spec...)...)
 	if err != nil {
 		return 0, "", err
 	}
@@ -136,7 +136,7 @@ func changedLines(ctx context.Context, dir string, files []string) (n int, binar
 		d, _ := strconv.Atoi(f[1])
 		n += a + d
 	}
-	tracked, err := proc.Run(ctx, dir, "git", append([]string{"ls-files", "-z", "--others", "--exclude-standard"}, spec...)...)
+	tracked, err := proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "ls-files", "-z", "--others", "--exclude-standard"}, spec...)...)
 	if err != nil {
 		return 0, "", err
 	}

@@ -328,7 +328,7 @@ func (m *Manager) DirtyDiff(ctx context.Context, id, path string) (string, error
 			return "binary file", nil
 		}
 		out = string(b)
-	} else if out, err = proc.Run(ctx, h.Worktree, "git", "diff", "HEAD", "--", f.Path); err != nil {
+	} else if out, err = proc.Run(ctx, h.Worktree, "git", "--literal-pathspecs", "diff", "HEAD", "--", f.Path); err != nil {
 		return "", err
 	}
 	if len(out) > maxShownDiff {
@@ -608,12 +608,12 @@ func (m *Manager) commitHuman(ctx context.Context, dir, msg string, paths []stri
 	} else if binary != "" {
 		return invalid("refused: %s is binary", binary)
 	}
-	unstage := func() { _, _ = proc.Run(ctx, dir, "git", append([]string{"reset", "-q", "--"}, files...)...) }
-	if _, err := proc.Run(ctx, dir, "git", append([]string{"add", "--"}, files...)...); err != nil {
+	unstage := func() { _, _ = proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "reset", "-q", "--"}, files...)...) }
+	if _, err := proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "add", "--"}, files...)...); err != nil {
 		unstage()
 		return fmt.Errorf("git add: %w", err)
 	}
-	commit := append(hostGit(ctx, dir), "commit", "-q", "-m", msg, "--")
+	commit := append(hostGit(ctx, dir), "--literal-pathspecs", "commit", "-q", "-m", msg, "--")
 	if _, err := proc.Run(ctx, dir, "git", append(commit, files...)...); err != nil {
 		unstage()
 		return fmt.Errorf("commit: %w", err)
