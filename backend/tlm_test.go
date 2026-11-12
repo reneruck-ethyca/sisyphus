@@ -68,7 +68,7 @@ func TestTLMHandoffStatusWait(t *testing.T) {
 	}
 }
 
-func TestSendsTokenOnlyToLoopbackOnMutations(t *testing.T) {
+func TestSendsTokenOnlyToLoopback(t *testing.T) {
 	for _, c := range []struct {
 		method, url string
 		want        bool
@@ -76,7 +76,7 @@ func TestSendsTokenOnlyToLoopbackOnMutations(t *testing.T) {
 		{"POST", "http://127.0.0.1:7465/api/handoffs", true},
 		{"PUT", "http://localhost:7465/x", true},
 		{"POST", "http://[::1]:7465/x", true},
-		{"GET", "http://127.0.0.1:7465/x", false},
+		{"GET", "http://127.0.0.1:7465/x", true},
 		{"POST", "http://example.com:7465/x", false},
 		{"POST", "http://10.0.0.5:7465/x", false},
 	} {

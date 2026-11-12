@@ -550,7 +550,8 @@ func handoffServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatal(err)
 	}
 	apiTokenForTests = strings.TrimSpace(string(b))
-	t.Cleanup(func() { apiTokenForTests = "" })
+	hs.token, testBearer = apiTokenForTests, apiTokenForTests // in a real install they're the same file
+	t.Cleanup(func() { apiTokenForTests, testBearer = "", testToken })
 	srv := httptest.NewServer(newHandler(hs))
 	t.Cleanup(srv.Close)
 	return srv, clone
@@ -571,9 +572,7 @@ func postToken(t *testing.T, url, body, token string) (int, string) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	req.Header.Set("Authorization", "Bearer "+token) // "" too: a request that sends no valid token
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -632,7 +631,7 @@ func TestHTTPHandoffsDisabled(t *testing.T) {
 	if code, _ := get(t, srv.URL+"/api/handoffs/x"); code != 404 {
 		t.Errorf("get = %d, want 404", code)
 	}
-	if code, _ := post(t, srv.URL+"/api/handoffs", `{"worktree": "/x", "base": "main"}`); code != 503 {
+	if code, _ := postToken(t, srv.URL+"/api/handoffs", `{"worktree": "/x", "base": "main"}`, testToken); code != 503 {
 		t.Errorf("create = %d, want 503", code)
 	}
 }
@@ -847,5 +846,75 @@ func TestHTTPServesUI(t *testing.T) {
 	t.Cleanup(empty.Close)
 	if code, body := get(t, empty.URL+"/"); code != http.StatusServiceUnavailable || !strings.Contains(body, "make build") {
 		t.Errorf("unbuilt UI = %d %q", code, body)
+	}
+}
+
+const testToken = "test-token"
+
+// testBearer is the token every test request carries unless it sets its own Authorization.
+var testBearer = testToken
+
+type bearerTransport struct{ next http.RoundTripper }
+
+func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Header.Get("Authorization") == "" {
+		r = r.Clone(r.Context())
+		r.Header.Set("Authorization", "Bearer "+testBearer)
+	}
+	return b.next.RoundTrip(r)
+}
+
+func TestMain(m *testing.M) {
+	loadAPIToken = func(string) (string, error) { return testToken, nil }
+	http.DefaultTransport = bearerTransport{http.DefaultTransport}
+	os.Exit(m.Run())
+}
+
+// Every /api call needs the token, as a Bearer token or the session cookie the page gets
+// for it; loopback isn't enough, since review containers reach the port with any Host.
+func TestHTTPRequiresToken(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	raw := &http.Client{Transport: http.DefaultTransport.(bearerTransport).next, CheckRedirect: http.DefaultClient.CheckRedirect}
+	do := func(method, path, auth string, cookie *http.Cookie) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"org": "evil"}`))
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		resp, err := raw.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	for _, c := range []struct{ method, path string }{{"GET", "/api/status"}, {"GET", "/api/settings"}, {"PUT", "/api/settings"}, {"POST", "/api/restart"},
+		{"POST", "/api/handoffs/x/dirty/agent"}, {"GET", "/api/logs/stream"}} {
+		if r := do(c.method, c.path, "", nil); r.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s %s without token = %d", c.method, c.path, r.StatusCode)
+		}
+		if r := do(c.method, c.path, "Bearer wrong", nil); r.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s %s with a wrong token = %d", c.method, c.path, r.StatusCode)
+		}
+	}
+	if r := do("GET", "/api/status", "Bearer "+testToken, nil); r.StatusCode != 200 {
+		t.Errorf("bearer = %d", r.StatusCode)
+	}
+	// The page itself isn't secret; it trades ?t= for a cookie.
+	if r := do("GET", "/prs/o/r/1", "", nil); r.StatusCode == http.StatusUnauthorized {
+		t.Errorf("page = %d", r.StatusCode)
+	}
+	if r := do("GET", "/api/session?t=wrong", "", nil); r.StatusCode != http.StatusUnauthorized || len(r.Cookies()) != 0 {
+		t.Errorf("session with a wrong token = %d %v", r.StatusCode, r.Cookies())
+	}
+	r := do("GET", "/api/session?t="+testToken, "", nil)
+	if r.StatusCode != http.StatusNoContent || len(r.Cookies()) != 1 || !r.Cookies()[0].HttpOnly || r.Cookies()[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("session = %d %+v", r.StatusCode, r.Cookies())
+	}
+	if r := do("GET", "/api/status", "", r.Cookies()[0]); r.StatusCode != 200 {
+		t.Errorf("cookie = %d", r.StatusCode)
 	}
 }

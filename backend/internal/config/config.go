@@ -438,12 +438,18 @@ func defaults() Config {
 	}
 }
 
+// volumeName is what docker run --volume takes as a named volume; anything else is a bind mount.
+var volumeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
 func (r Review) check() error {
 	if err := r.Agent.Check(); err != nil {
 		return err
 	}
 	if r.Disabled {
 		return nil
+	}
+	if r.PluginsVolume != "" && !volumeName.MatchString(r.PluginsVolume) {
+		return fmt.Errorf("plugins_volume %q must be a Docker volume name, not a path", r.PluginsVolume)
 	}
 	if r.StackFrom != StackFromWorktree && r.StackFrom != StackFromSafe {
 		return fmt.Errorf("stack_from must be %q or %q", StackFromWorktree, StackFromSafe)

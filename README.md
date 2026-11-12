@@ -33,8 +33,9 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
    the reviewer's tooling: the ethyca-talos and superpowers plugins and `adversarial-review`, copied
    from your Claude Code install without their hooks (`make reviewer-plugins`; rebuild to pick up
    updates), pyright and typescript-language-server for the LSP tool, semgrep, and `mcp-atlassian`.
-3. Start it: `make install-agent` (at login, via LaunchAgent) or `make start`. The dashboard is at
-   <http://127.0.0.1:7465/>.
+3. Start it: `make install-agent` (at login, via LaunchAgent) or `make start`. Open the dashboard from
+   the menu-bar item (Open window, or Open dashboard for your browser): the API needs a token, which
+   those links carry.
 
 ## Usage
 
@@ -83,7 +84,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `include_drafts` | `false` | also track draft PRs |
 | `hooks` | `{}` | `{"on_conflict": "<shell command>"}` |
 | `hook_timeout` | `30m` | per hook run |
-| `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; only loopback `Host`s and same-origin POSTs are accepted |
+| `http_addr` | `127.0.0.1:7465` | dashboard + JSON API; every `/api` call needs the API token (see the JSON API below) |
 | `review.disabled` | `false` | don't run reviews |
 | `review.post` | `true` | post the agent's review to GitHub; `false` = dry run (review stays in `out/review.json`) |
 | `review.agent` | `{"vendor":"claude","model":"opus","effort":"medium"}` | app-wide default review profile; a tracked PR can override it in the dashboard |
@@ -456,8 +457,8 @@ in the environment as `TLM_ID`, `TLM_EVENT`, …. A failing command is logged, n
 
 API: `POST /api/handoffs` (JSON body with the flags' names in snake_case; 201 with the handoff),
 `GET /api/handoffs`, `GET /api/handoffs/{id}`, `GET /api/lastmile/shadow`, `PUT /api/handoffs/{id}/reviewers`,
-`POST /api/handoffs/{id}/resume`, `POST /api/handoffs/{id}/cancel`. `tlm` sends the API token only on
-POST/PUT requests to a loopback address. The dashboard lists the
+`POST /api/handoffs/{id}/resume`, `POST /api/handoffs/{id}/cancel`. `tlm` sends the API token, and only
+to a loopback address. The dashboard lists the
 handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.json` next to the state file.
 
 | Field | Default | |
@@ -528,7 +529,13 @@ The UI routes `/`, `/reviews`, `/prs/{owner}/{repo}/{number}` (and `…/runs/{ru
 non-`/api` path with its `index.html`. It renders from `GET /api/status/stream`, so pages update in
 place. A run's files are under `/api/…/runs/{run}/files/` (`log`, `run.json`, `out/`, …; served
 sandboxed with CSP `sandbox` and `nosniff`, so HTML a reviewer writes can't script the dashboard).
-Only loopback `Host`s and same-origin POSTs are accepted. The JSON API:
+Only loopback `Host`s and same-origin POSTs are accepted, and every `/api` call needs the API token
+(`lastmile.token` next to the state file, created on first start): as `Authorization: Bearer`, which
+`tlm` sends, or as the HttpOnly session cookie the page gets from `GET /api/session?t=<token>`; the
+menu-bar item opens the page with `?t=`. Loopback alone isn't enough: review containers reach the
+port too. For `make web-dev`, open <http://localhost:5173/?t=$(cat ~/.local/state/sisyphus/lastmile.token)>.
+Settings that are paths mounted into or copied for review containers (`codex_home`, `env_file`,
+`plugins_volume`, …) are file-only. The JSON API:
 
 | | |
 |---|---|

@@ -60,6 +60,7 @@ func TestLoadConfigReview(t *testing.T) {
 		`{"review": {"repos": {"x/y": {"image": ""}}}}`,
 		`{"review": {"repos": {"x/y": {"image": "i", "cache": ["../outside"]}}}}`,
 		`{"review": {"repos": {"x/y": {"image": "i", "workdir": "relative"}}}}`,
+		`{"review": {"plugins_volume": "/Users/me"}}`, // a bind mount of the host, not a volume
 	} {
 		os.WriteFile(p, []byte(bad), 0o644)
 		if _, err := Load(p); err == nil {
@@ -111,7 +112,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if value(fs, "org") != "acme" || value(fs, "interval") != "10m" || value(fs, "review.timeout") != "1h" || value(fs, "hook_timeout") != "30m" || value(fs, "review.agent.model") != "sonnet" ||
-		value(fs, "review.max_turns") != 200.0 || value(fs, "review.post") != true || value(fs, "review.env_file") != "~/.config/sisyphus/review.env" {
+		value(fs, "review.max_turns") != 200.0 || value(fs, "review.post") != true {
 		t.Fatalf("settings = %+v", fs)
 	}
 
@@ -133,6 +134,8 @@ func TestSettings(t *testing.T) {
 		{"review.max_concurrent": 0}, {"review.five_hour_percent": 101},
 		{"review.max_turns": "many"},
 		{"state_file": "/elsewhere"},
+		// Paths mounted into or copied for review containers are file-only.
+		{"review.plugins_volume": "/Users/me"}, {"review.codex_home": "/Users/me"}, {"review.env_file": "/etc/passwd"}, {"review.claude_settings": "/x"},
 	} {
 		if err := SaveSettings(p, bad); err == nil {
 			t.Errorf("%v should be rejected", bad)

@@ -244,12 +244,9 @@ func tlmWait(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-// sendsToken says whether req may carry the API token: only mutating requests,
-// and only to a loopback host, so a mistyped or hostile --addr never receives it.
+// sendsToken says whether req may carry the API token: only to a loopback host,
+// so a mistyped or hostile --addr never receives it. Every API call needs it.
 func sendsToken(req *http.Request) bool {
-	if req.Method != http.MethodPost && req.Method != http.MethodPut {
-		return false
-	}
 	host := req.URL.Hostname()
 	if host == "localhost" {
 		return true

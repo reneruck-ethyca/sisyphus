@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,11 +46,22 @@ type server struct {
 	rev        *review.Reviewer // nil when reviews are disabled
 	logs       *app.LogBuffer
 	configPath string
+	token      string // every /api call needs it: as the session cookie or a Bearer token
 }
 
+// loadAPIToken is the API token in the state dir; a var for tests.
+var loadAPIToken = lastmile.LoadToken
+
 func newServer(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, logs *app.LogBuffer) server {
-	return server{svc: app.NewService(cfg, tr, rev), tracker: tr, rev: rev, logs: logs, configPath: cfg.Path}
+	tok, err := loadAPIToken(filepath.Dir(cfg.StateFile))
+	if err != nil { // no token: every API call is refused, which the dashboard says
+		slog.Error("API token", "err", err)
+	}
+	return server{svc: app.NewService(cfg, tr, rev), tracker: tr, rev: rev, logs: logs, configPath: cfg.Path, token: tok}
 }
+
+// dashboardURL is base with the token, which the page trades for a session cookie (GET /api/session).
+func (s server) dashboardURL(base string) string { return base + "?t=" + s.token }
 
 func (s server) runDir(prID, runID string) (string, bool) {
 	if s.rev == nil {
@@ -117,6 +130,15 @@ func newHandler(srv server) http.Handler {
 	markSkills() // once: the handler is built at startup
 	mux := http.NewServeMux()
 	mux.Handle("GET /", spa(uiDist()))
+	// The page trades the token from its URL for an HttpOnly cookie, so the token leaves the address bar.
+	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, r *http.Request) {
+		if !srv.authorized(r.URL.Query().Get("t")) {
+			http.Error(w, "wrong token", http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: srv.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, app.Board{Status: svc.Status()}.View())
 	})
@@ -417,7 +439,7 @@ func newHandler(srv server) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return localOnly(http.NewCrossOriginProtection().Handler(mux))
+	return localOnly(http.NewCrossOriginProtection().Handler(srv.requireToken(mux)))
 }
 
 const errLastMileDisabled = "the last mile is disabled (lastmile.disabled)"
@@ -608,8 +630,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-
-
 // runLog is a run's readable output so far; Next is where its live stream carries on.
 type runLog struct {
 	Events []review.Event `json:"events"`
@@ -642,5 +662,32 @@ func spa(dist fs.FS) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(index)
+	})
+}
+
+const sessionCookie = "sisyphus_session"
+
+func (s server) authorized(tok string) bool {
+	return s.token != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1
+}
+
+// requireToken refuses /api calls without the token. Loopback isn't enough: a review
+// container reaches the port too (host.docker.internal), with any Host header it likes,
+// and an agent there must not change settings, start agents or push.
+func (s server) requireToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/session" {
+			tok, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if !bearer {
+				if c, err := r.Cookie(sessionCookie); err == nil {
+					tok = c.Value
+				}
+			}
+			if !s.authorized(tok) {
+				http.Error(w, "unauthorized: open the dashboard from the sisyphus menu, or send the API token (tlm does)", http.StatusUnauthorized)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }

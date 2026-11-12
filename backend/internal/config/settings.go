@@ -23,7 +23,9 @@ type Field struct {
 	Invert  bool     `json:"invert,omitempty"`  // a bool the UI shows the other way round ("disabled" as "Run reviews")
 }
 
-// Field groups, in the order the UIs show them.
+// Field groups, in the order the UIs show them. Paths that get mounted into or
+// copied for review containers (codex_home, env_file, plugins_volume, …) stay
+// file-only: the UI must not be able to point a container at the host.
 var Groups = []string{"GitHub", "Reviews", "Local stack", "Advanced"}
 
 var fields = []Field{
@@ -36,7 +38,6 @@ var fields = []Field{
 	{Key: "review.agent.vendor", Type: "text", Group: "Reviews", Label: "Agent vendor", Options: []string{"claude", "codex"}, Help: "CLI used for reviews."},
 	{Key: "review.agent.model", Type: "text", Group: "Reviews", Label: "Agent model", Options: []string{"opus", "sonnet", "haiku", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-codex"}, Help: "Model used by the selected agent."},
 	{Key: "review.agent.effort", Type: "text", Group: "Reviews", Label: "Reasoning effort", Options: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Help: "Reasoning effort used by the selected agent."},
-	{Key: "review.codex_home", Type: "text", Group: "Advanced", Label: "Codex home", Help: "Private Codex CLI state directory. Seeded from ~/.codex/auth.json when needed."},
 	{Key: "review.max_turns", Type: "number", Group: "Reviews", Label: "Turn limit", Help: "Hitting it fails the run."},
 	{Key: "review.max_budget_usd", Type: "number", Group: "Reviews", Label: "Spend limit (USD)", Help: "0 means no limit. Only enforced with API-key auth."},
 	{Key: "review.timeout", Type: "text", Group: "Reviews", Label: "Flag runs after", Help: "Longer runs are flagged, never stopped. E.g. 1h."},
@@ -47,12 +48,7 @@ var fields = []Field{
 	{Key: "review.stack_from", Type: "text", Group: "Local stack", Label: "Start stacks from", Options: []string{"worktree", "safe"}, Help: "worktree: the PR's code, on the host. safe: the clone in the repos root."},
 	{Key: "review.setup_step_timeout", Type: "text", Group: "Local stack", Label: "Setup step timeout", Help: "Each setup step (uv sync, npm install…) is killed past this, failing the run. E.g. 20m."},
 	{Key: "review.cleanup", Type: "bool", Group: "Local stack", Label: "Reset worktrees after each run", Help: "Only worktrees sisyphus created."},
-	{Key: "repos_root", Type: "text", Group: "Advanced", Label: "Repos root", Help: "Clones live at <repos root>/<repo>."},
 	{Key: "hook_timeout", Type: "text", Group: "Advanced", Label: "Hook timeout", Help: "Per hook run, e.g. 30m."},
-	{Key: "review.env_file", Type: "text", Group: "Advanced", Label: "Env file", Help: "Holds CLAUDE_CODE_OAUTH_TOKEN and a read-only GH_TOKEN."},
-	{Key: "review.prompt_file", Type: "text", Group: "Advanced", Label: "Prompt file", Help: "Go text/template prompt. Empty uses the built-in one."},
-	{Key: "review.claude_settings", Type: "text", Group: "Advanced", Label: "Claude settings", Help: "settings.json given to Claude in each run."},
-	{Key: "review.plugins_volume", Type: "text", Group: "Advanced", Label: "Plugins volume", Help: "Docker volume mounted as Claude's plugins/."},
 }
 
 // Settings returns the editable fields as path (over the defaults) has them now.

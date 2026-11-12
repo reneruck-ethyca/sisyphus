@@ -36,7 +36,7 @@ func runApp(cfg config.Config, srv server) error {
 		Mac:  application.MacOptions{ActivationPolicy: application.ActivationPolicyAccessory},
 	})
 	win := wapp.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "sisyphus", Width: 1100, Height: 760, Hidden: true, URL: dashURL,
+		Title: "sisyphus", Width: 1100, Height: 760, Hidden: true, URL: srv.dashboardURL(dashURL),
 		Mac: application.MacWindow{WebviewPreferences: application.MacWebviewPreferences{ApplicationNameForUserAgent: windowUserAgent}},
 	})
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
@@ -48,7 +48,7 @@ func runApp(cfg config.Config, srv server) error {
 	status := menu.Add("Starting…").SetEnabled(false)
 	menu.Add("Open window").OnClick(func(*application.Context) { win.Show(); win.Focus() })
 	menu.Add("Open dashboard").OnClick(func(*application.Context) {
-		if err := openInBrowser(dashURL); err != nil {
+		if err := openInBrowser(srv.dashboardURL(dashURL)); err != nil {
 			slog.Warn("opening dashboard", "err", err)
 		}
 	})

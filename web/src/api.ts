@@ -120,6 +120,16 @@ export type Settings = { path: string; groups: string[]; fields: Field[] };
 export type SkillStatus = { agents: { id: string; name: string; state: "absent" | "current" | "stale" }[] | null; busy?: string; error?: string };
 export type LogEntry = { seq: number; time: string; level: string; msg: string; attrs?: string };
 
+// session trades the token the menu-bar app opens the page with (?t=) for an HttpOnly cookie,
+// then drops it from the address bar. Every API call waits for it.
+export const session: Promise<void> = (async () => {
+  const url = new URL(location.href), t = url.searchParams.get("t");
+  if (!t) return;
+  await fetch("/api/session?t=" + encodeURIComponent(t)).catch(() => {});
+  url.searchParams.delete("t");
+  history.replaceState(null, "", url.pathname + url.search + url.hash);
+})();
+
 export class HTTPError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -127,6 +137,7 @@ export class HTTPError extends Error {
 }
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+  await session;
   const res = await fetch(url, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },

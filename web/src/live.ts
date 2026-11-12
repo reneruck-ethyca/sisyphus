@@ -1,6 +1,6 @@
 // Live state shared by the pages: the router, the status stream, timers and fetches.
 import { useEffect, useState } from "preact/hooks";
-import { get, type Status } from "./api";
+import { get, session, type Status } from "./api";
 
 export type { Status };
 
@@ -64,17 +64,23 @@ export function unstream(s: EventSource) {
 addEventListener("pagehide", () => streams.forEach((s) => s.close()));
 addEventListener("pageshow", (e) => e.persisted && location.reload());
 
-let statusStream: EventSource | undefined;
-function followStatus() {
-  if (statusStream) return;
-  statusStream = stream("/api/status/stream");
-  statusStream.onmessage = (m) => {
+const signedOut = "Not signed in: open the dashboard from the sisyphus menu (Open window or Open dashboard).";
+
+let following = false;
+async function followStatus() {
+  if (following) return;
+  following = true;
+  await session;
+  const s = stream("/api/status/stream");
+  s.onmessage = (m) => {
     status = JSON.parse(m.data);
     statusError = "";
     statusListeners.forEach((f) => f());
   };
-  statusStream.onerror = () => {
-    statusError = "Lost the connection to sisyphus; reconnecting…";
+  s.onerror = async () => {
+    // A 401 closes the stream for good; anything else reconnects on its own.
+    const unauthorized = s.readyState === EventSource.CLOSED && (await fetch("/api/status").catch(() => null))?.status === 401;
+    statusError = unauthorized ? signedOut : "Lost the connection to sisyphus; reconnecting…";
     statusListeners.forEach((f) => f());
   };
 }
