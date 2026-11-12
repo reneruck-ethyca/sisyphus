@@ -1193,3 +1193,15 @@ func TestFollowSendsBacklogThenLiveThenCloses(t *testing.T) {
 		t.Fatalf("from 1 = %v", s)
 	}
 }
+
+// A lost run's job must not replace a newer head's job queued meanwhile.
+func TestLostRunKeepsNewerQueuedJob(t *testing.T) {
+	f := newFixture(t)
+	newer := f.tr
+	newer.HeadSHA = "b"
+	f.r.enqueue(f.r.newJob(newer, ReasonCommits))
+	f.r.lose(Run{ID: "r1", Job: f.r.newJob(f.tr, ReasonNew)}, errors.New("gone"))
+	if q := f.r.st.Queue; len(q) != 1 || q[0].PR.HeadSHA != "b" {
+		t.Fatalf("queue = %+v", q)
+	}
+}

@@ -370,17 +370,25 @@ func (r *Reviewer) retry(run Run) {
 	wait := r.cfg.RetryBackoff.Duration << j.Attempt
 	j.Attempt++
 	j.NotBefore = time.Now().Add(wait)
+	if r.requeue(j) {
+		slog.Info("review retry queued", "pr", id, "attempt", j.Attempt, "of", r.cfg.Retries, "at", j.NotBefore.Format(time.TimeOnly))
+	}
+}
+
+// requeue queues j again unless a job for its PR is queued already: that newer
+// job (new head) must win. It says whether j was queued.
+func (r *Reviewer) requeue(j Job) bool {
 	r.mu.Lock()
-	queued := slices.ContainsFunc(r.st.Queue, func(q Job) bool { return q.PR.Key() == id })
-	if !queued { // checked and added under one lock: a newer job (new head) must win
+	queued := slices.ContainsFunc(r.st.Queue, func(q Job) bool { return q.PR.Key() == j.PR.Key() })
+	if !queued { // checked and added under one lock
 		r.st.Queue = append(r.st.Queue, j)
 		r.saveLocked()
 	}
 	r.mu.Unlock()
 	if !queued {
-		slog.Info("review retry queued", "pr", id, "attempt", j.Attempt, "of", r.cfg.Retries, "at", j.NotBefore.Format(time.TimeOnly))
 		r.changed()
 	}
+	return !queued
 }
 
 var rank = map[string]int{ReasonManual: 0, ReasonReplies: 1, ReasonCommits: 2, ReasonNew: 3}
@@ -541,11 +549,12 @@ func (r *Reviewer) waitRuntime(ctx context.Context) error {
 	return nil
 }
 
-// lose marks a run that can't be followed any more and queues its job again.
+// lose marks a run that can't be followed any more and queues its job again,
+// unless a newer one is queued.
 func (r *Reviewer) lose(run Run, err error) {
 	slog.Warn("review lost, requeueing", "pr", run.Job.PR.Key(), "run", run.ID, "err", err)
 	r.record(run.Job.PR.Key(), run.ID, func(x *Run) { x.Status, x.Error, x.Finished = Lost, err.Error(), time.Now() })
-	r.enqueue(run.Job)
+	r.requeue(run.Job)
 }
 
 // Run starts queued jobs, at most MaxConcurrent at a time, until ctx ends.
