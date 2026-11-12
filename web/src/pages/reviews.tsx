@@ -26,15 +26,15 @@ export function Reviews({ status: s, error, pr, run, archive }: Props) {
   if (archive) {
     const row = id ? history.data!.find((h) => h.id === id) : undefined;
     if (id && !row) main = <NotFound what="PR" />;
-    else if (row && run) main = <RunPage status={s} pr={row} runs={row.runs ?? []} runID={run} archive />;
-    else if (row) main = <Archived row={row} />;
+    else if (row && run) main = <RunPage key={row.id + run} status={s} pr={row} runs={row.runs ?? []} runID={run} archive />;
+    else if (row) main = <Archived key={row.id} row={row} />;
     else main = <div class="pagehead"><h1>History</h1>
       <div class="muted">Pick a PR on the left to see whether it was reviewed and what the reviews came to. PRs dropped before history was kept show as dropped "unknown".</div></div>;
   } else if (id) {
     const p = s.prs?.find((x) => x.id === id);
     if (!p) main = <NotFound what="PR" />;
-    else if (run) main = <RunPage status={s} pr={p} runs={p.review.runs ?? []} runID={run} />;
-    else main = <PRPage status={s} pr={p} />;
+    else if (run) main = <RunPage key={p.id + run} status={s} pr={p} runs={p.review.runs ?? []} runID={run} />;
+    else main = <PRPage key={p.id} status={s} pr={p} />;
   } else main = <Overview status={s} />;
 
   return <Page title={title} status={s} page={archive ? "history" : "reviews"}>

@@ -28,7 +28,7 @@ export function Handoff({ status: s, id }: { status?: Status; id: string }) {
           {v.agent_running === "dirty" && ", finishing the uncommitted work. If it fails, the changes come back uncommitted."}</p>}
         {!dirty && v.reason && <p class={"notice" + (v.state !== "needs-human" ? " quiet" : "")}>{v.reason}</p>}
         {v.error && <p class="err">{v.error}</p>}{v.warning && <p class="muted">{v.warning}</p>}
-        {dirty ? <DirtyPanel v={v} d={dirty} /> : <>
+        {dirty ? <DirtyPanel key={v.id + ":" + v.dirty_hash} v={v} d={dirty} /> : <>
           {v.state === "needs-human" && <p class="muted">Resume hands it back to TLM, which re-reads the PR from the start on its next tick.
             It doesn't fix the problem above: deal with that first{v.worktree && <> (worktree <code>{v.worktree}</code>)</>}, or it lands back here.</p>}
           <div class="actions"><Actions v={v} /></div>
