@@ -86,7 +86,8 @@ func newReplies(pr github.PR, me string, since time.Time) (count int, latest tim
 		consider(c.User, c.Bot, c.Body, c.CreatedAt, true)
 	}
 	for _, r := range pr.Reviews {
-		consider(r.User, r.Bot, r.Body, r.SubmittedAt, r.Body != "")
+		// An empty COMMENTED review is inline comments dated at drafting, maybe before since.
+		consider(r.User, r.Bot, r.Body, r.SubmittedAt, r.Body != "" || r.State == "COMMENTED" || r.State == "CHANGES_REQUESTED")
 	}
 	return count, latest
 }

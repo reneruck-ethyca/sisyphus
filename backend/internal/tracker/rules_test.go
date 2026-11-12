@@ -126,3 +126,13 @@ func TestDesignReview(t *testing.T) {
 		}
 	}
 }
+
+// A review submitted with no body carries only inline comments, which GitHub
+// dates at drafting time, possibly before the cursor: the review still counts.
+func TestNewRepliesCountsInlineOnlyReview(t *testing.T) {
+	pr := github.PR{Comments: []github.Comment{{User: "alice", Body: "why?", CreatedAt: at(2)}},
+		Reviews: []github.Review{rv("alice", "COMMENTED", 5)}}
+	if n, _ := newReplies(pr, "me", at(3)); n != 1 {
+		t.Fatalf("replies = %d", n)
+	}
+}
