@@ -34,7 +34,7 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
    from your Claude Code install without their hooks (`make reviewer-plugins`; rebuild to pick up
    updates), pyright and typescript-language-server for the LSP tool, semgrep, and `mcp-atlassian`.
 3. Start it: `make install-agent` (at login, via LaunchAgent) or `make start`. Open the dashboard from
-   the menu-bar item (Open window, or Open dashboard for your browser): the API needs a token, which
+   the menu-bar item (Open window, or Open dashboard for your browser): the API needs a sign-in, which
    those links carry.
 
 ## Usage
@@ -530,10 +530,12 @@ non-`/api` path with its `index.html`. It renders from `GET /api/status/stream`,
 place. A run's files are under `/api/…/runs/{run}/files/` (`log`, `run.json`, `out/`, …; served
 sandboxed with CSP `sandbox` and `nosniff`, so HTML a reviewer writes can't script the dashboard).
 Only loopback `Host`s and same-origin POSTs are accepted, and every `/api` call needs the API token
-(`lastmile.token` next to the state file, created on first start): as `Authorization: Bearer`, which
-`tlm` sends, or as the HttpOnly session cookie the page gets from `GET /api/session?t=<token>`; the
-menu-bar item opens the page with `?t=`. Loopback alone isn't enough: review containers reach the
-port too. For `make web-dev`, open <http://localhost:5173/?t=$(cat ~/.local/state/sisyphus/lastmile.token)>.
+(`lastmile.token` next to the state file, created on first start) as `Authorization: Bearer`, which
+`tlm` sends, or the dashboard's session cookie. The menu-bar item opens the page with a one-time
+`?code=`, which the page trades for that cookie at `GET /api/session` (an HttpOnly cookie derived from
+the token, not the token). Loopback alone isn't enough: review containers reach the port too. For
+`make web-dev`, sign in from the menu once, then use <http://127.0.0.1:5173/> (the cookie is for
+127.0.0.1, whatever the port).
 Settings that are paths mounted into or copied for review containers (`codex_home`, `env_file`,
 `plugins_volume`, …) are file-only. The JSON API:
 

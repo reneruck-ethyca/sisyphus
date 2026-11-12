@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/app"
@@ -46,7 +51,8 @@ type server struct {
 	rev        *review.Reviewer // nil when reviews are disabled
 	logs       *app.LogBuffer
 	configPath string
-	token      string // every /api call needs it: as the session cookie or a Bearer token
+	token      string // every /api call needs it: as a Bearer token, or the session cookie made from it
+	codes      *loginCodes
 }
 
 // loadAPIToken is the API token in the state dir; a var for tests.
@@ -57,11 +63,43 @@ func newServer(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer, log
 	if err != nil { // no token: every API call is refused, which the dashboard says
 		slog.Error("API token", "err", err)
 	}
-	return server{svc: app.NewService(cfg, tr, rev), tracker: tr, rev: rev, logs: logs, configPath: cfg.Path, token: tok}
+	return server{svc: app.NewService(cfg, tr, rev), tracker: tr, rev: rev, logs: logs, configPath: cfg.Path, token: tok, codes: &loginCodes{}}
 }
 
-// dashboardURL is base with the token, which the page trades for a session cookie (GET /api/session).
-func (s server) dashboardURL(base string) string { return base + "?t=" + s.token }
+// dashboardURL is base with a one-time code the page trades for the session cookie (GET /api/session).
+// Not the token: a URL lands in the browser's history, which may sync.
+func (s server) dashboardURL(base string) string { return base + "?code=" + s.codes.mint() }
+
+// loginCodes are single-use: the window and each Open dashboard get their own.
+type loginCodes struct {
+	mu    sync.Mutex
+	codes []string // ponytail: newest last, capped; a code nobody used is forgotten after maxCodes newer ones
+}
+
+const maxCodes = 16
+
+func (c *loginCodes) mint() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	code := hex.EncodeToString(b)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.codes = append(c.codes, code)[max(0, len(c.codes)+1-maxCodes):]
+	return code
+}
+
+// use says whether code is one minted and not used yet, and uses it up.
+func (c *loginCodes) use(code string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, x := range c.codes {
+		if subtle.ConstantTimeCompare([]byte(x), []byte(code)) == 1 {
+			c.codes = slices.Delete(c.codes, i, i+1)
+			return true
+		}
+	}
+	return false
+}
 
 func (s server) runDir(prID, runID string) (string, bool) {
 	if s.rev == nil {
@@ -132,11 +170,11 @@ func newHandler(srv server) http.Handler {
 	mux.Handle("GET /", spa(uiDist()))
 	// The page trades the token from its URL for an HttpOnly cookie, so the token leaves the address bar.
 	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, r *http.Request) {
-		if !srv.authorized(r.URL.Query().Get("t")) {
-			http.Error(w, "wrong token", http.StatusUnauthorized)
+		if srv.token == "" || !srv.codes.use(r.URL.Query().Get("code")) {
+			http.Error(w, "unknown or used code: open the dashboard from the sisyphus menu again", http.StatusUnauthorized)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: srv.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: srv.session(), Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
@@ -671,6 +709,14 @@ func (s server) authorized(tok string) bool {
 	return s.token != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1
 }
 
+// session is the cookie's value: derived from the token, so it outlives a restart,
+// but it isn't the token tlm and the handoff API take.
+func (s server) session() string {
+	m := hmac.New(sha256.New, []byte(s.token))
+	m.Write([]byte("sisyphus dashboard session"))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
 // requireToken refuses /api calls without the token. Loopback isn't enough: a review
 // container reaches the port too (host.docker.internal), with any Host header it likes,
 // and an agent there must not change settings, start agents or push.
@@ -678,12 +724,11 @@ func (s server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/session" {
 			tok, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if !bearer {
-				if c, err := r.Cookie(sessionCookie); err == nil {
-					tok = c.Value
-				}
+			ok := bearer && s.authorized(tok)
+			if c, err := r.Cookie(sessionCookie); !bearer && err == nil && s.token != "" {
+				ok = subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.session())) == 1
 			}
-			if !s.authorized(tok) {
+			if !ok {
 				http.Error(w, "unauthorized: open the dashboard from the sisyphus menu, or send the API token (tlm does)", http.StatusUnauthorized)
 				return
 			}

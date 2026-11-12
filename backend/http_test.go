@@ -873,7 +873,10 @@ func TestMain(m *testing.M) {
 // Every /api call needs the token, as a Bearer token or the session cookie the page gets
 // for it; loopback isn't enough, since review containers reach the port with any Host.
 func TestHTTPRequiresToken(t *testing.T) {
-	srv, _, _ := newTestServer(t)
+	cfg, tr := testkit.Tracker(t, &github.Fake{})
+	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
+	srv := httptest.NewServer(newHandler(hs))
+	t.Cleanup(srv.Close)
 	raw := &http.Client{Transport: http.DefaultTransport.(bearerTransport).next, CheckRedirect: http.DefaultClient.CheckRedirect}
 	do := func(method, path, auth string, cookie *http.Cookie) *http.Response {
 		t.Helper()
@@ -903,16 +906,24 @@ func TestHTTPRequiresToken(t *testing.T) {
 	if r := do("GET", "/api/status", "Bearer "+testToken, nil); r.StatusCode != 200 {
 		t.Errorf("bearer = %d", r.StatusCode)
 	}
-	// The page itself isn't secret; it trades ?t= for a cookie.
+	// The page itself isn't secret; it trades a one-time code for a cookie that isn't the token.
 	if r := do("GET", "/prs/o/r/1", "", nil); r.StatusCode == http.StatusUnauthorized {
 		t.Errorf("page = %d", r.StatusCode)
 	}
-	if r := do("GET", "/api/session?t=wrong", "", nil); r.StatusCode != http.StatusUnauthorized || len(r.Cookies()) != 0 {
-		t.Errorf("session with a wrong token = %d %v", r.StatusCode, r.Cookies())
+	if r := do("GET", "/api/session?code="+testToken, "", nil); r.StatusCode != http.StatusUnauthorized || len(r.Cookies()) != 0 {
+		t.Errorf("session for the token instead of a code = %d %v", r.StatusCode, r.Cookies())
 	}
-	r := do("GET", "/api/session?t="+testToken, "", nil)
-	if r.StatusCode != http.StatusNoContent || len(r.Cookies()) != 1 || !r.Cookies()[0].HttpOnly || r.Cookies()[0].SameSite != http.SameSiteStrictMode {
+	code := strings.TrimPrefix(hs.dashboardURL(""), "?code=")
+	r := do("GET", "/api/session?code="+code, "", nil)
+	if r.StatusCode != http.StatusNoContent || len(r.Cookies()) != 1 || !r.Cookies()[0].HttpOnly || r.Cookies()[0].SameSite != http.SameSiteStrictMode ||
+		r.Cookies()[0].Value == testToken {
 		t.Fatalf("session = %d %+v", r.StatusCode, r.Cookies())
+	}
+	if again := do("GET", "/api/session?code="+code, "", nil); again.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a used code = %d", again.StatusCode)
+	}
+	if r := do("GET", "/api/status", "Bearer "+r.Cookies()[0].Value, nil); r.StatusCode != http.StatusUnauthorized {
+		t.Errorf("the cookie's value as a Bearer token = %d", r.StatusCode)
 	}
 	if r := do("GET", "/api/status", "", r.Cookies()[0]); r.StatusCode != 200 {
 		t.Errorf("cookie = %d", r.StatusCode)
