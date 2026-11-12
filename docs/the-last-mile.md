@@ -162,6 +162,8 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   itself lives in memory, so a mark with no run behind it means a restart lost the run. Only a lost conflict
   run's rebase is aborted on the next tick; any other rebase in progress is a human's (resolving a needs-human
   conflict) and stays.
+  A finished run's outcome stays in memory until the tick that applies it is stored: a tick discarded because
+  the handoff changed meanwhile (an assessment, a dashboard action) leaves it for the next tick to apply.
 - **Replies are posted in one batch from the host.**
 - **Bot comments get the same treatment as human ones, with a cap.** TLM replies to review bots
   (sisyphus, ethycabot, others) but at most 3 replies per bot thread; after that it stops replying
@@ -218,7 +220,9 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   Haiku only writes text, off the tick, once per distinct status (`claude -p --json-schema`, no tools, no
   settings): the porcelain list, the last five commits, `git diff HEAD` (cut at 40 KB) and small untracked
   text files (regular files only, ≤8 KB each, ≤20 KB in all) go in, marked as data, not instructions. It
-  answers `{summary, message}`: ≤60 words on what the changes are and a ≤72-character commit subject. The
+  answers `{summary, message}`: ≤60 words on what the changes are and a ≤72-character commit subject, which
+  go into the stored `dirty` only while its status is still the one assessed, leaving the rest of it (`dismissed`,
+  `wip`) as it is by then. The
   panel works without it: "Analysing…" while it runs, "Couldn't summarise" on an error. Its subject fills the
   message box only when the human hasn't typed in it; the draft and the ticks survive the page's reloads in
   `sessionStorage`, keyed by handoff and status hash.
@@ -440,3 +444,8 @@ None right now.
   so a human resolving a needs-human "rebase conflict" with `git rebase origin/<base>` lost it within two minutes.
   Handoffs gain `run` (trigger, start), stored when a run starts and cleared when its outcome is applied; a tick
   aborts a rebase only when that mark says a conflict run was lost to a restart.
+- **2026-11-12:** A run's outcome survives a discarded tick (§5). `agentFinished` dropped the run from memory
+  before the tick's commit, so when the commit was refused because `Gen` moved (the assessment finishing,
+  leave, resume), pushed work stayed in needs-human and the run's events were lost. The run is now dropped only
+  after the commit. The dirty assessment likewise wrote its whole copy of `dirty` back, erasing a `wip` set by an
+  agent run that started meanwhile; it now merges only summary, message and error, and only into the same status.

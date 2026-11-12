@@ -154,16 +154,21 @@ func (m *Manager) checkDirty(ctx context.Context, h *Handoff) {
 			return
 		}
 		// Set even if the tick hasn't committed base yet: update bumps Gen, which discards
-		// that tick. A worktree that moved on meanwhile differs from d.Status, so the next
-		// tick rebuilds and assesses it again.
+		// that tick. Otherwise only the advice goes in, so what was set meanwhile (dismissed,
+		// an agent run's WIP) stays; a worktree that moved on is assessed again next tick.
 		_, err = m.update(hc.ID, func(h *Handoff) error {
-			if h.State != StateNeedsHuman {
+			switch {
+			case h.State != StateNeedsHuman:
 				return errResumed
+			case h.Dirty == nil:
+				h.Dirty = &d
+			case h.Dirty.Status != d.Status:
+				return ErrStale
+			default:
+				cur := *h.Dirty
+				cur.Summary, cur.Message, cur.Err = d.Summary, d.Message, d.Err
+				h.Dirty = &cur
 			}
-			if h.Dirty != nil && h.Dirty.Status == d.Status {
-				d.Dismissed = h.Dirty.Dismissed
-			}
-			h.Dirty = &d
 			return nil
 		})
 		if err == nil {

@@ -177,10 +177,8 @@ func (m *Manager) markRun(id string, r *RunMark) {
 	}
 }
 
-// agentFinished applies the outcome of a run that ended since the last tick.
-func (m *Manager) agentFinished(ctx context.Context, h *Handoff) {
-	a, _ := m.running.get(h.ID)
-	m.running.drop(h.ID)
+// agentFinished applies the outcome of a, a run that ended since the last tick.
+func (m *Manager) agentFinished(ctx context.Context, h *Handoff, a agentRun) {
 	h.Run = nil
 	a.fx.apply(h)
 	if a.trigger == TriggerDirty {

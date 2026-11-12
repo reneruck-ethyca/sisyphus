@@ -46,24 +46,30 @@ func (m *Manager) tick(ctx context.Context) {
 		}
 		next := h
 		next.Error = ""
-		if err := m.advance(ctx, &next); err != nil {
+		finished, err := m.advance(ctx, &next)
+		if err != nil {
 			slog.Warn("lastmile tick failed", "id", h.ID, "err", err)
 			next.Error = err.Error()
 		}
 		m.judge(&next)
-		if reflect.DeepEqual(h, next) {
-			continue
+		changed := !reflect.DeepEqual(h, next)
+		if changed && !m.commit(h, next) {
+			continue // a finished run stays in memory: the next tick applies it to the fresh handoff
 		}
-		if m.commit(h, next) {
+		if finished {
+			m.running.drop(h.ID)
+		}
+		if changed {
 			m.afterCommit(ctx, h, next)
 		}
 	}
 }
 
 // advance does one handoff's tick on h: open the PR, or read it and move it on.
-func (m *Manager) advance(ctx context.Context, h *Handoff) error {
+// finished says it applied a run's outcome, which the caller drops once it's stored.
+func (m *Manager) advance(ctx context.Context, h *Handoff) (finished bool, err error) {
 	if h.PRNumber == 0 {
-		return m.openPR(ctx, h)
+		return false, m.openPR(ctx, h)
 	}
 	a, running := m.running.get(h.ID)
 	if !running && h.Run != nil { // the run was lost to a restart
@@ -74,14 +80,14 @@ func (m *Manager) advance(ctx context.Context, h *Handoff) error {
 	}
 	if running {
 		if !a.done {
-			return nil // the agent holds the worktree; the handoff shows "fix agent running"
+			return false, nil // the agent holds the worktree; the handoff shows "fix agent running"
 		}
 		// A run just ended. Don't read the PR in the same tick: right after a push GitHub
 		// may still show the old head's red checks. The next tick reads the new head.
-		m.agentFinished(ctx, h)
-		return nil
+		m.agentFinished(ctx, h, a)
+		return true, nil
 	}
-	return m.follow(ctx, h)
+	return false, m.follow(ctx, h)
 }
 
 // lockedGit runs git in the handoff's worktree while holding its lock.

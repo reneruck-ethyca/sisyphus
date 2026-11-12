@@ -358,3 +358,20 @@ func TestDirtyAgentLostRunIsUnwrapped(t *testing.T) {
 		t.Errorf("dirty = %+v", h.Dirty)
 	}
 }
+
+func TestDirtyAssessmentKeepsWIP(t *testing.T) {
+	m, _, id, _ := redFixture(t, &fakeTasks{result: okFix})
+	release := make(chan struct{})
+	m.Assess = func(context.Context, string) (string, error) { <-release; return okAdvice, nil }
+	writeFile(t, m.must(t, id).Worktree, "wip.txt", "half")
+	m.tickWait(t)                // the fix agent refuses the dirty worktree
+	m.tickWait(t)                // escalates
+	m.tick(context.Background()) // lists the files; the assessment waits
+	// DirtyAgent starts meanwhile.
+	m.set(t, id, func(h *Handoff) { d := *h.Dirty; d.WIP = "abc"; h.Dirty = &d })
+	close(release)
+	m.Wait()
+	if d := m.must(t, id).Dirty; d == nil || d.WIP != "abc" || d.Message == "" {
+		t.Errorf("dirty = %+v", d)
+	}
+}

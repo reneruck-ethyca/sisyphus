@@ -428,6 +428,30 @@ func TestTickDiscardedAfterConcurrentEdit(t *testing.T) {
 	}
 }
 
+// bumpOnLabel bumps the handoff's Gen when the needs-human label is created, as a
+// dashboard action or an assessment landing during the tick would.
+type bumpOnLabel struct {
+	*FakeGitHub
+	bump func()
+}
+
+func (b bumpOnLabel) CreateLabel(ctx context.Context, repo, name, color, desc string) error {
+	b.bump()
+	return b.FakeGitHub.CreateLabel(ctx, repo, name, color, desc)
+}
+
+func TestRunOutcomeSurvivesARejectedCommit(t *testing.T) {
+	m, gh, id, _ := redFixture(t, &fakeTasks{result: okFix}) // no edits: "agent made no changes"
+	m.tickWait(t)
+	var once sync.Once
+	m.GH = bumpOnLabel{gh, func() { once.Do(func() { m.set(t, id, func(*Handoff) {}) }) }}
+	m.tick(context.Background()) // applies the run; the commit is rejected
+	m.tick(context.Background()) // applies it again
+	if h := m.must(t, id); h.State != StateNeedsHuman || h.Reason != "agent made no changes" || h.Run != nil {
+		t.Errorf("handoff = %s %q, run %+v", h.State, h.Reason, h.Run)
+	}
+}
+
 func TestAgentsNeedReviews(t *testing.T) {
 	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{failCheck("unit", "22")}}
