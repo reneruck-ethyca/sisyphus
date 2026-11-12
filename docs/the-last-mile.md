@@ -225,7 +225,7 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
 
   `GET …/dirty/diff?path=` (path must be a listed file) is `git diff HEAD -- path` for a tracked file, the
   content of an untracked regular file, cut at 200 KB, or "binary file". Actions run under the worktree lock
-  and each is a `dirty` timeline event. Like resume and cancel, none take a token yet.
+  and each is a `dirty` timeline event. Like every API call, they need the API token (see the revision log, 2026-11-12).
 
   Haiku only writes text, off the tick, once per distinct status (`claude -p --json-schema`, no tools, no
   settings): the porcelain list, the last five commits, `git diff HEAD` (cut at 40 KB) and small untracked
@@ -475,3 +475,9 @@ None right now.
   escalates instead of carrying on, and `node_modules/` is exempt only for what changed before setup finished
   (`run.setup_done`, recorded by the post-setup hook; a tick's commit keeps the stored mark so it isn't lost),
   so an agent writing `node_modules/.bin` after setup is still named.
+- **2026-11-12:** Every API call now needs the token, not just creating a handoff. A security review showed a
+  review container could reach the loopback API with any `Host` header and, with no token, change settings
+  to mount the host into the next run, or start a dirty-worktree agent that pushes. `tlm` sends
+  `lastmile.token` as a Bearer token on every call; the dashboard signs in with a one-time code the menu-bar
+  item opens it with, traded for an HttpOnly cookie derived from the token. This supersedes "none take a
+  token yet" for resume, cancel, reviewers and the dirty actions.
