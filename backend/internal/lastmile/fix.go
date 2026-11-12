@@ -210,14 +210,11 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 	if err != nil {
 		return // the mark stays: the next tick tries again
 	}
+	changed, ierr := ignoredSince(ctx, h.Worktree, r, h.Untracked)
 	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == r.Head {
 		if err := reset(ctx, *h, head); err != nil {
 			slog.Warn("lastmile lost run: reset", "id", h.ID, "err", err)
 		}
-	}
-	changed, err := ignoredSince(ctx, h.Worktree, r.Started, h.Untracked)
-	if err != nil {
-		slog.Warn("lastmile lost run: ignored files", "id", h.ID, "err", err)
 	}
 	unlock()
 	h.Run = nil
@@ -225,13 +222,16 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 	if names := pathList(changed); names != "" {
 		reason += "; gitignored files created or changed since it started (not removed): " + names
 	}
+	if ierr != nil { // fail closed: unchecked is not clean
+		reason += "; checking gitignored files failed, look at them: " + ierr.Error()
+	}
 	switch {
 	case r.Trigger == TriggerDirty:
 		if m.unwrapWIP(ctx, *h, r.Head) {
 			reason += "; your changes are uncommitted again"
 		}
 		m.dirtyAgentFinished(ctx, h, reason)
-	case len(changed) > 0:
+	case len(changed) > 0 || ierr != nil:
 		h.EscalatedBy = r.Trigger
 		m.escalate(ctx, h, reason)
 	default:
@@ -239,17 +239,19 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 	}
 }
 
-// ignoredSince names the gitignored files whose ctime is past t, less what setup
-// writes under node_modules (see runAgent).
-func ignoredSince(ctx context.Context, dir string, t time.Time, extra []string) ([]string, error) {
+// ignoredSince names the gitignored files whose ctime is past r's start, less what
+// setup wrote under node_modules before r.SetupDone (see runAgent). Unknown setup
+// end = nothing is setup's.
+func ignoredSince(ctx context.Context, dir string, r RunMark, extra []string) ([]string, error) {
 	files, err := ignoredFiles(ctx, dir, extra...)
 	if err != nil {
 		return nil, err
 	}
-	since := t.Add(-time.Second).UnixNano() // a second's slack: the kernel's file clock can lag time.Now
+	since := r.Started.Add(-time.Second).UnixNano() // a second's slack: the kernel's file clock can lag time.Now
 	var changed []string
 	for f, st := range files {
-		if st.ctime > since && !slices.Contains(strings.Split(f, "/"), "node_modules") {
+		setup := !r.SetupDone.IsZero() && st.ctime <= r.SetupDone.UnixNano() && slices.Contains(strings.Split(f, "/"), "node_modules")
+		if st.ctime > since && !setup {
 			changed = append(changed, f)
 		}
 	}
@@ -355,6 +357,11 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 			if slices.Contains(strings.Split(f, "/"), "node_modules") {
 				before[f] = st
 			}
+		}
+		if h.Run != nil { // for a lost run's check (lostRun)
+			r := *h.Run
+			r.SetupDone = m.now()
+			m.markRun(h.ID, &r)
 		}
 		return nil
 	}

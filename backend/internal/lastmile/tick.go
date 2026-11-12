@@ -313,6 +313,9 @@ func (m *Manager) commit(before, after Handoff) bool {
 	if i < 0 || m.handoffs[i].Gen != before.Gen {
 		return false // gone, or resumed or cancelled while the tick ran: its view is stale
 	}
+	if after.Run != nil {
+		after.Run = m.handoffs[i].Run // markRun's copy: it may have the setup's end since
+	}
 	if cur := m.handoffs[i]; !slices.Equal(cur.Reviewers, before.Reviewers) || cur.ReviewersSet != before.ReviewersSet {
 		after.Reviewers, after.ReviewersSet, after.ReviewersPending = cur.Reviewers, cur.ReviewersSet, cur.ReviewersPending
 		after.Removed = cur.Removed

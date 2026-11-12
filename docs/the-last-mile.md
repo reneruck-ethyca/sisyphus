@@ -167,9 +167,10 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   next tick cleans up as after a failed run: a lost conflict run's rebase is aborted (any other rebase in
   progress is a human's, resolving a needs-human conflict, and stays), the tree goes back to the starting head
   unless a commit moved it on, and a lost dirty-agent run's WIP commit is unwrapped. Gitignored files whose
-  ctime is past the run's start (outside `node_modules/`) are named in a needs-human reason but not removed:
-  without the pre-run stamps a planted file can't be told from a changed one. With none, the handoff just
-  carries on. A lost fix round's failures don't count as seen (they're recorded when a round ends).
+  ctime is past the run's start are named in a needs-human reason but not removed: without the pre-run stamps a
+  planted file can't be told from a changed one. Only `node_modules/` files changed before the container's setup
+  finished are exempt (the mark records `setup_done` when it does; unrecorded, none are), and a check that
+  fails escalates too. With nothing found, the handoff just carries on. A lost fix round's failures don't count as seen (they're recorded when a round ends).
   A finished run's outcome stays in memory until the tick that applies it is stored: a tick discarded because
   the handoff changed meanwhile (an assessment, a dashboard action) leaves it for the next tick to apply.
 - **Replies are posted in one batch from the host.**
@@ -470,3 +471,7 @@ None right now.
   listed the files, and the panel's agent action committed and pushed them unticked. The untracked files present
   at handoff are now recorded (`untracked`) and excluded wherever TLM judges, commits, stashes or cleans the
   worktree; they're stamped with the ignored files, so an agent changing one is still caught.
+- **2026-11-12:** The lost-run check fails closed, after a security review. A failed ignored-file listing now
+  escalates instead of carrying on, and `node_modules/` is exempt only for what changed before setup finished
+  (`run.setup_done`, recorded by the post-setup hook; a tick's commit keeps the stored mark so it isn't lost),
+  so an agent writing `node_modules/.bin` after setup is still named.

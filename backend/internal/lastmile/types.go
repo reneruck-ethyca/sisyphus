@@ -166,6 +166,8 @@ type RunMark struct {
 	Trigger string    `json:"trigger"` // Trigger*
 	Started time.Time `json:"started"`
 	Head    string    `json:"head"` // the worktree's HEAD when it started
+	// SetupDone is when the container's setup finished: node_modules written before it is setup's.
+	SetupDone time.Time `json:"setup_done,omitzero"`
 }
 
 // Event is one line of a handoff's log.
