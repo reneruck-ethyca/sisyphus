@@ -421,7 +421,7 @@ func (m *Manager) DirtyAgent(ctx context.Context, id, hash, msg, task string) (H
 	if life == nil {
 		life = context.Background() // tests tick by hand
 	}
-	if !m.launch(life, h, TriggerDirty, func(ctx context.Context, h Handoff) outcome { return m.dirtyAgent(ctx, h, wip, task) }) {
+	if !m.launch(life, &h, TriggerDirty, func(ctx context.Context, h Handoff) outcome { return m.dirtyAgent(ctx, h, wip, task) }) {
 		m.unwrapWIP(ctx, h, wip)
 		return h, invalid("an agent is already running on %s", id)
 	}

@@ -158,6 +158,10 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
   sisyphus on the same state dir refuses to start (`sisyphus.lock`), since every instance rewrites
   the whole state files; running several instances is reneruck-ethyca/sisyphus#1.
+- **A run in flight is marked on the handoff** (`run`: trigger, start), stored when the run starts. The run
+  itself lives in memory, so a mark with no run behind it means a restart lost the run. Only a lost conflict
+  run's rebase is aborted on the next tick; any other rebase in progress is a human's (resolving a needs-human
+  conflict) and stays.
 - **Replies are posted in one batch from the host.**
 - **Bot comments get the same treatment as human ones, with a cap.** TLM replies to review bots
   (sisyphus, ethycabot, others) but at most 3 replies per bot thread; after that it stops replying
@@ -432,3 +436,7 @@ None right now.
   The run uses the `dirty` trigger; it isn't counted against `max_fix_rounds`, since a human starts each one.
   `Resume`'s state reset is shared with the run's success path (`unescalate`). Model and container are the
   handoff's agent, as for fix rounds. Token auth on the dashboard's actions stays out of scope.
+- **2026-11-12:** Only TLM's own rebases are aborted (§5). Every tick with no run in memory ran `rebase --abort`,
+  so a human resolving a needs-human "rebase conflict" with `git rebase origin/<base>` lost it within two minutes.
+  Handoffs gain `run` (trigger, start), stored when a run starts and cleared when its outcome is applied; a tick
+  aborts a rebase only when that mark says a conflict run was lost to a restart.

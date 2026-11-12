@@ -60,7 +60,7 @@ func (m *Manager) feedback(ctx context.Context, h *Handoff, p github.PRSnapshot,
 	snap := *s
 	snap.Failures = nil
 	changes := changesRequested(p.Reviews)
-	m.launch(ctx, *h, TriggerReview, func(ctx context.Context, hh Handoff) outcome {
+	m.launch(ctx, h, TriggerReview, func(ctx context.Context, hh Handoff) outcome {
 		return m.reviewAgent(ctx, hh, snap, box.New, p.Body, changes)
 	})
 	return StateFeedback, "review agent running", nil

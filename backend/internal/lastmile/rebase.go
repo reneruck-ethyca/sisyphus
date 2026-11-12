@@ -41,9 +41,9 @@ func rebaseInProgress(ctx context.Context, dir string) bool {
 	return false
 }
 
-// abortStaleRebase backs a rebase out that a crash left in the worktree. TLM only
-// rebases inside a run (a goroutine tracked in m.running), so with no run in flight
-// a rebase in progress isn't ours to keep: it would wedge every later git command.
+// abortStaleRebase backs out a rebase a conflict run lost to a restart left in the
+// worktree: it would wedge every later git command. Only then: a rebase with no such
+// run behind it is a human's (resolving a needs-human conflict) and stays.
 func (m *Manager) abortStaleRebase(ctx context.Context, h *Handoff) {
 	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
 	if err != nil {
@@ -118,7 +118,7 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 		return true, nil
 	}
 	spec := restackSpec{onto: base, head: s.Head}
-	if !m.launch(ctx, *h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
+	if !m.launch(ctx, h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
 		return true, nil
 	}
 	if len(conflicts) > 0 {
@@ -179,7 +179,7 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		return true, nil
 	}
 	spec := restackSpec{onto: newBase, upstream: upstream, head: s.Head}
-	if m.launch(ctx, *h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
+	if m.launch(ctx, h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
 		m.setState(h, StateCIRunning, "rebasing onto "+newBase)
 	}
 	return true, nil

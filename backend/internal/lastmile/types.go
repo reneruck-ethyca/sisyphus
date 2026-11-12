@@ -129,6 +129,7 @@ type Handoff struct {
 	FlakeReruns     int            `json:"flake_reruns,omitempty"`   // flake reruns on FlakeHead
 	FlakeTotal      int            `json:"flake_total,omitempty"`    // flake reruns over all heads, a merge-policy signal
 	Gen             int            `json:"gen,omitempty"`            // bumped by edits from outside the tick, which discard a tick in progress
+	Run             *RunMark       `json:"run,omitempty"`            // the agent run in flight; still set with no run in memory = lost to a restart
 
 	// Stack bookkeeping (design §3): while StackParent is set, Base is the parent's branch.
 	ParentHead   string `json:"parent_head,omitempty"`   // the parent's last head while it was open: the old base point once a squash merge hides it
@@ -156,6 +157,13 @@ type Handoff struct {
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State
 	PROpened time.Time `json:"pr_opened,omitempty"`
+}
+
+// RunMark is what lastmile.json keeps of an agent run in flight: the run itself
+// lives in memory, so after a restart this is how TLM knows one was cut short.
+type RunMark struct {
+	Trigger string    `json:"trigger"` // Trigger*
+	Started time.Time `json:"started"`
 }
 
 // Event is one line of a handoff's log.

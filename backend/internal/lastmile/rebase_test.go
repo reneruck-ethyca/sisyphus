@@ -447,6 +447,7 @@ func TestStaleRebaseIsAborted(t *testing.T) {
 		t.Fatalf("setup: the rebase should stop on a conflict: %v", err)
 	}
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: pre, BaseRef: "main", Author: "me"}
+	m.set(t, id, func(h *Handoff) { h.Run = &RunMark{Trigger: TriggerConflict} }) // a conflict run a restart lost
 	m.tick(context.Background())
 	if rebaseInProgress(context.Background(), h.Worktree) || gittest.Git(t, h.Worktree, "rev-parse", "HEAD") != pre {
 		t.Error("the rebase was left in progress")
@@ -454,6 +455,23 @@ func TestStaleRebaseIsAborted(t *testing.T) {
 	got := m.must(t, id)
 	if !slices.ContainsFunc(got.Events, func(e Event) bool { return e.Kind == "rebase" && strings.Contains(e.Text, "aborted") }) {
 		t.Errorf("events = %+v", got.Events)
+	}
+}
+
+func TestHumanRebaseIsKept(t *testing.T) {
+	m, gh, _, id := opened(t, Request{})
+	h := m.must(t, id)
+	pre := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
+	advanceMain(t, h.Worktree, "a.txt", "three")
+	gittest.Git(t, h.Worktree, "fetch", "-q", "origin")
+	if _, err := rebaseCmd(t, h.Worktree); err == nil {
+		t.Fatal("setup: the rebase should stop on a conflict")
+	}
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: pre, BaseRef: "main", Author: "me"}
+	m.set(t, id, func(h *Handoff) { h.State = StateNeedsHuman }) // the human is resolving "rebase conflict"
+	m.tick(context.Background())
+	if !rebaseInProgress(context.Background(), h.Worktree) {
+		t.Error("a tick aborted the human's rebase")
 	}
 }
 

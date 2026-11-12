@@ -134,22 +134,26 @@ func (r *runs) cancel(id string) {
 // Wait blocks until the agent runs started so far are over; for tests and shutdown.
 func (m *Manager) Wait() { m.wg.Wait() }
 
-// launch runs work on a copy of h beside the tick loop, for trigger. It returns
-// false when a run is already in flight for h.
-func (m *Manager) launch(ctx context.Context, h Handoff, trigger string, work func(context.Context, Handoff) outcome) bool {
+// launch runs work on a copy of h beside the tick loop, for trigger, and marks h
+// (and the stored handoff) with the run. It returns false when a run is already
+// in flight for h.
+func (m *Manager) launch(ctx context.Context, h *Handoff, trigger string, work func(context.Context, Handoff) outcome) bool {
 	runCtx, cancel := context.WithCancel(ctx)
 	run := &agentRun{cancel: cancel, trigger: trigger, started: m.now()}
 	if !m.running.put(h.ID, run) {
 		cancel()
 		return false
 	}
+	h.Run = &RunMark{Trigger: trigger, Started: run.started}
+	m.markRun(h.ID, h.Run)
+	snap := *h
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 		defer cancel()
-		out := work(runCtx, h)
+		out := work(runCtx, snap)
 		if ctx.Err() != nil || runCtx.Err() != nil { // shutdown or cancel: nothing to apply
-			m.running.drop(h.ID)
+			m.running.drop(snap.ID)
 			return
 		}
 		m.running.mu.Lock()
@@ -160,10 +164,24 @@ func (m *Manager) launch(ctx context.Context, h Handoff, trigger string, work fu
 	return true
 }
 
+// markRun stores r on the handoff id before its run starts, without waiting for the
+// tick's commit: a crash mid-run must find it. No Gen bump, so the tick isn't discarded.
+func (m *Manager) markRun(id string, r *RunMark) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i := slices.IndexFunc(m.handoffs, func(h Handoff) bool { return h.ID == id }); i >= 0 {
+		m.handoffs[i].Run = r
+		if err := m.saveLocked(); err != nil {
+			slog.Error("lastmile save failed", "err", err)
+		}
+	}
+}
+
 // agentFinished applies the outcome of a run that ended since the last tick.
 func (m *Manager) agentFinished(ctx context.Context, h *Handoff) {
 	a, _ := m.running.get(h.ID)
 	m.running.drop(h.ID)
+	h.Run = nil
 	a.fx.apply(h)
 	if a.trigger == TriggerDirty {
 		m.dirtyAgentFinished(ctx, h, a.reason)
@@ -200,7 +218,7 @@ func (m *Manager) redState(ctx context.Context, h *Handoff, s Snapshot) (state, 
 	for _, f := range s.Failures {
 		h.FixedFailures = append(h.FixedFailures, f.Fingerprint)
 	}
-	m.launch(ctx, *h, TriggerCI, func(ctx context.Context, snap Handoff) outcome { return m.fixCI(ctx, snap, s) })
+	m.launch(ctx, h, TriggerCI, func(ctx context.Context, snap Handoff) outcome { return m.fixCI(ctx, snap, s) })
 	return StateCIRed, "fix agent running", nil
 }
 
