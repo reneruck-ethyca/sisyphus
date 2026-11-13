@@ -18,7 +18,7 @@ It runs on your Mac as a menu-bar app with a local dashboard, every `interval` (
 
 ## Getting started
 
-Requires `gh` (authenticated), `git` and `wtp` on PATH, Docker, and for fidesplus' local stack `uv`
+Requires `gh` (authenticated: sisyphus calls the GitHub API with its token, or `GH_TOKEN` when set), `git` and `wtp` on PATH, Docker, and for fidesplus' local stack `uv`
 on the host. `make install-agent` bakes your current shell's PATH into the LaunchAgent.
 
 1. Put the reviewer's secrets in `~/.config/sisyphus/review.env` (`chmod 600`):
@@ -76,7 +76,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 
 | Field | Default | |
 |---|---|---|
-| `user` | `gh api user` | GitHub login whose reviews are tracked |
+| `user` | the token's user | GitHub login whose reviews are tracked |
 | `org` | `ethyca` | owner searched for PRs |
 | `interval` | `10m` | Go duration between ticks |
 | `repos_root` | `~/Dev` | clones live at `<repos_root>/<repo>`; PRs without a clone are skipped |
@@ -199,7 +199,7 @@ runs cardea's lint, typecheck and format check.
 
 fidesplus is the repo's `related` checkout, read-only at `/fidesplus`. Before each run sisyphus takes the
 Jira keys from the PR's title and branch (not its body, whose "Part of" epics match unrelated PRs) and
-looks for open fidesplus PRs naming one (`gh pr list --search '"ENG-…" in:title,body'`, forks left out). The most
+looks for open fidesplus PRs naming one (a search for `"ENG-…" in:title,body`, forks left out). The most
 recently updated one's head is checked out, else `dev`; the prompt says which and why. It's a
 `git archive` of that commit from `~/Dev/fidesplus` into the run dir, deleted after the run: tracked
 files only, so nothing ignored in your clone (`.env` files) reaches the container, and no git metadata.
@@ -331,9 +331,9 @@ never re-added, reviewers a human adds are left alone. `PUT /api/handoffs/{id}/r
 next tick applies the difference (naming someone anew re-adds them).
 
 CI fixing: on red CI the snapshot gets each failed check with the tail (150 lines) of its failed job log
-(`gh run view --job`; checks that aren't Actions jobs get none) and a failure fingerprint (job name plus a hash
+(its failed steps' lines; checks that aren't Actions jobs get none) and a failure fingerprint (job name plus a hash
 of the error lines with timestamps, SHAs, numbers and temp paths removed). A failure whose log matches a
-`lastmile.flakes` regex is rerun (`gh run rerun --failed`) up to `lastmile.flake_reruns` times per head SHA.
+`lastmile.flakes` regex is rerun (its failed jobs only) up to `lastmile.flake_reruns` times per head SHA.
 Otherwise, with `fix-ci` on, the fix agent runs in a container as a one-shot task of the review runtime: it
 shares `review.max_concurrent` and the 5-hour budget with reviews, has no GitHub token, and is not run when
 reviews are disabled (the handoff goes to `needs-human`). It runs beside the tick loop; the handoff shows
@@ -381,7 +381,7 @@ Stacks (`--stack-parent <id|branch>`): the parent is a handoff of the same repo 
 open ones); the child's PR base is the parent's branch and it opens right away. A branch nobody hands off is
 just a plain base. Cycles and a parent in another repo are refused. TLM notes the parent's head while it is
 open. When the parent merges the child gets `stack-parent-merged`, its PR is retargeted to the parent's own
-base (`gh pr edit --base`) and rebased with `git rebase --onto origin/<base> <parent's last head> <branch>`
+base and rebased with `git rebase --onto origin/<base> <parent's last head> <branch>`
 (that survives a squash merge) and pushed with `--force-with-lease`. A parent that was closed or cancelled
 sends the child to `needs-human` ("stack parent closed"). The Last mile page shows a stack under its root,
 children indented, "waiting on <parent>" while the parent is open.
@@ -500,7 +500,7 @@ it: a queue, review containers running Claude Code, local stacks, run records an
 | `internal/review` | job queue (one per PR), container runs, local stacks, posting, run records, re-attach after restart, debug shell |
 | `internal/container` | `Runtime` interface; `Docker` (docker CLI) and `Fake` |
 | `internal/worktree` | git/wtp operations |
-| `internal/github` | `Client` interface; `CLI` (gh) and `Fake` |
+| `internal/github` | `Client` interface; `API` (GitHub REST and GraphQL through go-gh, with gh's token) and `Fake` |
 | `internal/lastmile` | the-last-mile: handoffs, their store, notify |
 | `internal/config` | config file, defaults, the settings the UIs edit |
 | `internal/app` | `Service`: the boundary UIs talk to |

@@ -42,7 +42,7 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 }
 
 type Config struct {
-	User          string            `json:"user"` // empty = `gh api user`
+	User          string            `json:"user"` // empty = the GitHub token's user
 	Org           string            `json:"org"`
 	Interval      Duration          `json:"interval"`
 	ReposRoot     string            `json:"repos_root"`

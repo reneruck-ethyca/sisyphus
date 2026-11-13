@@ -35,8 +35,11 @@ func TestParsePR(t *testing.T) {
 }
 
 func TestParseSearch(t *testing.T) {
-	got, err := parseSearch([]byte(`[{"number":1,"repository":{"nameWithOwner":"ethyca/a"}}]`))
+	got, err := parseSearch([]byte(`{"items":[{"number":1,"repository_url":"https://api.github.com/repos/ethyca/a"}]}`))
 	if err != nil || !reflect.DeepEqual(got, []PRRef{{"ethyca/a", 1}}) {
 		t.Errorf("got %v %v", got, err)
+	}
+	if _, err := parseSearch([]byte(`{"items":[{"number":1,"repository_url":"nope"}]}`)); err == nil {
+		t.Error("a repository_url without /repos/ should fail")
 	}
 }

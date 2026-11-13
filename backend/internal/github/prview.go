@@ -4,17 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/reneruck/sisyphus/internal/proc"
 )
-
-// prViewFields is what `gh pr view --json` is asked for: one call builds most of a PR snapshot.
-const prViewFields = "number,url,state,isDraft,headRefOid,headRefName,baseRefName,mergeable,mergeStateStatus," +
-	"reviewDecision,reviews,reviewRequests,body,author,statusCheckRollup,mergedAt,closedAt,mergedBy,additions,deletions,files"
 
 // Check is one CI check on a PR's head: a check run or a commit status.
 type Check struct {
@@ -25,14 +17,14 @@ type Check struct {
 	URL        string
 }
 
-// SnapReview is a review as `gh pr view` reports it, with the commit it covers.
+// SnapReview is a review as PRView reports it, with the commit it covers.
 type SnapReview struct {
 	User, State, Body, CommitSHA string
 	Bot                          bool
 	SubmittedAt                  time.Time
 }
 
-// PRSnapshot is the PR state one `gh pr view` shows. Review threads and failed
+// PRSnapshot is the PR state one PRView reads. Review threads and failed
 // job logs come from elsewhere.
 type PRSnapshot struct {
 	PRRef
@@ -40,7 +32,7 @@ type PRSnapshot struct {
 	State                          string // OPEN | CLOSED | MERGED
 	Draft                          bool
 	HeadSHA, HeadRef, BaseRef      string
-	Mergeable, MergeState          string // gh's MERGEABLE|CONFLICTING|UNKNOWN; BEHIND|BLOCKED|CLEAN|DIRTY|DRAFT|UNSTABLE|…
+	Mergeable, MergeState          string // GitHub's MERGEABLE|CONFLICTING|UNKNOWN; BEHIND|BLOCKED|CLEAN|DIRTY|DRAFT|UNSTABLE|…
 	ReviewDecision                 string // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ""
 	Reviews                        []SnapReview
 	RequestedUsers, RequestedTeams []string
@@ -51,108 +43,191 @@ type PRSnapshot struct {
 	Files                          []string
 }
 
-// PRView reads the PR's snapshot with one `gh pr view`.
-func (CLI) PRView(ctx context.Context, ref PRRef) (PRSnapshot, error) {
-	out, err := proc.Run(ctx, "", "gh", "pr", "view", strconv.Itoa(ref.Number), "--repo", ref.Repo, "--json", prViewFields)
-	if err != nil {
+// checkNodes is one page of a head commit's checks: check runs and commit statuses.
+const checkNodes = `pageInfo{hasNextPage endCursor} nodes{__typename
+... on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{workflow{name}}}}
+... on StatusContext{context state targetUrl}}`
+
+const prViewQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+number url state isDraft headRefOid headRefName baseRefName mergeable mergeStateStatus reviewDecision body
+author{login __typename} mergedAt closedAt mergedBy{login} additions deletions
+reviews(last:100){nodes{author{login __typename} state body submittedAt commit{oid}}}
+reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login} ... on Bot{login} ... on Mannequin{login} ... on Team{slug}}}}
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){` + checkNodes + `}}}}}
+files(first:100){nodes{path}}
+}}}`
+
+// checksQuery reads the checks after cursor, for a PR with more than one page of them.
+const checksQuery = `query($owner:String!,$name:String!,$number:Int!,$after:String!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100,after:$after){` + checkNodes + `}}}}}
+}}}`
+
+// PRView reads the PR's snapshot with one GraphQL query, and one more per
+// further 100 checks: a failing check must never be missed.
+// ponytail: first 100 files and review requests, last 100 reviews; page when a PR outgrows them.
+func (a *API) PRView(ctx context.Context, ref PRRef) (PRSnapshot, error) {
+	owner, name, ok := strings.Cut(ref.Repo, "/")
+	if !ok {
+		return PRSnapshot{}, fmt.Errorf("bad repo %q", ref.Repo)
+	}
+	vars := map[string]any{"owner": owner, "name": name, "number": ref.Number}
+	var data json.RawMessage
+	if err := a.graphql(ctx, prViewQuery, vars, &data); err != nil {
 		return PRSnapshot{}, err
 	}
-	s, err := parsePRView([]byte(out))
+	s, after, err := parsePRView(data)
+	for err == nil && after != "" {
+		vars["after"] = after
+		if err = a.graphql(ctx, checksQuery, vars, &data); err != nil {
+			break
+		}
+		var more PRSnapshot
+		more, after, err = parsePRView(data)
+		s.Checks = append(s.Checks, more.Checks...)
+	}
 	s.PRRef = ref
 	return s, err
 }
 
-type ghAuthor struct {
+type gqlActor struct {
 	Login string `json:"login"`
-	IsBot bool   `json:"is_bot"`
+	Type  string `json:"__typename"`
 }
 
-func parsePRView(b []byte) (PRSnapshot, error) {
+// parsePRView reads prViewQuery's or checksQuery's data. after is the cursor
+// of the next page of checks, "" when there is none.
+func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
+	type nodes[T any] struct {
+		Nodes []T `json:"nodes"`
+	}
 	var v struct {
-		Number           int       `json:"number"`
-		URL              string    `json:"url"`
-		State            string    `json:"state"`
-		IsDraft          bool      `json:"isDraft"`
-		HeadRefOid       string    `json:"headRefOid"`
-		HeadRefName      string    `json:"headRefName"`
-		BaseRefName      string    `json:"baseRefName"`
-		Mergeable        string    `json:"mergeable"`
-		MergeStateStatus string    `json:"mergeStateStatus"`
-		ReviewDecision   string    `json:"reviewDecision"`
-		Body             string    `json:"body"`
-		Author           ghAuthor  `json:"author"`
-		MergedAt         time.Time `json:"mergedAt"`
-		ClosedAt         time.Time `json:"closedAt"`
-		MergedBy         ghAuthor  `json:"mergedBy"`
-		Additions        int       `json:"additions"`
-		Deletions        int       `json:"deletions"`
-		Reviews          []struct {
-			Author      ghAuthor  `json:"author"`
-			State       string    `json:"state"`
-			Body        string    `json:"body"`
-			SubmittedAt time.Time `json:"submittedAt"`
-			Commit      struct {
-				OID string `json:"oid"`
-			} `json:"commit"`
-		} `json:"reviews"`
-		ReviewRequests []struct {
-			Type  string `json:"__typename"`
-			Login string `json:"login"`
-			Slug  string `json:"slug"`
-		} `json:"reviewRequests"`
-		StatusCheckRollup []struct {
-			Type         string `json:"__typename"`
-			Name         string `json:"name"`
-			WorkflowName string `json:"workflowName"`
-			Status       string `json:"status"`
-			Conclusion   string `json:"conclusion"`
-			DetailsURL   string `json:"detailsUrl"`
-			Context      string `json:"context"` // StatusContext
-			State        string `json:"state"`
-			TargetURL    string `json:"targetUrl"`
-		} `json:"statusCheckRollup"`
-		Files []struct {
-			Path string `json:"path"`
-		} `json:"files"`
+		Repository struct {
+			PullRequest struct {
+				Number           int       `json:"number"`
+				URL              string    `json:"url"`
+				State            string    `json:"state"`
+				IsDraft          bool      `json:"isDraft"`
+				HeadRefOid       string    `json:"headRefOid"`
+				HeadRefName      string    `json:"headRefName"`
+				BaseRefName      string    `json:"baseRefName"`
+				Mergeable        string    `json:"mergeable"`
+				MergeStateStatus string    `json:"mergeStateStatus"`
+				ReviewDecision   string    `json:"reviewDecision"`
+				Body             string    `json:"body"`
+				Author           *gqlActor `json:"author"`
+				MergedAt         time.Time `json:"mergedAt"`
+				ClosedAt         time.Time `json:"closedAt"`
+				MergedBy         *gqlActor `json:"mergedBy"`
+				Additions        int       `json:"additions"`
+				Deletions        int       `json:"deletions"`
+				Reviews          nodes[struct {
+					Author      *gqlActor `json:"author"`
+					State       string    `json:"state"`
+					Body        string    `json:"body"`
+					SubmittedAt time.Time `json:"submittedAt"`
+					Commit      *struct {
+						OID string `json:"oid"`
+					} `json:"commit"`
+				}] `json:"reviews"`
+				ReviewRequests nodes[struct {
+					Reviewer *struct {
+						Type  string `json:"__typename"`
+						Login string `json:"login"`
+						Slug  string `json:"slug"`
+					} `json:"requestedReviewer"`
+				}] `json:"reviewRequests"`
+				Commits nodes[struct {
+					Commit struct {
+						Rollup *struct {
+							Contexts struct {
+								PageInfo struct {
+									HasNextPage bool   `json:"hasNextPage"`
+									EndCursor   string `json:"endCursor"`
+								} `json:"pageInfo"`
+								Nodes []struct {
+									Type       string `json:"__typename"`
+									Name       string `json:"name"`
+									Status     string `json:"status"`
+									Conclusion string `json:"conclusion"`
+									DetailsURL string `json:"detailsUrl"`
+									CheckSuite *struct {
+										WorkflowRun *struct {
+											Workflow struct {
+												Name string `json:"name"`
+											} `json:"workflow"`
+										} `json:"workflowRun"`
+									} `json:"checkSuite"`
+									Context   string `json:"context"` // StatusContext
+									State     string `json:"state"`
+									TargetURL string `json:"targetUrl"`
+								} `json:"nodes"`
+							} `json:"contexts"`
+						} `json:"statusCheckRollup"`
+					} `json:"commit"`
+				}] `json:"commits"`
+				Files nodes[struct {
+					Path string `json:"path"`
+				}] `json:"files"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
-		return PRSnapshot{}, fmt.Errorf("parse pr view: %w", err)
+		return PRSnapshot{}, "", fmt.Errorf("parse pr view: %w", err)
 	}
-	s := PRSnapshot{
-		PRRef: PRRef{Number: v.Number}, URL: v.URL, Body: v.Body, Author: v.Author.Login, State: v.State, Draft: v.IsDraft,
-		HeadSHA: v.HeadRefOid, HeadRef: v.HeadRefName, BaseRef: v.BaseRefName,
-		Mergeable: v.Mergeable, MergeState: v.MergeStateStatus, ReviewDecision: v.ReviewDecision,
-		MergedAt: v.MergedAt, ClosedAt: v.ClosedAt, MergedBy: v.MergedBy.Login, Additions: v.Additions, Deletions: v.Deletions,
+	p := v.Repository.PullRequest
+	login := func(a *gqlActor) string {
+		if a == nil {
+			return ""
+		}
+		return a.Login
 	}
-	if u, err := url.Parse(v.URL); err == nil { // https://github.com/owner/name/pull/n
-		if p := strings.Split(strings.Trim(u.Path, "/"), "/"); len(p) >= 2 {
-			s.Repo = p[0] + "/" + p[1]
+	s = PRSnapshot{
+		PRRef: PRRef{Number: p.Number}, URL: p.URL, Body: p.Body, Author: login(p.Author), State: p.State, Draft: p.IsDraft,
+		HeadSHA: p.HeadRefOid, HeadRef: p.HeadRefName, BaseRef: p.BaseRefName,
+		Mergeable: p.Mergeable, MergeState: p.MergeStateStatus, ReviewDecision: p.ReviewDecision,
+		MergedAt: p.MergedAt, ClosedAt: p.ClosedAt, MergedBy: login(p.MergedBy), Additions: p.Additions, Deletions: p.Deletions,
+	}
+	for _, r := range p.Reviews.Nodes {
+		sr := SnapReview{User: login(r.Author), Bot: r.Author != nil && r.Author.Type == "Bot", State: r.State, Body: r.Body, SubmittedAt: r.SubmittedAt}
+		if r.Commit != nil {
+			sr.CommitSHA = r.Commit.OID
+		}
+		s.Reviews = append(s.Reviews, sr)
+	}
+	for _, r := range p.ReviewRequests.Nodes {
+		switch {
+		case r.Reviewer == nil:
+		case r.Reviewer.Type == "Team":
+			s.RequestedTeams = append(s.RequestedTeams, r.Reviewer.Slug)
+		default:
+			s.RequestedUsers = append(s.RequestedUsers, r.Reviewer.Login)
 		}
 	}
-	for _, r := range v.Reviews {
-		s.Reviews = append(s.Reviews, SnapReview{User: r.Author.Login, Bot: r.Author.IsBot, State: r.State,
-			Body: r.Body, CommitSHA: r.Commit.OID, SubmittedAt: r.SubmittedAt})
-	}
-	for _, r := range v.ReviewRequests {
-		if r.Type == "Team" {
-			s.RequestedTeams = append(s.RequestedTeams, r.Slug)
-		} else {
-			s.RequestedUsers = append(s.RequestedUsers, r.Login)
-		}
-	}
-	for _, c := range v.StatusCheckRollup {
-		if c.Type == "StatusContext" { // a commit status: PENDING | SUCCESS | FAILURE | ERROR | EXPECTED
-			ck := Check{Name: c.Context, Status: "COMPLETED", Conclusion: c.State, URL: c.TargetURL}
-			if c.State == "PENDING" || c.State == "EXPECTED" {
-				ck.Status, ck.Conclusion = "IN_PROGRESS", ""
-			}
-			s.Checks = append(s.Checks, ck)
+	for _, cm := range p.Commits.Nodes {
+		if cm.Commit.Rollup == nil {
 			continue
 		}
-		s.Checks = append(s.Checks, Check{Name: c.Name, Workflow: c.WorkflowName, Status: c.Status, Conclusion: c.Conclusion, URL: c.DetailsURL})
+		if pi := cm.Commit.Rollup.Contexts.PageInfo; pi.HasNextPage {
+			after = pi.EndCursor
+		}
+		for _, c := range cm.Commit.Rollup.Contexts.Nodes {
+			if c.Type == "StatusContext" { // a commit status: PENDING | SUCCESS | FAILURE | ERROR | EXPECTED
+				ck := Check{Name: c.Context, Status: "COMPLETED", Conclusion: c.State, URL: c.TargetURL}
+				if c.State == "PENDING" || c.State == "EXPECTED" {
+					ck.Status, ck.Conclusion = "IN_PROGRESS", ""
+				}
+				s.Checks = append(s.Checks, ck)
+				continue
+			}
+			ck := Check{Name: c.Name, Status: c.Status, Conclusion: c.Conclusion, URL: c.DetailsURL}
+			if c.CheckSuite != nil && c.CheckSuite.WorkflowRun != nil {
+				ck.Workflow = c.CheckSuite.WorkflowRun.Workflow.Name
+			}
+			s.Checks = append(s.Checks, ck)
+		}
 	}
-	for _, f := range v.Files {
+	for _, f := range p.Files.Nodes {
 		s.Files = append(s.Files, f.Path)
 	}
-	return s, nil
+	return s, after, nil
 }

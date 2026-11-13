@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/cli/go-gh/v2/pkg/api"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -65,7 +66,7 @@ func main() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	gh := github.CLI{}
+	gh := github.NewAPI(api.ClientOptions{})
 	if *judge {
 		if *evalOut == "" {
 			fatal(errors.New("-judge needs -eval-out"))
@@ -184,7 +185,7 @@ func resetState(ctx context.Context, tr *tracker.Tracker, rev *review.Reviewer, 
 // dir, so the app's state is left alone.
 // ponytail: the stack starts at the default PORT_OFFSET, not the one the app
 // remembered for it; a clash still retries with the next.
-func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh github.CLI, id string) error {
+func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh *github.API, id string) error {
 	i := slices.IndexFunc(tr.Snapshot(), func(t tracker.Tracked) bool { return t.Key() == id })
 	if i < 0 {
 		return fmt.Errorf("%s isn't tracked: no worktree to open a shell on", id)
@@ -214,7 +215,7 @@ func openShell(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh g
 }
 
 // runEval replays cases with this config; the runs and report go to out.
-func runEval(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh github.CLI, cases, out string, reps int) error {
+func runEval(ctx context.Context, cfg config.Config, tr *tracker.Tracker, gh *github.API, cases, out string, reps int) error {
 	cs, err := eval.LoadCases(cases)
 	if err != nil {
 		return err

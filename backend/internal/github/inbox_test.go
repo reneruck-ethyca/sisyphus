@@ -2,7 +2,7 @@ package github
 
 import "testing"
 
-const inboxFixture = `{"data":{"repository":{"pullRequest":{
+const inboxFixture = `{"repository":{"pullRequest":{
  "reviewThreads":{"nodes":[
   {"id":"T1","isResolved":false,"isOutdated":true,"path":"a.go","line":12,"comments":{"nodes":[
     {"databaseId":101,"body":"rename this","createdAt":"2026-11-05T10:00:00Z","url":"u1","author":{"login":"alice","__typename":"User"}},
@@ -16,7 +16,7 @@ const inboxFixture = `{"data":{"repository":{"pullRequest":{
   {"databaseId":204,"state":"CHANGES_REQUESTED","body":"fix it","createdAt":"2026-11-05T11:00:00Z","url":"r4","author":{"login":"ethycabot","__typename":"User"}}]},
  "comments":{"nodes":[
   {"databaseId":301,"body":"hello","createdAt":"2026-11-05T12:00:00Z","url":"c1","author":{"login":"carol","__typename":"User"}}]}
-}}}}`
+}}}`
 
 func TestParseInbox(t *testing.T) {
 	in, err := parseInbox([]byte(inboxFixture))
@@ -41,20 +41,8 @@ func TestParseInbox(t *testing.T) {
 	}
 }
 
-func TestParseInboxErrors(t *testing.T) {
-	if _, err := parseInbox([]byte(`{"errors":[{"message":"nope"}]}`)); err == nil {
-		t.Error("graphql error not reported")
-	}
+func TestParseInboxBadJSON(t *testing.T) {
 	if _, err := parseInbox([]byte(`x`)); err == nil {
 		t.Error("bad json not reported")
-	}
-}
-
-func TestParseCommentID(t *testing.T) {
-	if got := parseCommentID("https://github.com/o/r/pull/7#issuecomment-12345\n"); got != 12345 {
-		t.Errorf("id = %d", got)
-	}
-	if got := parseCommentID("nothing"); got != 0 {
-		t.Errorf("id = %d", got)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/reneruck/sisyphus/internal/github"
 )
 
-// GitHub is what TLM needs from GitHub; github.CLI implements it.
+// GitHub is what TLM needs from GitHub; github.API implements it.
 type GitHub interface {
 	PRView(ctx context.Context, ref github.PRRef) (github.PRSnapshot, error)
 	CreatePR(ctx context.Context, repo string, pr github.NewPR) (github.PRRef, error)
@@ -21,7 +21,7 @@ type GitHub interface {
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 }
 
-var _ GitHub = github.CLI{}
+var _ GitHub = (*github.API)(nil)
 
 // FakeGitHub is an in-memory GitHub for tests: it records the calls it gets.
 type FakeGitHub struct {

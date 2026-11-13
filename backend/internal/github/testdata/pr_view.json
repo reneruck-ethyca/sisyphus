@@ -1,4 +1,4 @@
-{
+{"repository": {"pullRequest": {
   "number": 42,
   "url": "https://github.com/ethyca/fidesplus/pull/42",
   "state": "OPEN",
@@ -10,70 +10,32 @@
   "mergeStateStatus": "BEHIND",
   "reviewDecision": "CHANGES_REQUESTED",
   "body": "## Description\n\nDoes the thing.",
-  "author": {"id": "MDQ6VXNlcjE=", "is_bot": false, "login": "reneruck", "name": "Rene"},
+  "author": {"login": "reneruck", "__typename": "User"},
   "mergedAt": null,
   "closedAt": null,
+  "mergedBy": null,
   "additions": 120,
   "deletions": 8,
-  "files": [
-    {"path": "src/a.py", "additions": 100, "deletions": 8},
-    {"path": "tests/test_a.py", "additions": 20, "deletions": 0}
-  ],
-  "reviews": [
-    {
-      "id": "PRR_1",
-      "author": {"login": "alice"},
-      "authorAssociation": "MEMBER",
-      "body": "Please rename.",
-      "submittedAt": "2026-11-05T10:00:00Z",
-      "state": "CHANGES_REQUESTED",
-      "commit": {"oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-    },
-    {
-      "id": "PRR_2",
-      "author": {"login": "ethycabot", "is_bot": true},
-      "authorAssociation": "NONE",
-      "body": "",
-      "submittedAt": "2026-11-05T10:05:00Z",
-      "state": "COMMENTED",
-      "commit": {"oid": "0123456789abcdef0123456789abcdef01234567"}
-    }
-  ],
-  "reviewRequests": [
-    {"__typename": "User", "login": "bob"},
-    {"__typename": "Team", "name": "Backend", "slug": "backend"}
-  ],
-  "statusCheckRollup": [
-    {
-      "__typename": "CheckRun",
-      "name": "pytest",
-      "workflowName": "CI",
-      "status": "COMPLETED",
-      "conclusion": "FAILURE",
-      "detailsUrl": "https://github.com/ethyca/fidesplus/actions/runs/99/job/1",
-      "startedAt": "2026-11-05T09:00:00Z",
-      "completedAt": "2026-11-05T09:30:00Z"
-    },
-    {
-      "__typename": "CheckRun",
-      "name": "lint",
-      "workflowName": "CI",
-      "status": "IN_PROGRESS",
-      "conclusion": "",
-      "detailsUrl": "https://github.com/ethyca/fidesplus/actions/runs/99/job/2"
-    },
-    {
-      "__typename": "StatusContext",
-      "context": "ci/legacy",
-      "state": "PENDING",
-      "targetUrl": "https://example.com/legacy",
-      "startedAt": "2026-11-05T09:00:00Z"
-    },
-    {
-      "__typename": "StatusContext",
-      "context": "ci/other",
-      "state": "SUCCESS",
-      "targetUrl": "https://example.com/other"
-    }
-  ]
-}
+  "files": {"nodes": [{"path": "src/a.py"}, {"path": "tests/test_a.py"}]},
+  "reviews": {"nodes": [
+    {"author": {"login": "alice", "__typename": "User"}, "body": "Please rename.", "submittedAt": "2026-11-05T10:00:00Z",
+     "state": "CHANGES_REQUESTED", "commit": {"oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+    {"author": {"login": "ethycabot", "__typename": "Bot"}, "body": "", "submittedAt": "2026-11-05T10:05:00Z",
+     "state": "COMMENTED", "commit": {"oid": "0123456789abcdef0123456789abcdef01234567"}}
+  ]},
+  "reviewRequests": {"nodes": [
+    {"requestedReviewer": {"__typename": "User", "login": "bob"}},
+    {"requestedReviewer": {"__typename": "Team", "slug": "backend"}},
+    {"requestedReviewer": null}
+  ]},
+  "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": [
+    {"__typename": "CheckRun", "name": "pytest", "status": "COMPLETED", "conclusion": "FAILURE",
+     "detailsUrl": "https://github.com/ethyca/fidesplus/actions/runs/99/job/1",
+     "checkSuite": {"workflowRun": {"workflow": {"name": "CI"}}}},
+    {"__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS", "conclusion": null,
+     "detailsUrl": "https://github.com/ethyca/fidesplus/actions/runs/99/job/2",
+     "checkSuite": {"workflowRun": {"workflow": {"name": "CI"}}}},
+    {"__typename": "StatusContext", "context": "ci/legacy", "state": "PENDING", "targetUrl": "https://example.com/legacy"},
+    {"__typename": "StatusContext", "context": "ci/other", "state": "SUCCESS", "targetUrl": "https://example.com/other"}
+  ]}}}}]}
+}}}

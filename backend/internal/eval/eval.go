@@ -107,7 +107,7 @@ func loadCase(f string) (Case, error) {
 type Runner struct {
 	Cfg   config.Config
 	RT    container.Runtime
-	GH    github.CLI
+	GH    *github.API
 	Locks *tracker.Locks
 	Out   string // runs land in Out/runs/<owner>/<repo>/<n>/eval-<sha>-r<k>/
 	Reps  int
@@ -149,12 +149,12 @@ type pull struct {
 
 func (e Runner) runCase(ctx context.Context, rev *review.Reviewer, c Case) error {
 	ref, _ := c.ref()
-	out, err := proc.Run(ctx, "", "gh", "api", fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number))
+	d, err := e.GH.Discussion(ctx, ref) // ponytail: fetches four files for the one it needs; fine for an eval
 	if err != nil {
 		return err
 	}
 	var p pull
-	if err := json.Unmarshal([]byte(out), &p); err != nil {
+	if err := json.Unmarshal(d[0].Body, &p); err != nil {
 		return err
 	}
 	repoDir := filepath.Join(e.Cfg.ReposRoot, path.Base(ref.Repo))
@@ -277,7 +277,7 @@ type runMeta struct {
 
 // before is the discussion as it stood at Cutoff, for the run's context dir.
 type before struct {
-	GH         github.CLI
+	GH         *github.API
 	Cutoff     time.Time
 	Head, Base string
 }

@@ -27,7 +27,7 @@ type Approval struct {
 	Bot       bool   `json:"bot,omitempty"`
 }
 
-// Snapshot is the PR as TLM sees it, built from one `gh pr view` plus local
+// Snapshot is the PR as TLM sees it, built from one PRView plus local
 // git (design §4). Review threads, failed job logs and the body-edit guard
 // join it in later phases. Who TLM requested and who was removed live on the
 // Handoff.

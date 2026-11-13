@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 // InboxComment is one comment on a PR: an inline review comment, a review's
@@ -49,17 +46,16 @@ comments(last:100){nodes{databaseId body createdAt url author{login __typename}}
 }}}`
 
 // Inbox reads the PR's review threads, review bodies and conversation comments.
-func (CLI) Inbox(ctx context.Context, ref PRRef) (Inbox, error) {
+func (a *API) Inbox(ctx context.Context, ref PRRef) (Inbox, error) {
 	owner, name, ok := strings.Cut(ref.Repo, "/")
 	if !ok {
 		return Inbox{}, fmt.Errorf("bad repo %q", ref.Repo)
 	}
-	out, err := proc.Run(ctx, "", "gh", "api", "graphql", "-f", "query="+inboxQuery,
-		"-f", "owner="+owner, "-f", "name="+name, "-F", "number="+strconv.Itoa(ref.Number))
-	if err != nil {
+	var data json.RawMessage
+	if err := a.graphql(ctx, inboxQuery, map[string]any{"owner": owner, "name": name, "number": ref.Number}, &data); err != nil {
 		return Inbox{}, err
 	}
-	return parseInbox([]byte(out))
+	return parseInbox(data)
 }
 
 type gqlComment struct {
@@ -85,35 +81,29 @@ func (c gqlComment) comment() InboxComment {
 
 func parseInbox(b []byte) (Inbox, error) {
 	var v struct {
-		Errors []struct{ Message string } `json:"errors"`
-		Data   struct {
-			Repository struct {
-				PullRequest struct {
-					ReviewThreads struct {
-						Nodes []struct {
-							ID         string `json:"id"`
-							IsResolved bool   `json:"isResolved"`
-							IsOutdated bool   `json:"isOutdated"`
-							Path       string `json:"path"`
-							Line       int    `json:"line"`
-							Comments   struct {
-								Nodes []gqlComment `json:"nodes"`
-							} `json:"comments"`
-						} `json:"nodes"`
-					} `json:"reviewThreads"`
-					Reviews  struct{ Nodes []gqlComment } `json:"reviews"`
-					Comments struct{ Nodes []gqlComment } `json:"comments"`
-				} `json:"pullRequest"`
-			} `json:"repository"`
-		} `json:"data"`
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads struct {
+					Nodes []struct {
+						ID         string `json:"id"`
+						IsResolved bool   `json:"isResolved"`
+						IsOutdated bool   `json:"isOutdated"`
+						Path       string `json:"path"`
+						Line       int    `json:"line"`
+						Comments   struct {
+							Nodes []gqlComment `json:"nodes"`
+						} `json:"comments"`
+					} `json:"nodes"`
+				} `json:"reviewThreads"`
+				Reviews  struct{ Nodes []gqlComment } `json:"reviews"`
+				Comments struct{ Nodes []gqlComment } `json:"comments"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return Inbox{}, fmt.Errorf("parse inbox: %w", err)
 	}
-	if len(v.Errors) > 0 {
-		return Inbox{}, fmt.Errorf("inbox: %s", v.Errors[0].Message)
-	}
-	pr := v.Data.Repository.PullRequest
+	pr := v.Repository.PullRequest
 	var in Inbox
 	for _, t := range pr.ReviewThreads.Nodes {
 		th := ReviewThread{ID: t.ID, Resolved: t.IsResolved, Outdated: t.IsOutdated, Path: t.Path, Line: t.Line}

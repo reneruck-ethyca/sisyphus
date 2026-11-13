@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 // PRRef identifies a PR. Repo is "owner/name".
@@ -48,7 +48,7 @@ type PR struct {
 	Comments           []Comment // issue + inline review comments
 }
 
-// Client is everything sisyphus needs from Client; swap the gh CLI out here.
+// Client is what the tracker needs from GitHub; API implements it, Fake stands in for tests.
 type Client interface {
 	CurrentUser(ctx context.Context) (string, error)
 	// Candidates finds open PRs that may await user's review. Search results lag
@@ -61,52 +61,74 @@ type Client interface {
 	Files(ctx context.Context, ref PRRef) ([]string, error)
 }
 
-// CLI implements Client by shelling out to an authenticated `gh`.
-type CLI struct{}
-
-func (CLI) CurrentUser(ctx context.Context) (string, error) {
-	return proc.Run(ctx, "", "gh", "api", "user", "-q", ".login")
+func (a *API) CurrentUser(ctx context.Context) (string, error) {
+	var u struct {
+		Login string `json:"login"`
+	}
+	return u.Login, a.get(ctx, "user", &u)
 }
 
-func (CLI) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
-	out, err := proc.Run(ctx, "", "gh", "search", "prs", "--state=open", "--owner="+org, "--review-requested="+user,
-		"--json", "repository,number", "--limit", "200")
-	if err != nil {
-		return nil, err
-	}
-	refs, err := parseSearch([]byte(out))
-	if err != nil {
-		return nil, err
+// maxCandidates matches the limit `gh search prs` ran with.
+const maxCandidates = 200
+
+func (a *API) Candidates(ctx context.Context, org, user string) ([]PRRef, error) {
+	q := url.Values{"q": {fmt.Sprintf("is:pr is:open user:%s review-requested:%s", org, user)}, "per_page": {"100"}}
+	var refs []PRRef
+	for path := "search/issues?" + q.Encode(); path != "" && len(refs) < maxCandidates; {
+		b, next, err := a.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		page, err := parseSearch(b)
+		if err != nil {
+			return nil, err
+		}
+		refs, path = append(refs, page...), next
 	}
 	slices.SortFunc(refs, func(a, b PRRef) int { return strings.Compare(a.Key(), b.Key()) })
 	return refs, nil
 }
 
-func (CLI) Teams(ctx context.Context, org string) ([]string, error) {
-	out, err := proc.Run(ctx, "", "gh", "api", "user/teams", "--paginate",
-		"--jq", fmt.Sprintf(`.[] | select(.organization.login == %q) | .slug`, org))
+func (a *API) Teams(ctx context.Context, org string) ([]string, error) {
+	ts, err := pages[struct {
+		Slug         string `json:"slug"`
+		Organization struct {
+			Login string `json:"login"`
+		} `json:"organization"`
+	}](ctx, a, "user/teams?per_page=100")
 	if err != nil {
 		return nil, err
 	}
-	return strings.Fields(out), nil
+	var out []string
+	for _, t := range ts {
+		if t.Organization.Login == org {
+			out = append(out, t.Slug)
+		}
+	}
+	return out, nil
 }
 
 // ponytail: per_page=100, no pagination: a PR with more reviews or comments loses the newest; paginate then.
-func (c CLI) PR(ctx context.Context, ref PRRef) (PR, error) {
-	d, err := c.Discussion(ctx, ref)
+func (a *API) PR(ctx context.Context, ref PRRef) (PR, error) {
+	d, err := a.Discussion(ctx, ref)
 	if err != nil {
 		return PR{}, err
 	}
 	return parsePR(d[0].Body, d[1].Body, d[2].Body, d[3].Body)
 }
 
-func (CLI) Files(ctx context.Context, ref PRRef) ([]string, error) {
-	out, err := proc.Run(ctx, "", "gh", "api", "--paginate",
-		fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", ref.Repo, ref.Number), "--jq", ".[].filename")
+func (a *API) Files(ctx context.Context, ref PRRef) ([]string, error) {
+	fs, err := pages[struct {
+		Filename string `json:"filename"`
+	}](ctx, a, fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", ref.Repo, ref.Number))
 	if err != nil {
 		return nil, err
 	}
-	return strings.Split(strings.TrimSpace(out), "\n"), nil
+	out := make([]string, len(fs))
+	for i, f := range fs {
+		out[i] = f.Filename
+	}
+	return out, nil
 }
 
 // OpenPR is an open PR a search found.
@@ -117,15 +139,19 @@ type OpenPR struct {
 	Fork      bool      `json:"isCrossRepository"`
 }
 
+const openPRsQuery = `query($q:String!){search(query:$q,type:ISSUE,first:20){nodes{
+... on PullRequest{number headRefOid updatedAt isCrossRepository}}}}`
+
 // OpenPRs are repo's open PRs with phrase in their title or body.
-func (CLI) OpenPRs(ctx context.Context, repo, phrase string) ([]OpenPR, error) {
-	out, err := proc.Run(ctx, "", "gh", "pr", "list", "--repo", repo, "--state", "open",
-		"--search", fmt.Sprintf("%q in:title,body", phrase), "--json", "number,headRefOid,updatedAt,isCrossRepository", "--limit", "20")
-	if err != nil {
+func (a *API) OpenPRs(ctx context.Context, repo, phrase string) ([]OpenPR, error) {
+	var v struct {
+		Search struct{ Nodes []OpenPR }
+	}
+	q := fmt.Sprintf("repo:%s is:pr is:open %q in:title,body", repo, phrase)
+	if err := a.graphql(ctx, openPRsQuery, map[string]any{"q": q}, &v); err != nil {
 		return nil, err
 	}
-	var prs []OpenPR
-	return prs, json.Unmarshal([]byte(out), &prs)
+	return v.Search.Nodes, nil
 }
 
 // DiscussionFile is one raw GitHub API response about a PR.
@@ -136,7 +162,7 @@ type DiscussionFile struct {
 
 // Discussion fetches a PR, its reviews, its inline review comments and its
 // issue comments, as the GitHub API returns them.
-func (CLI) Discussion(ctx context.Context, ref PRRef) ([]DiscussionFile, error) {
+func (a *API) Discussion(ctx context.Context, ref PRRef) ([]DiscussionFile, error) {
 	base := fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number)
 	files := []DiscussionFile{
 		{Name: "pr.json"}, {Name: "reviews.json"}, {Name: "review_comments.json"}, {Name: "issue_comments.json"},
@@ -144,51 +170,61 @@ func (CLI) Discussion(ctx context.Context, ref PRRef) ([]DiscussionFile, error) 
 	paths := []string{base, base + "/reviews?per_page=100", base + "/comments?per_page=100",
 		fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", ref.Repo, ref.Number)}
 	for i, p := range paths {
-		out, err := proc.Run(ctx, "", "gh", "api", p)
+		b, _, err := a.do(ctx, http.MethodGet, p, nil)
 		if err != nil {
 			return nil, err
 		}
-		files[i].Body = []byte(out)
+		files[i].Body = b
 	}
 	return files, nil
 }
 
 // CreateReview posts a review from file (the GitHub create-review payload)
 // and returns the review's URL.
-func (CLI) CreateReview(ctx context.Context, ref PRRef, file string) (string, error) {
-	return proc.Run(ctx, "", "gh", "api", "--method", "POST",
-		fmt.Sprintf("repos/%s/pulls/%d/reviews", ref.Repo, ref.Number), "--input", file, "--jq", ".html_url")
+func (a *API) CreateReview(ctx context.Context, ref PRRef, file string) (string, error) {
+	payload, err := os.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		HTMLURL string `json:"html_url"`
+	}
+	return r.HTMLURL, a.send(ctx, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/reviews", ref.Repo, ref.Number), payload, &r)
 }
 
 // ReplyToComment answers in the thread of an inline review comment.
-func (c CLI) ReplyToComment(ctx context.Context, ref PRRef, commentID int64, body string) error {
-	_, err := c.Reply(ctx, ref, commentID, body)
+func (a *API) ReplyToComment(ctx context.Context, ref PRRef, commentID int64, body string) error {
+	_, err := a.Reply(ctx, ref, commentID, body)
 	return err
 }
 
 // Reply is ReplyToComment that returns the new comment's id.
-func (CLI) Reply(ctx context.Context, ref PRRef, commentID int64, body string) (int64, error) {
-	out, err := proc.Run(ctx, "", "gh", "api", "--method", "POST",
-		fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", ref.Repo, ref.Number, commentID), "-f", "body="+body, "--jq", ".id")
-	if err != nil {
-		return 0, err
+func (a *API) Reply(ctx context.Context, ref PRRef, commentID int64, body string) (int64, error) {
+	var c struct {
+		ID int64 `json:"id"`
 	}
-	return strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	return c.ID, a.send(ctx, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", ref.Repo, ref.Number, commentID),
+		map[string]string{"body": body}, &c)
 }
 
-func parseSearch(out []byte) ([]PRRef, error) {
-	var rows []struct {
-		Number     int `json:"number"`
-		Repository struct {
-			NameWithOwner string `json:"nameWithOwner"`
-		} `json:"repository"`
+// parseSearch reads one page of search/issues.
+func parseSearch(b []byte) ([]PRRef, error) {
+	var page struct {
+		Items []struct {
+			Number        int    `json:"number"`
+			RepositoryURL string `json:"repository_url"` // https://api.github.com/repos/owner/name
+		} `json:"items"`
 	}
-	if err := json.Unmarshal(out, &rows); err != nil {
+	if err := json.Unmarshal(b, &page); err != nil {
 		return nil, fmt.Errorf("parse search: %w", err)
 	}
-	refs := make([]PRRef, len(rows))
-	for i, r := range rows {
-		refs[i] = PRRef{Repo: r.Repository.NameWithOwner, Number: r.Number}
+	refs := make([]PRRef, 0, len(page.Items))
+	for _, it := range page.Items {
+		_, repo, ok := strings.Cut(it.RepositoryURL, "/repos/")
+		if !ok {
+			return nil, fmt.Errorf("parse search: repository_url %q", it.RepositoryURL)
+		}
+		refs = append(refs, PRRef{Repo: repo, Number: it.Number})
 	}
 	return refs, nil
 }
