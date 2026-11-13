@@ -302,9 +302,10 @@ function RunPage({ status: s, pr, runs, runID, archive }: { status: Status; pr: 
   const setup = useRef<HTMLPreElement>(null);
   const running = run?.status === "running";
 
+  // A newly loaded log already holds what was streamed so far.
+  useEffect(() => setLive([]), [log.data]);
   // Follow a running run from where the loaded log ends; a finished one is all in the log.
   useEffect(() => {
-    setLive([]);
     if (!running || !log.data) return;
     const src = stream(`${files}/events?from=${log.data.next}`);
     src.onmessage = (m) => {

@@ -112,18 +112,19 @@ export function useTick(ms = 30000): number {
 export type Loaded<T> = { data?: T; error?: string; loading: boolean };
 
 export function useFetch<T>(url: string, key: unknown = ""): Loaded<T> {
-  const [state, set] = useState<Loaded<T>>({ loading: true });
+  const [state, set] = useState<Loaded<T> & { url?: string }>({ loading: true });
   useEffect(() => {
     if (!url) return set({ loading: false });
     let live = true;
     set((s) => ({ ...s, loading: true }));
     get<T>(url).then(
-      (data) => live && set({ data, loading: false }),
-      (e: Error) => live && set({ error: e.message, loading: false }),
+      (data) => live && set({ url, data, loading: false }),
+      (e: Error) => live && set({ url, error: e.message, loading: false }),
     );
     return () => void (live = false);
   }, [url, String(key)]);
-  return state;
+  // Another URL's answer isn't this one's: while it loads there is none. Reloading the same URL keeps the last.
+  return state.url === url ? state : { loading: !!url };
 }
 
 // sessionState is per-tab memory that survives a reload: a search, a draft.
