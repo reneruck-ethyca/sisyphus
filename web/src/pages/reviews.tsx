@@ -93,18 +93,16 @@ function HistoryList({ rows, sel }: { rows: HistoryRow[]; sel?: string }) {
 
 function Overview({ status: s }: { status: Status }) {
   const attention = (s.prs ?? []).filter((p) => p.group === "attention"), reviewing = (s.prs ?? []).filter((p) => p.group === "reviewing");
-  const needs = s.needs_human ?? [];
   return <>
     <h1>Overview</h1>
     <section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
       {s.last_error && <p class="notice">The last check failed: {s.last_error}</p>}
       <Notices status={s} />
-      {needs.length > 0 && <p class="notice">{needs.length} handoff{needs.length === 1 ? " needs" : "s need"} you → <a href="/lastmile">Open Last mile</a></p>}
       {attention.length ? <ol class="list card">{attention.map((p) => <li key={p.id}>
         <Chip tone={p.tone}>{p.verdict}</Chip>
         <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number} · {p.last_error || p.review_note}</span></span>
         {!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</li>)}</ol>
-        : !s.last_error && !s.runtime_error && s.reviews && !needs.length && <div class="card empty"><div><b>Nothing needs you right now</b>
+        : !s.last_error && !s.runtime_error && s.reviews && <div class="card empty"><div><b>Nothing needs you right now</b>
           <div class="muted">Failed reviews, merge conflicts and container problems show up here.</div></div></div>}
     </section>
     <section aria-labelledby="now"><h2 id="now">Reviewing now</h2>
