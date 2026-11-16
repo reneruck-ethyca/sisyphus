@@ -98,6 +98,7 @@ section { display: flex; flex-direction: column; gap: 10px; }
 .list > li > .chip { justify-self: start; }
 .list > li + li { border-top: 1px solid var(--line2); }
 .list .grow { min-width: 0; }
+.list .ends { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .list time, .list .facts { color: var(--muted); font-size: 13px; }
 /* Last mile: one grid for the header and every row, so the columns line up; a stack's children sit indented under their parent. */
 .lm { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content max-content; }

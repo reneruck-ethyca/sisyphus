@@ -28,7 +28,7 @@ export function Home({ status: s, error }: { status?: Status; error: string }) {
             <span class="t"><Ago t={v.updated} /></span></li>)}
           {(s.failing ?? []).map((p) => <li key={p.id}><Chip tone={p.tone}>{p.verdict}</Chip><span class="src">{p.design ? "Design" : "Review"}</span>
             <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number}{p.design && p.author && ` · ${p.author}`} · {p.last_error || p.review_note}</span></span>
-            <span class="t">{!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</span><DesignButton pr={p} /></li>)}
+            <span class="t ends">{!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}<DesignButton pr={p} /></span></li>)}
           {(s.awaiting_you ?? []).map((p) => <li key={p.id}><Chip tone={p.tone}>{p.verdict}</Chip><span class="src">Your review</span>
             <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number}{p.author && ` · ${p.author}`} · sisyphus reviewed · waiting for yours
               {p.url && <> · <Ext href={p.url}>PR ↗</Ext></>}</span></span>

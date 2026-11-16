@@ -106,7 +106,7 @@ function Overview({ status: s }: { status: Status }) {
       {attention.length ? <ol class="list card">{attention.map((p) => <li key={p.id}>
         <Chip tone={p.tone}>{p.verdict}</Chip>
         <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number} · {p.last_error || p.review_note}</span></span>
-        {!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}<DesignButton pr={p} /></li>)}</ol>
+        <span class="ends">{!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}<DesignButton pr={p} /></span></li>)}</ol>
         : !s.last_error && !s.runtime_error && s.reviews && <div class="card empty"><div><b>Nothing needs you right now</b>
           <div class="muted">Design reviews, failed reviews, merge conflicts and container problems show up here.</div></div></div>}
     </section>

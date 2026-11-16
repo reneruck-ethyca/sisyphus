@@ -144,11 +144,18 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		if since != "" && since != d.HeadSHA {
 			// ponytail: a since commit GitHub no longer has (force-pushed away) leaves sinceLines null; the page then highlights the whole PR.
 			if cf, err := srv.gh.CompareFiles(ctx, d.HeadRepo, since, d.HeadSHA); err == nil {
-				lines := []int{}
-				if j := slices.IndexFunc(cf, func(c github.ChangedFile) bool { return c.Filename == p }); j >= 0 && cf[j].Patch != nil {
-					_, lines = github.ParsePatch(*cf[j].Patch)
+				out["sinceLines"] = []int{}
+				if j := slices.IndexFunc(cf, func(c github.ChangedFile) bool { return c.Filename == p }); j >= 0 {
+					out["sinceLines"] = nil
+					var he *api.HTTPError
+					if cf[j].Patch != nil {
+						_, out["sinceLines"] = github.ParsePatch(*cf[j].Patch)
+					} else if old, err := srv.gh.Content(ctx, d.HeadRepo, p, since); err == nil { // GitHub leaves out a big diff
+						out["sinceLines"] = addedLines(string(old), string(content))
+					} else if errors.As(err, &he) && he.StatusCode == http.StatusNotFound { // not there yet at that commit
+						out["sinceLines"] = addedLines("", string(content))
+					}
 				}
-				out["sinceLines"] = lines
 			}
 		} else if since != "" {
 			out["sinceLines"] = []int{}
@@ -226,6 +233,42 @@ func designHandlers(mux *http.ServeMux, srv server) {
 	mux.HandleFunc("DELETE "+base+"/review", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, _ *http.Request) error {
 		return srv.gh.DiscardReview(ctx, ref, d.Viewer)
 	}))
+}
+
+// addedLines returns the 1-based lines of now that aren't in before, by a longest
+// common subsequence of whole lines.
+// ponytail: O(n·m) table, ~1M cells for two 1000-line docs; Myers if docs get much longer.
+func addedLines(before, now string) []int {
+	a, b := strings.Split(before, "\n"), strings.Split(now, "\n")
+	if before == "" {
+		a = nil
+	}
+	lcs := make([][]int32, len(a)+1)
+	for i := range lcs {
+		lcs[i] = make([]int32, len(b)+1)
+	}
+	for i := len(a) - 1; i >= 0; i-- {
+		for j := len(b) - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				lcs[i][j] = lcs[i+1][j+1] + 1
+			} else {
+				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+			}
+		}
+	}
+	out := []int{}
+	for i, j := 0, 0; j < len(b); {
+		switch {
+		case i < len(a) && a[i] == b[j]:
+			i, j = i+1, j+1
+		case i < len(a) && lcs[i+1][j] >= lcs[i][j+1]:
+			i++
+		default:
+			out = append(out, j+1)
+			j++
+		}
+	}
+	return out
 }
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
