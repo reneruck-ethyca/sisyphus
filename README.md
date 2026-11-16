@@ -133,6 +133,15 @@ prose (under `docs/`, or `.md`/`.mdx`/`.rst`, ignoring `changelog/` fragments) a
 design, ADR or RFC, or a doc sits under a `designs/`, `adrs/`, `rfcs/` or `plans/` directory. This is
 decided again for each new head, so a design PR that gains code gets automatic reviews from then on.
 
+You review a design PR yourself on its design page (**Review design**, `/prs/{owner}/{repo}/{n}/design`):
+its Markdown docs rendered, Mermaid diagrams included, with the review threads beside them. Select text
+or press **+** beside a block to comment, add comments to a pending review or post them right away,
+reply, resolve, and submit the review as Comment, Approve or Request changes. Everything goes to GitHub
+as you. A new design PR sits in **Needs you**; once you've reviewed it, it moves to **Waiting on the
+author** and comes back to Needs you on new commits, or on comments from others unless you approved.
+Coming back, the page marks the comments that arrived since your review and can highlight only what
+changed since then.
+
 Otherwise, a run is started when a PR is first tracked (`new`), after new commits (`commits`, which also stops a
 run still going on the old head) and after new replies (`replies`, queued behind a running one). Each
 PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and one running container,
@@ -551,6 +560,9 @@ Settings that are paths mounted into or copied for review containers (`codex_hom
 | `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events?from=` | a run's parsed events (server-sent events: backlog, then live) |
 | `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/review`, `…/files/{path}` | what the agent wrote (`out/review.json`, or null); the run's files |
 | `GET /api/prs/{owner}/{repo}/{number}/stack` | the PR's local stack on Docker (null: none configured) |
+| `GET /api/prs/{owner}/{repo}/{number}/design`, `…/design/file?path=&since=`, `…/design/blob?path=` | a tracked PR's docs, one doc at the head with its changed lines (and those since a commit), a file a doc links to |
+| `GET`, `POST /api/prs/{owner}/{repo}/{number}/design/threads`; `POST …/threads/{id}/replies` \| `resolve` \| `unresolve` | review threads, on GitHub as you; writes need `X-Head`, the head the page rendered (409 once it moved) |
+| `POST`, `DELETE /api/prs/{owner}/{repo}/{number}/design/review` | submit your pending review (`{event, body}`), or discard it |
 | `GET /api/history` | PRs no longer tracked, with their runs |
 | `GET /api/logs`, `GET /api/logs/stream` | last 1000 ops log lines; live (server-sent events) |
 | `GET`/`PUT /api/settings`, `POST /api/restart` | settings; re-exec to apply them |

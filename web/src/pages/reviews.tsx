@@ -60,7 +60,7 @@ function PRList({ status: s, sel }: { status: Status; sel?: string }) {
     {s.groups?.length ? s.groups.map((g) => <Fragment key={g.label}>
       <h2><span>{g.label}</span><span>{g.prs.length}</span></h2>
       {g.prs.map((p) => <a key={p.id} class="pr" href={`/prs/${p.repo}/${p.number}`} aria-current={p.id === sel ? "page" : undefined}>
-        <span class="row"><Chip tone={p.tone}>{p.verdict}</Chip>{p.design_review && <span class="chip" title="Reviewed only when you start one">Design</span>}
+        <span class="row"><Chip tone={p.tone}>{p.verdict}</Chip>{p.design_review && !p.design && <span class="chip" title="Reviewed only when you start one">Design</span>}
           {!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</span>
         <span class="title">{p.title}</span>
         <span class="meta">{base(p.repo)} #{p.number}{p.author && ` · ${p.author}`}</span>
@@ -91,8 +91,13 @@ function HistoryList({ rows, sel }: { rows: HistoryRow[]; sel?: string }) {
   </>;
 }
 
+// DesignButton opens a design review's docs; nothing for a code review.
+export const DesignButton = ({ pr }: { pr: PRView }) => pr.design
+  ? <a class="btn small" href={`/prs/${pr.repo}/${pr.number}/design`}>{isZero(pr.design.reviewed_at) ? "Review design" : "Review changes"}</a> : null;
+
 function Overview({ status: s }: { status: Status }) {
-  const attention = (s.prs ?? []).filter((p) => p.group === "attention"), reviewing = (s.prs ?? []).filter((p) => p.group === "reviewing");
+  const group = (g: string) => (s.prs ?? []).filter((p) => p.group === g);
+  const attention = group("attention"), reviewing = group("reviewing"), author = group("author");
   return <>
     <h1>Overview</h1>
     <section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
@@ -101,10 +106,16 @@ function Overview({ status: s }: { status: Status }) {
       {attention.length ? <ol class="list card">{attention.map((p) => <li key={p.id}>
         <Chip tone={p.tone}>{p.verdict}</Chip>
         <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number} · {p.last_error || p.review_note}</span></span>
-        {!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</li>)}</ol>
+        {!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}<DesignButton pr={p} /></li>)}</ol>
         : !s.last_error && !s.runtime_error && s.reviews && <div class="card empty"><div><b>Nothing needs you right now</b>
-          <div class="muted">Failed reviews, merge conflicts and container problems show up here.</div></div></div>}
+          <div class="muted">Design reviews, failed reviews, merge conflicts and container problems show up here.</div></div></div>}
     </section>
+    {author.length > 0 && <section aria-labelledby="author"><h2 id="author">Waiting on the author</h2>
+      <ol class="list card">{author.map((p) => <li key={p.id}>
+        <Chip tone={p.tone}>{p.verdict}</Chip>
+        <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number}{p.author && ` · ${p.author}`} · back in Needs you on new commits or comments</span></span>
+        {!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</li>)}</ol>
+    </section>}
     <section aria-labelledby="now"><h2 id="now">Reviewing now</h2>
       {reviewing.length ? <ol class="list card">{reviewing.map((p) => <li key={p.id}>
         <Chip tone={p.tone}>{p.verdict}</Chip>
@@ -175,7 +186,9 @@ function PRPage({ status: s, pr }: { status: Status; pr: PRView }) {
       <div class="meta-line"><span>{pr.repo} #{pr.number}</span>{pr.author && <span>by <Ext href={`https://github.com/${pr.author}`}>{pr.author}</Ext></span>}
         <code>{pr.head_ref}</code><span>tracked <Ago t={pr.tracked_at} /></span></div>
       <div class="actions">
-        <button class="btn" disabled={busy === "review"} onClick={() => act("review")}>{runs.length ? "Review again" : "Review now"}</button>
+        {pr.design && <a class="btn" href={`/prs/${pr.repo}/${pr.number}/design`}>{isZero(pr.design.reviewed_at) ? "Review design" : "Open the docs"}</a>}
+        <button class={"btn" + (pr.design ? " quiet" : "")} disabled={busy === "review"} onClick={() => act("review")}>
+          {pr.design ? (runs.length ? "Ask the AI again" : "Ask the AI for a review") : runs.length ? "Review again" : "Review now"}</button>
         <Ext class="btn quiet" href={pr.url}>Open on GitHub ↗</Ext>
         <details class="menu" ref={menu}><summary class="btn quiet">More ▾</summary><div>
           <button disabled={!!busy} onClick={() => act("reset", "Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays.")}>
@@ -193,7 +206,15 @@ function PRPage({ status: s, pr }: { status: Status; pr: PRView }) {
 
     <AgentFold pr={pr} />
 
-    <section aria-labelledby="latest"><h2 id="latest">Latest review</h2>
+    {pr.design && <section aria-labelledby="yours"><h2 id="yours">Your review</h2>
+      <div class="card"><div class="card-h"><Chip tone={pr.tone}>{isZero(pr.design.reviewed_at) ? "Not reviewed yet" : pr.verdict}</Chip>
+        <span class="muted">{pr.review_note}</span>
+        <a class="end" href={`/prs/${pr.repo}/${pr.number}/design`}>Open the docs →</a></div>
+        <div class="card-f">{isZero(pr.design.reviewed_at) ? "Sisyphus watches this PR once you've submitted a review."
+          : "Sisyphus puts it back in Needs you on new commits, or on comments unless you approved."}</div></div>
+    </section>}
+
+    <section aria-labelledby="latest"><h2 id="latest">{pr.design ? "Latest AI review" : "Latest review"}</h2>
       {runs.length ? <LatestReview pr={pr} runs={runs} runBase={`/prs/${pr.repo}/${pr.number}/runs`}
         foot={pr.up_to_date && !pr.design_review ? <>Up to date with <code>{short(pr.head_sha)}</code>. The next review starts on new commits or replies.</> : pr.review_note} />
         : <div class="card"><div class="card-b muted">{pr.review_note}</div></div>}

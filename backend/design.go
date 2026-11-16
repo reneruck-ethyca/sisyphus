@@ -127,7 +127,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		}
 		i := slices.IndexFunc(files, func(f github.ChangedFile) bool { return f.Filename == p && f.Status != "removed" })
 		if i < 0 || !isDoc(p) {
-			return nil, notDoc
+			return nil, errNotDoc
 		}
 		f := files[i]
 		content, err := srv.gh.Content(ctx, d.HeadRepo, p, d.HeadSHA)
@@ -221,7 +221,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 	}))
 }
 
-var notDoc = errors.New("not a doc this PR changes")
+var errNotDoc = errors.New("not a doc this PR changes")
 
 type badRequest struct{ error }
 
@@ -242,7 +242,7 @@ func designError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &br):
 		code = http.StatusBadRequest
-	case errors.Is(err, notDoc), errors.Is(err, github.ErrNoPendingReview):
+	case errors.Is(err, errNotDoc), errors.Is(err, github.ErrNoPendingReview):
 		code = http.StatusNotFound
 	case errors.As(err, &he) && he.StatusCode >= 400 && he.StatusCode < 500 && he.StatusCode != http.StatusUnauthorized:
 		code = he.StatusCode

@@ -8,6 +8,15 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "dompurify": "^3.4.16",
+    "github-markdown-css": "^5.9.0",
+    "markdown-it": "^15.0.2",
+    "markdown-it-anchor": "^10.0.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-front-matter": "^0.2.4",
+    "markdown-it-github-alerts": "^1.0.1",
+    "markdown-it-task-lists": "^2.1.1",
+    "mermaid": "^12.1.0",
     "preact": "^11.0.1"
   },
   "devDependencies": {

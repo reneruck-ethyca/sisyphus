@@ -9,6 +9,12 @@ export type Tracked = {
   created_worktree: boolean; created_branch: boolean;
   tracked_at: string; last_seen_at: string;
   conflict_head_sha?: string; last_error?: string; design_review?: boolean;
+  design?: DesignState; // set for design reviews
+};
+
+// DesignState is where your own review of a design PR stands (tracker.DesignState).
+export type DesignState = {
+  reviewed_at: string; reviewed_sha?: string; verdict?: string; new_commits?: boolean; replies?: number;
 };
 
 export type Posted = { url?: string; event?: string; comments?: number; replies?: number; fallback?: boolean; error?: string };

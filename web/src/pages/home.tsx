@@ -3,7 +3,7 @@ import type { ShadowReport, Status } from "../api";
 import { Ago, BudgetMeter, Chip, Ext, Loading, Notices, Page } from "../components";
 import { base, clock, isZero, lmCount, pct, plural, runPath, secs } from "../format";
 import { useFetch } from "../live";
-import { runHref } from "./reviews";
+import { DesignButton, runHref } from "./reviews";
 
 export function Home({ status: s, error }: { status?: Status; error: string }) {
   const lastmileOn = !!s?.handoffs; // nil handoffs: the last mile is off
@@ -26,16 +26,16 @@ export function Home({ status: s, error }: { status?: Status; error: string }) {
             <span class="grow"><a href={`/lastmile/${v.id}`}>{v.title}</a><span class="facts">{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}
               {v.prev_state && ` · was ${v.prev_state}`} · {v.reason}{v.pr_url && <> · <Ext href={v.pr_url}>PR ↗</Ext></>}</span></span>
             <span class="t"><Ago t={v.updated} /></span></li>)}
-          {(s.failing ?? []).map((p) => <li key={p.id}><Chip tone={p.tone}>{p.verdict}</Chip><span class="src">Review</span>
-            <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number} · {p.last_error || p.review_note}</span></span>
-            <span class="t">{!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</span></li>)}
+          {(s.failing ?? []).map((p) => <li key={p.id}><Chip tone={p.tone}>{p.verdict}</Chip><span class="src">{p.design ? "Design" : "Review"}</span>
+            <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number}{p.design && p.author && ` · ${p.author}`} · {p.last_error || p.review_note}</span></span>
+            <span class="t">{!isZero(p.verdict_at) && <Ago t={p.verdict_at} />}</span><DesignButton pr={p} /></li>)}
           {(s.awaiting_you ?? []).map((p) => <li key={p.id}><Chip tone={p.tone}>{p.verdict}</Chip><span class="src">Your review</span>
             <span class="grow"><a href={`/prs/${p.repo}/${p.number}`}>{p.title}</a><span class="facts">{base(p.repo)} #{p.number}{p.author && ` · ${p.author}`} · sisyphus reviewed · waiting for yours
               {p.url && <> · <Ext href={p.url}>PR ↗</Ext></>}</span></span>
             <span class="t"><Ago t={p.verdict_at} /></span></li>)}
         </ol>
         : !s.last_error && !s.runtime_error && s.reviews && <div class="card empty"><div><b>Nothing needs you right now</b>
-          <div class="muted">Handoffs that need a person, failed reviews and reviews waiting for yours show up here.</div></div></div>}
+          <div class="muted">Handoffs that need a person, design reviews, failed reviews and reviews waiting for yours show up here.</div></div></div>}
       </section>
 
       <div class="two">
