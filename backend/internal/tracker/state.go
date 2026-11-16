@@ -35,6 +35,7 @@ type Tracked struct {
 	ClassifiedSHA string        `json:"classified_sha,omitempty"` // head DesignReview was decided for
 	Design        *DesignState  `json:"design,omitempty"`         // a design review's state; nil for code reviews
 	Agent         *config.Agent `json:"agent,omitempty"`          // nil inherits review.agent
+	ByHand        bool          `json:"by_hand,omitempty"`        // tracked from the API, not because it asked for my review
 }
 
 // DesignState is where the user's own review of a design PR stands, read off

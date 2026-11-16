@@ -95,7 +95,7 @@ func (t *Tracker) Tick(ctx context.Context) error {
 		if _, ignored := t.state.Ignored[ref.Key()]; ignored {
 			continue
 		}
-		if t.state.PRs[ref.Key()] == nil && t.discover(ctx, ref) {
+		if t.state.PRs[ref.Key()] == nil && t.discover(ctx, ref, false) {
 			added[ref.Key()] = true
 		}
 	}
@@ -107,7 +107,8 @@ func (t *Tracker) Tick(ctx context.Context) error {
 	return nil
 }
 
-func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
+// discover starts tracking ref. byHand tracks it whether or not it asks for my review.
+func (t *Tracker) discover(ctx context.Context, ref github.PRRef, byHand bool) bool {
 	key := ref.Key()
 	pr, err := t.gh.PR(ctx, ref)
 	if err != nil {
@@ -115,7 +116,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 		return false
 	}
 	// Picked up only on a request; reviewedByMe keeps PRs already tracked, not new ones.
-	if !requested(pr, t.cfg.User, t.teams) || dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "" {
+	if !byHand && !requested(pr, t.cfg.User, t.teams) || dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "" {
 		return false
 	}
 	if pr.HeadRepo != pr.Repo {
@@ -153,7 +154,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 	tr := &Tracked{
 		PRRef: pr.PRRef, URL: pr.URL, Title: pr.Title, Author: pr.Author, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
 		SyncedSHA: synced, Worktree: wt, CreatedWorktree: createdWT, CreatedBranch: createdBranch,
-		TrackedAt: time.Now(), LastSeenAt: seen,
+		TrackedAt: time.Now(), LastSeenAt: seen, ByHand: byHand,
 	}
 	t.state.PRs[key] = tr
 	t.save() // before anything else can fail: a created worktree must never be forgotten
@@ -184,7 +185,7 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 		slog.Warn("fetching PR", "pr", key, "err", err)
 		return
 	}
-	if reason := dropReason(pr, t.cfg.User, requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts); reason != "" {
+	if reason := dropReason(pr, t.cfg.User, tr.ByHand || requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts); reason != "" {
 		unlock, ok := t.lock(tr)
 		if !ok {
 			return // retried next tick, once whatever holds the worktree has let go
@@ -384,16 +385,28 @@ func (t *Tracker) Untrack(ctx context.Context, id string) error {
 	return nil
 }
 
-// Retrack stops ignoring a PR; the next tick picks it up if it still requests a review.
-func (t *Tracker) Retrack(id string) error {
+// Retrack stops ignoring an untracked PR; the next tick picks it up if it still
+// requests a review. Any other PR it tracks by hand, now: one that doesn't ask for
+// my review (any more), kept until merged or closed.
+func (t *Tracker) Retrack(ctx context.Context, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if _, ok := t.state.Ignored[id]; !ok {
-		return fmt.Errorf("%s isn't untracked", id)
+	if _, ok := t.state.Ignored[id]; ok {
+		delete(t.state.Ignored, id)
+		t.save()
+		slog.Info("tracking PR again", "pr", id)
+		return nil
 	}
-	delete(t.state.Ignored, id)
-	t.save()
-	slog.Info("tracking PR again", "pr", id)
+	if t.state.PRs[id] != nil {
+		return fmt.Errorf("%s is already tracked", id)
+	}
+	ref, err := github.ParseKey(id)
+	if err != nil {
+		return err
+	}
+	if !t.discover(ctx, ref, true) {
+		return fmt.Errorf("%s can't be tracked: merged, closed, a fork, or no clone of its repo (see the log)", id)
+	}
 	return nil
 }
 

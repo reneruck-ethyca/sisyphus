@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,16 @@ type PRRef struct {
 }
 
 func (r PRRef) Key() string { return fmt.Sprintf("%s#%d", r.Repo, r.Number) }
+
+// ParseKey reads a Key back: "owner/name#n".
+func ParseKey(key string) (PRRef, error) {
+	repo, n, ok := strings.Cut(key, "#")
+	num, err := strconv.Atoi(n)
+	if !ok || err != nil || num <= 0 || strings.Count(repo, "/") != 1 {
+		return PRRef{}, fmt.Errorf("%q isn't owner/repo#number", key)
+	}
+	return PRRef{Repo: repo, Number: num}, nil
+}
 
 type Review struct {
 	User        string

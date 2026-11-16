@@ -428,7 +428,7 @@ func TestUntrackIgnoresUntilRetracked(t *testing.T) {
 	if err := tr.Untrack(ctx, refA.Key()); err == nil {
 		t.Fatal("untracked an untracked PR")
 	}
-	if err := tr.Retrack(refA.Key()); err != nil || len(tr.IgnoredPRs()) != 0 {
+	if err := tr.Retrack(ctx, refA.Key()); err != nil || len(tr.IgnoredPRs()) != 0 {
 		t.Fatalf("retrack: %v, %+v", err, tr.IgnoredPRs())
 	}
 	tr.Tick(ctx)
@@ -478,5 +478,34 @@ func TestUntrackStopsReviewInsteadOfWaiting(t *testing.T) {
 	defer cancel()
 	if err := tr.Untrack(ctx, refA.Key()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A PR tracked by hand stays while it no longer asks for my review; one tracked
+// because it asked is dropped then.
+func TestByHandKeepsUnrequestedPR(t *testing.T) {
+	pr := openPR("a")
+	pr.RequestedReviewers = nil
+	gh := &github.Fake{PRs: map[string]github.PR{refA.Key(): pr}}
+	wt := t.TempDir()
+	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", Worktree: wt, ByHand: true})
+	tr.Tick(context.Background())
+	if tr.state.PRs[refA.Key()] == nil {
+		t.Fatal("hand-tracked PR dropped")
+	}
+	tr.state.PRs[refA.Key()].ByHand = false
+	tr.Tick(context.Background())
+	if tr.state.PRs[refA.Key()] != nil {
+		t.Fatal("unrequested PR kept")
+	}
+}
+
+func TestRetrackRefusesTrackedAndBadIDs(t *testing.T) {
+	tr := newTestTracker(t, &github.Fake{}, &Tracked{PRRef: refA, Worktree: t.TempDir()})
+	ctx := context.Background()
+	for _, id := range []string{refA.Key(), "nonsense", "o/r#0"} {
+		if err := tr.Retrack(ctx, id); err == nil {
+			t.Errorf("%s: tracked", id)
+		}
 	}
 }

@@ -319,7 +319,7 @@ func (s *Service) Untrack(ctx context.Context, id string) error {
 
 // Retrack stops ignoring an untracked PR and syncs, picking it up if it still requests a review.
 func (s *Service) Retrack(ctx context.Context, id string) error {
-	err := s.do(ctx, func(context.Context) error { return s.tracker.Retrack(id) })
+	err := s.do(ctx, func(ctx context.Context) error { return s.tracker.Retrack(ctx, id) })
 	if err == nil {
 		s.RunNow()
 	}
