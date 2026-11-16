@@ -58,9 +58,18 @@ const md = markdownIt({ html: true, linkify: true })
   .use(anchor, { slugify: (s: string) => s.trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s_-]/gu, "").replace(/\s/g, "-") })
   .use(sourceLines);
 
-export function renderMarkdown(src: string): string {
-  // No CSS from the doc: it could restyle or spoof the review UI. GitHub strips it too.
-  return DOMPurify.sanitize(md.render(src), { FORBID_TAGS: ["style"], FORBID_ATTR: ["style"] });
+// sanitize keeps a doc's (or a comment's) HTML from acting on the dashboard: no CSS, which could restyle or
+// spoof it, and no forms, which would post to sisyphus's API as the user. GitHub strips both too.
+export const sanitize = (html: string) => DOMPurify.sanitize(html, {
+  FORBID_TAGS: ["style", "form", "button", "input", "select", "textarea", "option"],
+  FORBID_ATTR: ["style", "action", "formaction"],
+});
+
+export const renderMarkdown = (src: string): string => sanitize(md.render(src));
+
+// decode is decodeURIComponent that keeps what it can't decode (a lone "%" in a doc's link).
+export function decode(s: string): string {
+  try { return decodeURIComponent(s); } catch { return s; }
 }
 
 export type Block = { el: HTMLElement; s: number; e: number };
@@ -86,15 +95,15 @@ const isRelative = (s: string) => !/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(s);
 
 function resolve(docPath: string, rel: string) {
   const u = new URL(rel, "https://x/" + docPath);
-  return { path: decodeURIComponent(u.pathname.slice(1)), hash: u.hash };
+  return { path: decode(u.pathname.slice(1)), hash: u.hash };
 }
 
 // Point relative images at the blob proxy. Relative links to a doc in the PR get data-doc/data-anchor
 // so the app opens them in place; other relative links go to the file on GitHub.
-export function rewriteLinks(root: HTMLElement, docPath: string, repoBlobUrl: string, prDocs: Set<string>, blobAPI: string) {
+export function rewriteLinks(root: HTMLElement, docPath: string, repoBlobUrl: string, prDocs: Set<string>, blobURL: (path: string) => string) {
   for (const img of root.querySelectorAll<HTMLImageElement>("img[src]")) {
     const src = img.getAttribute("src")!;
-    if (isRelative(src)) img.src = blobAPI + "?path=" + encodeURIComponent(resolve(docPath, src).path);
+    if (isRelative(src)) img.src = blobURL(resolve(docPath, src).path);
   }
   for (const a of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
     const href = a.getAttribute("href")!;
@@ -104,7 +113,7 @@ export function rewriteLinks(root: HTMLElement, docPath: string, repoBlobUrl: st
       if (prDocs.has(r.path)) {
         a.href = "#" + encodeURIComponent(r.path);
         a.dataset.doc = r.path;
-        a.dataset.anchor = decodeURIComponent(r.hash.slice(1));
+        a.dataset.anchor = decode(r.hash.slice(1));
         continue;
       }
       a.href = `${repoBlobUrl}/${r.path}${r.hash}`;

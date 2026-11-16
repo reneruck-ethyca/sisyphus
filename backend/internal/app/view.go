@@ -78,7 +78,7 @@ func verdict(tr tracker.Tracked, health string, rs review.PRStatus) (label, tone
 		return "Reviewing", ToneLive, GroupReviewing, last.Started
 	case rs.State != "": // queued, or a stopped run letting go
 		return "Queued", ToneLive, GroupReviewing, time.Time{}
-	case tr.Design != nil:
+	case tr.Design != nil && !aiFailed(last):
 		return designVerdict(tr)
 	case last == nil:
 		return "Not reviewed", ToneNeutral, GroupWaiting, tr.TrackedAt
@@ -89,6 +89,16 @@ func verdict(tr tracker.Tracked, health string, rs review.PRStatus) (label, tone
 		group = GroupAttention
 	}
 	return label, tone, group, last.Finished
+}
+
+// aiFailed says whether the last AI review failed to run or to post: on a design
+// review that needs you more than where your own review stands.
+func aiFailed(last *review.Run) bool {
+	if last == nil {
+		return false
+	}
+	_, tone := Outcome(*last)
+	return tone == ToneBad
 }
 
 // designVerdict places a design review by where the user's own review stands:

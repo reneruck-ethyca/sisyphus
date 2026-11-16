@@ -58,7 +58,8 @@ export function designAPI(repo: string, number: number, head: () => string) {
   };
   const q = (path: string) => "?path=" + encodeURIComponent(path);
   return {
-    blob: base + "/blob",
+    // blob is a file a doc links to, at the commit the doc was rendered from.
+    blob: (path: string, ref: string) => `${base}/blob?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`,
     pr: () => call<DesignPR>("GET", ""),
     file: (path: string, since = "") => call<DocFile>("GET", "/file" + q(path) + (since ? "&since=" + encodeURIComponent(since) : "")),
     threads: (path = "") => call<Thread[]>("GET", "/threads" + (path ? q(path) : "")),

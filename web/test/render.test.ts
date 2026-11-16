@@ -60,3 +60,21 @@ describe("sanitize", () => {
     expect(html).toContain(">x</p>");
   });
 });
+
+describe("sanitize", () => {
+  it("drops forms and their controls, which would post to sisyphus as the user", () => {
+    const html = renderMarkdown('<form method="post" action="/api/restart"><button formaction="/api/x">Show</button><input name="a"></form>\n\ntext');
+    expect(html).not.toMatch(/<form|<button|<input|action=/);
+    expect(html).toContain("text");
+  });
+});
+
+describe("rewriteLinks", () => {
+  it("survives a lone % in a doc's link", async () => {
+    const { rewriteLinks } = await import("../src/design/render");
+    const root = document.createElement("div");
+    root.innerHTML = renderMarkdown("[a](bench/50%-load.md) [b](#100%) ![c](img/x%.png)");
+    rewriteLinks(root, "docs/a.md", "https://github.com/o/r/blob/h", new Set(["docs/bench/50%-load.md"]), (p) => "/blob?path=" + encodeURIComponent(p));
+    expect(root.querySelector("img")!.getAttribute("src")).toBe("/blob?path=" + encodeURIComponent("docs/img/x%.png"));
+  });
+});

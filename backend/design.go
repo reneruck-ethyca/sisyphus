@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"mime"
 	"net/http"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -154,19 +156,19 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		return out, nil
 	}))
 
-	// blob is a file the doc links to (an image), at the head.
+	// blob is a file a doc links to (an image), at the commit the doc was rendered from (ref).
 	mux.HandleFunc("GET "+base+"/blob", func(w http.ResponseWriter, r *http.Request) {
 		ref, ok := pr(w, r)
 		if !ok {
 			return
 		}
-		p := r.URL.Query().Get("path")
-		d, err := srv.gh.DesignPR(r.Context(), ref)
-		if err != nil {
-			designError(w, err)
+		p, sha := r.URL.Query().Get("path"), r.URL.Query().Get("ref")
+		if !fullSHA.MatchString(sha) {
+			http.Error(w, "ref must be a full commit SHA", http.StatusBadRequest)
 			return
 		}
-		b, err := srv.gh.Content(r.Context(), d.HeadRepo, p, d.HeadSHA)
+		// The head repo, where a fork's commits live; the tracker only follows PRs from the base repo.
+		b, err := srv.gh.Content(r.Context(), ref.Repo, p, sha)
 		if err != nil {
 			designError(w, err)
 			return
@@ -177,6 +179,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		// Repo content is untrusted: it must never run as a page on our origin (an SVG opened directly).
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "sandbox")
+		w.Header().Set("Cache-Control", "private, max-age=604800, immutable") // a commit's file never changes
 		w.Write(b)
 	})
 
@@ -213,13 +216,19 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		if err := srv.gh.SubmitReview(ctx, ref, d, in.Event, in.Body); err != nil {
 			return err
 		}
-		_, err := srv.tracker.Refresh(ctx, ref.Key()) // so the PR leaves Needs you now, not at the next check
-		return err
+		// So the PR leaves Needs you now, not at the next check. The review is posted either way: failing
+		// the request now would have the user submit it again.
+		if _, err := srv.tracker.Refresh(ctx, ref.Key()); err != nil {
+			slog.Warn("refreshing PR after a design review", "pr", ref.Key(), "err", err)
+		}
+		return nil
 	}))
 	mux.HandleFunc("DELETE "+base+"/review", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, _ *http.Request) error {
 		return srv.gh.DiscardReview(ctx, ref, d.Viewer)
 	}))
 }
+
+var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 var errNotDoc = errors.New("not a doc this PR changes")
 

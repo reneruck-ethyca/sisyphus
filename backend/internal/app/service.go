@@ -132,6 +132,13 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 		return "queued"
 	}
 	if d := tr.Design; d != nil {
+		if last := rs.Latest(); aiFailed(last) {
+			why := last.Error
+			if p := last.Posted; why == "" && p != nil {
+				why = "posting failed: " + p.Error
+			}
+			return fmt.Sprintf("AI review %s: %s; %s", last.Status, cmp.Or(why, "no details"), designNote(*d))
+		}
 		return designNote(*d)
 	}
 	last := rs.Latest()

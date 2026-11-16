@@ -560,7 +560,7 @@ Settings that are paths mounted into or copied for review containers (`codex_hom
 | `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/events?from=` | a run's parsed events (server-sent events: backlog, then live) |
 | `GET /api/prs/{owner}/{repo}/{number}/runs/{run}/review`, `…/files/{path}` | what the agent wrote (`out/review.json`, or null); the run's files |
 | `GET /api/prs/{owner}/{repo}/{number}/stack` | the PR's local stack on Docker (null: none configured) |
-| `GET /api/prs/{owner}/{repo}/{number}/design`, `…/design/file?path=&since=`, `…/design/blob?path=` | a tracked PR's docs, one doc at the head with its changed lines (and those since a commit), a file a doc links to |
+| `GET /api/prs/{owner}/{repo}/{number}/design`, `…/design/file?path=&since=`, `…/design/blob?path=&ref=` | a tracked PR's docs, one doc at the head with its changed lines (and those since a commit), a file a doc links to at a commit |
 | `GET`, `POST /api/prs/{owner}/{repo}/{number}/design/threads`; `POST …/threads/{id}/replies` \| `resolve` \| `unresolve` | review threads, on GitHub as you; writes need `X-Head`, the head the page rendered (409 once it moved) |
 | `POST`, `DELETE /api/prs/{owner}/{repo}/{number}/design/review` | submit your pending review (`{event, body}`), or discard it |
 | `GET /api/history` | PRs no longer tracked, with their runs |

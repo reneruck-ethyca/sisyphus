@@ -127,6 +127,8 @@ func TestDesignVerdict(t *testing.T) {
 		{"replies", tracker.DesignState{ReviewedAt: reviewed, Verdict: "COMMENTED", Replies: 2}, review.PRStatus{}, "Design · updated", GroupAttention},
 		{"commits after approving", tracker.DesignState{ReviewedAt: reviewed, Verdict: "APPROVED", NewCommits: true}, review.PRStatus{}, "Design · updated", GroupAttention},
 		{"waiting", tracker.DesignState{ReviewedAt: reviewed, Verdict: "CHANGES_REQUESTED"}, review.PRStatus{}, "You requested changes", GroupAuthor},
+		{"a failed AI review needs you", tracker.DesignState{ReviewedAt: reviewed, Verdict: "APPROVED"}, review.PRStatus{Runs: []review.Run{{Status: review.Failed}}}, "Failed", GroupAttention},
+		{"a succeeded AI review leaves your state", tracker.DesignState{ReviewedAt: reviewed, Verdict: "APPROVED"}, review.PRStatus{Runs: []review.Run{{Status: review.Succeeded, Posted: &review.Posted{Event: "COMMENT"}}}}, "You approved", GroupAuthor},
 		{"an AI review running wins", tracker.DesignState{}, review.PRStatus{State: "running", Runs: []review.Run{{Status: review.Running}}}, "Reviewing", GroupReviewing},
 	} {
 		tr := tracker.Tracked{DesignReview: true, Design: &c.d}

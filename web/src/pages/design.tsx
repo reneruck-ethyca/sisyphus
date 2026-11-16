@@ -1,6 +1,5 @@
 // The design review page: a PR's Markdown docs rendered, with its review threads beside them.
 // Ported from the gh design-review extension; comments go to GitHub as the user.
-import DOMPurify from "dompurify";
 import "github-markdown-css/github-markdown.css";
 import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -9,7 +8,7 @@ import { Ago, Chip, Ext, Page } from "../components";
 import { isZero, rel } from "../format";
 import { designAPI, isStale, type DesignPR, type DocFile, type Mode, type ReviewEvent, type Thread } from "../design/api";
 import { blockForLine, blocksInRange, buildComment, placeThread, selectionRange, type Placement, type Range } from "../design/anchor";
-import { blocks, markChanged, renderMarkdown, renderMermaid, rewriteLinks } from "../design/render";
+import { blocks, decode, markChanged, renderMarkdown, renderMermaid, rewriteLinks, sanitize } from "../design/render";
 
 type Composer = { range: Range; quote: string; below: number }; // below: px from the doc column's top
 type Placed = { t: Thread; p: Placement; block?: HTMLElement; unread: number };
@@ -44,7 +43,8 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
   // Since your review: what came in after it is marked new, and its commit is what changes are counted from.
   const d = pv?.design;
   const reviewed = d && !isZero(d.reviewed_at) ? d : undefined;
-  const updated = !!reviewed && (!!d!.new_commits || (d!.replies ?? 0) > 0);
+  // Mirrors tracker.DesignState.Updated: once you approved, only new commits count.
+  const updated = !!reviewed && (!!d!.new_commits || ((d!.replies ?? 0) > 0 && d!.verdict !== "APPROVED"));
   const [mode, setMode] = useState<Highlight>(updated ? "since" : "all");
   useEffect(() => { if (updated) setMode("since"); }, [updated]); // the status may arrive after the first render
 
@@ -53,15 +53,20 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
     else setToast(e instanceof Error ? e.message : String(e));
   };
 
-  const loadPR = () => api.pr().then((p) => {
+  // Writes send the head the page shows: the doc's, or the PR's while no doc has loaded (none to show, say).
+  const showPR = (p: DesignPR) => {
+    if (!file) head.current = p.headSha;
     setPr(p);
+  };
+  const loadPR = () => api.pr().then((p) => {
+    showPR(p);
     setPath((cur) => {
-      const fromHash = decodeURIComponent(location.hash.slice(1));
+      const fromHash = decode(location.hash.slice(1));
       const want = cur || fromHash;
       return p.docs.some((x) => x.path === want) ? want : p.docs[0]?.path ?? "";
     });
   }).catch(fail);
-  const reload = () => Promise.all([api.threads().then(setThreads), api.pr().then(setPr)]).catch(fail);
+  const reload = () => Promise.all([api.threads().then(setThreads), api.pr().then(showPR)]).catch(fail);
 
   useEffect(() => { loadPR(); api.threads().then(setThreads).catch(fail); }, [id]);
 
@@ -70,12 +75,26 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
     history.replaceState(null, "", location.pathname + "#" + encodeURIComponent(path));
     setFile(null);
     setComposer(null);
-    api.file(path, reviewed?.reviewed_sha ?? "").then((f) => { head.current = f.headSha; setFile(f); }).catch(fail);
+    let live = true; // a doc clicked before this one answers must not replace it
+    api.file(path, reviewed?.reviewed_sha ?? "").then((f) => {
+      if (!live) return;
+      head.current = f.headSha;
+      trackedHead.current = pvHead.current;
+      setFile(f);
+    }, (e) => live && fail(e));
+    return () => void (live = false);
   }, [path, reviewed?.reviewed_sha]);
 
-  // The tracker sees new commits on its next check; say so instead of letting comments land on moved lines.
+  // The tracker sees new commits on its next check, and may lag GitHub: only a head it learns of after the
+  // doc loaded, and that isn't the doc's, means the doc is behind.
+  const pvHead = useRef(pv?.head_sha);
+  pvHead.current = pv?.head_sha;
+  const trackedHead = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (file && pv && pv.head_sha && pv.head_sha !== file.headSha) setBanner("New commits were pushed. Reload to see them.");
+    const h = pv?.head_sha;
+    if (!file || !h) return;
+    if (trackedHead.current === undefined) trackedHead.current = h; // the status arrived after the doc
+    if (h !== file.headSha && h !== trackedHead.current) setBanner("New commits were pushed. Reload to see them.");
   }, [pv?.head_sha, file]);
 
   useEffect(() => {
@@ -89,7 +108,8 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
     if (!root || !file || !pr) return;
     root.innerHTML = renderMarkdown(file.content);
     const [owner, name] = pr.headRepo.split("/");
-    rewriteLinks(root, file.path, `${new URL(pr.url).origin}/${owner}/${name}/blob/${file.headSha}`, new Set(pr.docs.map((x) => x.path)), api.blob);
+    rewriteLinks(root, file.path, `${new URL(pr.url).origin}/${owner}/${name}/blob/${file.headSha}`, new Set(pr.docs.map((x) => x.path)),
+      (p) => api.blob(p, file.headSha));
     const anchor = pendingAnchor.current;
     pendingAnchor.current = null;
     if (anchor !== null) scrollToAnchor(anchor, "auto");
@@ -185,7 +205,7 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
     }
     if (href?.startsWith("#")) {
       e.preventDefault();
-      scrollToAnchor(decodeURIComponent(href.slice(1)));
+      scrollToAnchor(decode(href.slice(1)));
       return;
     }
     const el = (e.target as Element).closest<HTMLElement>(".commented");
@@ -453,7 +473,7 @@ function ThreadView({ t, p, unread, api, reload, fail, highlight, jump }: Placed
           : <Ext href={c.url}><time dateTime={c.createdAt}>{rel(c.createdAt)}</time></Ext>}
         {i >= firstNew && <span class="newtag">new</span>}
       </div>
-      <div class="markdown-body" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.bodyHTML) }} />
+      <div class="markdown-body" dangerouslySetInnerHTML={{ __html: sanitize(c.bodyHTML) }} />
     </div>)}
     <label class="sr-only" for={"reply-" + t.id}>Reply</label>
     <textarea id={"reply-" + t.id} placeholder="Reply…" value={reply} onInput={(e) => setReply(e.currentTarget.value)}
@@ -489,7 +509,9 @@ function SubmitDialog({ ref_, pr, threads, api, fail, author, onDone }: {
     setBusy(true);
     try { await fn(); close(); after(); } catch (e) { fail(e); } finally { setBusy(false); }
   };
-  const text = (html: string) => new DOMParser().parseFromString(DOMPurify.sanitize(html), "text/html").body.textContent?.trim() ?? "";
+  const text = (html: string) => new DOMParser().parseFromString(sanitize(html), "text/html").body.textContent?.trim() ?? "";
+  // GitHub wants a body for a Comment or Request changes that carries no comments.
+  const needsBody = event !== "APPROVE" && !pending.length && !body.trim();
 
   return <dialog ref={ref_} class="dr-dialog" aria-labelledby="dr-submit-h">
     <h2 id="dr-submit-h">Submit your review</h2>
@@ -509,7 +531,7 @@ function SubmitDialog({ ref_, pr, threads, api, fail, author, onDone }: {
     <p class="watch">Sisyphus then watches the PR and puts it back in <b>Needs you</b> when {author ?? "the author"} pushes a commit
       {event === "APPROVE" ? "" : " or someone comments"}.</p>
     <div class="row">
-      <button class="btn" disabled={busy || !pr} onClick={() => act(() => api.submit(event, body), () => { setBody(""); onDone(event); })}>Submit review</button>
+      <button class="btn" disabled={busy || !pr || needsBody} title={needsBody ? "Write a summary, or approve" : undefined} onClick={() => act(() => api.submit(event, body), () => { setBody(""); onDone(event); })}>Submit review</button>
       <button class="btn quiet" type="button" onClick={close}>Keep editing</button>
       {(pr?.pending?.count ?? 0) > 0 && <button class="btn quiet danger end" disabled={busy}
         onClick={() => confirm("Discard your pending review and all its comments?") && act(() => api.discard(), () => onDone(null))}>Discard pending</button>}
