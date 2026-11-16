@@ -116,6 +116,7 @@ func main() {
 		return
 	}
 	srv := newServer(cfg, tr, rev, logs)
+	srv.gh = gh
 	svc := srv.svc
 	if !cfg.LastMile.Disabled {
 		lm, err := lastmile.New(cfg, gh, tr.Locks, filepath.Dir(cfg.StateFile))

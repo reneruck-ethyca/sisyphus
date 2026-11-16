@@ -114,3 +114,24 @@ func TestBoardQueued(t *testing.T) {
 	}
 }
 
+
+func TestDesignVerdict(t *testing.T) {
+	reviewed := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name         string
+		d            tracker.DesignState
+		rs           review.PRStatus
+		label, group string
+	}{
+		{"new", tracker.DesignState{}, review.PRStatus{}, "Design · new", GroupAttention},
+		{"replies", tracker.DesignState{ReviewedAt: reviewed, Verdict: "COMMENTED", Replies: 2}, review.PRStatus{}, "Design · updated", GroupAttention},
+		{"commits after approving", tracker.DesignState{ReviewedAt: reviewed, Verdict: "APPROVED", NewCommits: true}, review.PRStatus{}, "Design · updated", GroupAttention},
+		{"waiting", tracker.DesignState{ReviewedAt: reviewed, Verdict: "CHANGES_REQUESTED"}, review.PRStatus{}, "You requested changes", GroupAuthor},
+		{"an AI review running wins", tracker.DesignState{}, review.PRStatus{State: "running", Runs: []review.Run{{Status: review.Running}}}, "Reviewing", GroupReviewing},
+	} {
+		tr := tracker.Tracked{DesignReview: true, Design: &c.d}
+		if label, _, group, _ := verdict(tr, HealthOK, c.rs); label != c.label || group != c.group {
+			t.Errorf("%s: got %q/%q, want %q/%q", c.name, label, group, c.label, c.group)
+		}
+	}
+}

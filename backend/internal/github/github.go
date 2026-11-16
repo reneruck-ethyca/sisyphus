@@ -26,6 +26,7 @@ type Review struct {
 	State       string // APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING
 	Body        string
 	SubmittedAt time.Time
+	CommitID    string // the head it was submitted on
 }
 
 type Comment struct {
@@ -284,13 +285,14 @@ func parsePR(pull, reviews, reviewComments, issueComments []byte) (PR, error) {
 		State       string    `json:"state"`
 		Body        string    `json:"body"`
 		SubmittedAt time.Time `json:"submitted_at"`
+		CommitID    string    `json:"commit_id"`
 	}
 	if err := json.Unmarshal(reviews, &rs); err != nil {
 		return PR{}, fmt.Errorf("parse reviews: %w", err)
 	}
 	for _, r := range rs {
 		pr.Reviews = append(pr.Reviews, Review{User: r.User.Login, Bot: r.User.Type == "Bot",
-			State: r.State, Body: r.Body, SubmittedAt: r.SubmittedAt})
+			State: r.State, Body: r.Body, SubmittedAt: r.SubmittedAt, CommitID: r.CommitID})
 	}
 
 	for _, raw := range [][]byte{reviewComments, issueComments} {

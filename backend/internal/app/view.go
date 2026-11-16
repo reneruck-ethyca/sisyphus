@@ -33,6 +33,7 @@ const (
 	GroupAttention = "attention"
 	GroupReviewing = "reviewing"
 	GroupReviewed  = "reviewed"
+	GroupAuthor    = "author"  // a design review you've reviewed, waiting on its author
 	GroupWaiting   = "waiting" // not reviewed yet
 )
 
@@ -77,6 +78,8 @@ func verdict(tr tracker.Tracked, health string, rs review.PRStatus) (label, tone
 		return "Reviewing", ToneLive, GroupReviewing, last.Started
 	case rs.State != "": // queued, or a stopped run letting go
 		return "Queued", ToneLive, GroupReviewing, time.Time{}
+	case tr.Design != nil:
+		return designVerdict(tr)
 	case last == nil:
 		return "Not reviewed", ToneNeutral, GroupWaiting, tr.TrackedAt
 	}
@@ -86,6 +89,23 @@ func verdict(tr tracker.Tracked, health string, rs review.PRStatus) (label, tone
 		group = GroupAttention
 	}
 	return label, tone, group, last.Finished
+}
+
+// designVerdict places a design review by where the user's own review stands:
+// it needs them when new, or when something came in since they reviewed.
+func designVerdict(tr tracker.Tracked) (label, tone, group string, at time.Time) {
+	d := *tr.Design
+	switch {
+	case d.ReviewedAt.IsZero():
+		return "Design · new", ToneLive, GroupAttention, tr.TrackedAt
+	case d.Updated():
+		return "Design · updated", ToneLive, GroupAttention, tr.LastSeenAt
+	case d.Verdict == "APPROVED":
+		return "You approved", ToneOK, GroupAuthor, d.ReviewedAt
+	case d.Verdict == "CHANGES_REQUESTED":
+		return "You requested changes", ToneChanges, GroupAuthor, d.ReviewedAt
+	}
+	return "You commented", ToneNeutral, GroupAuthor, d.ReviewedAt
 }
 
 // Activity is one finished or started review run, for the overview's feed.
@@ -136,7 +156,7 @@ type PRGroup struct {
 }
 
 var groupLabels = []struct{ key, label string }{
-	{GroupAttention, "Needs you"}, {GroupReviewing, "Reviewing"}, {GroupReviewed, "Reviewed"}, {GroupWaiting, "Not reviewed yet"},
+	{GroupAttention, "Needs you"}, {GroupReviewing, "Reviewing"}, {GroupReviewed, "Reviewed"}, {GroupAuthor, "Waiting on the author"}, {GroupWaiting, "Not reviewed yet"},
 }
 
 // Groups is the PR list by what the user has to do, empty groups left out.

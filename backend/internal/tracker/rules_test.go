@@ -136,3 +136,40 @@ func TestNewRepliesCountsInlineOnlyReview(t *testing.T) {
 		t.Fatalf("replies = %d", n)
 	}
 }
+
+func TestDesignState(t *testing.T) {
+	on := func(r github.Review, sha string) github.Review { r.CommitID = sha; return r }
+	cmt := func(user string, m int) github.Comment { return github.Comment{User: user, Body: "x", CreatedAt: at(m)} }
+	pr := func(head string, rs []github.Review, cs ...github.Comment) github.PR {
+		return github.PR{HeadSHA: head, Reviews: rs, Comments: cs}
+	}
+	ours := on(rv("me", "APPROVED", 1), "h1")
+	ours.Body = "fine\n\n" + SisyphusMark
+	cases := []struct {
+		name    string
+		pr      github.PR
+		updated bool
+		want    DesignState
+	}{
+		{"never reviewed", pr("h1", nil, cmt("alice", 1)), false, DesignState{}},
+		{"sisyphus's review isn't mine", pr("h1", []github.Review{ours}), false, DesignState{}},
+		{"reviewed, nothing since", pr("h1", []github.Review{on(rv("me", "CHANGES_REQUESTED", 2), "h1")}, cmt("alice", 1)), false,
+			DesignState{ReviewedAt: at(2), ReviewedSHA: "h1", Verdict: "CHANGES_REQUESTED"}},
+		{"new commits", pr("h2", []github.Review{on(rv("me", "COMMENTED", 2), "h1")}), true,
+			DesignState{ReviewedAt: at(2), ReviewedSHA: "h1", Verdict: "COMMENTED", NewCommits: true}},
+		{"replies after my review", pr("h1", []github.Review{on(rv("me", "COMMENTED", 2), "h1")}, cmt("alice", 3), cmt("bob", 4)), true,
+			DesignState{ReviewedAt: at(2), ReviewedSHA: "h1", Verdict: "COMMENTED", Replies: 2}},
+		{"my own later comment resets the count", pr("h1", []github.Review{on(rv("me", "COMMENTED", 2), "h1")}, cmt("alice", 3), cmt("me", 4)), false,
+			DesignState{ReviewedAt: at(2), ReviewedSHA: "h1", Verdict: "COMMENTED"}},
+		{"a later comment keeps my verdict", pr("h1", []github.Review{on(rv("me", "COMMENTED", 3), "h1"), on(rv("me", "CHANGES_REQUESTED", 2), "h0")}), false,
+			DesignState{ReviewedAt: at(3), ReviewedSHA: "h1", Verdict: "CHANGES_REQUESTED"}},
+		{"approved: replies don't wake it", pr("h1", []github.Review{on(rv("me", "APPROVED", 2), "h1")}, cmt("alice", 3)), false,
+			DesignState{ReviewedAt: at(2), ReviewedSHA: "h1", Verdict: "APPROVED", Replies: 1}},
+	}
+	for _, c := range cases {
+		got := designState(c.pr, "me")
+		if got != c.want || got.Updated() != c.updated {
+			t.Errorf("%s: got %+v (updated %v), want %+v (updated %v)", c.name, got, got.Updated(), c.want, c.updated)
+		}
+	}
+}

@@ -33,7 +33,24 @@ type Tracked struct {
 	// A design review is tracked, but reviewed only when the user asks (designReview).
 	DesignReview  bool          `json:"design_review,omitempty"`
 	ClassifiedSHA string        `json:"classified_sha,omitempty"` // head DesignReview was decided for
+	Design        *DesignState  `json:"design,omitempty"`         // a design review's state; nil for code reviews
 	Agent         *config.Agent `json:"agent,omitempty"`          // nil inherits review.agent
+}
+
+// DesignState is where the user's own review of a design PR stands, read off
+// GitHub on every check. Reviews sisyphus posted don't count as the user's.
+type DesignState struct {
+	ReviewedAt  time.Time `json:"reviewed_at"`            // the user's latest submitted review; zero = never reviewed
+	ReviewedSHA string    `json:"reviewed_sha,omitempty"` // the head it was on
+	Verdict     string    `json:"verdict,omitempty"`      // APPROVED | CHANGES_REQUESTED | COMMENTED
+	NewCommits  bool      `json:"new_commits,omitempty"`  // the head moved since that review
+	Replies     int       `json:"replies,omitempty"`      // others' comments since the user last wrote
+}
+
+// Updated says whether something new waits for the user since their review.
+// Once they approved, only new commits count, as for code reviews.
+func (d DesignState) Updated() bool {
+	return !d.ReviewedAt.IsZero() && (d.NewCommits || d.Replies > 0 && d.Verdict != "APPROVED")
 }
 
 type State struct {

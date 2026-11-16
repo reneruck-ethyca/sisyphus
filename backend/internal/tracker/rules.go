@@ -115,3 +115,34 @@ func designReview(title string, files []string) bool {
 	}
 	return docs > 0 && signal
 }
+
+// designState reads where my review of a design PR stands. My last word is my
+// latest review or comment: replies count from then on.
+func designState(pr github.PR, me string) DesignState {
+	var d DesignState
+	var said time.Time
+	mine := func(user, body string) bool { return user == me && !strings.Contains(body, SisyphusMark) }
+	rs := slices.Clone(pr.Reviews)
+	slices.SortStableFunc(rs, func(a, b github.Review) int { return a.SubmittedAt.Compare(b.SubmittedAt) })
+	for _, r := range rs {
+		if !mine(r.User, r.Body) || r.State == "PENDING" || r.State == "DISMISSED" {
+			continue
+		}
+		d.ReviewedAt, d.ReviewedSHA = r.SubmittedAt, r.CommitID
+		if r.State != "COMMENTED" || d.Verdict == "" {
+			d.Verdict = r.State // GitHub's rule: a comment doesn't undo an earlier verdict
+		}
+	}
+	if d.ReviewedAt.IsZero() {
+		return d
+	}
+	said = d.ReviewedAt
+	for _, c := range pr.Comments {
+		if mine(c.User, c.Body) && c.CreatedAt.After(said) {
+			said = c.CreatedAt
+		}
+	}
+	d.NewCommits = d.ReviewedSHA != "" && d.ReviewedSHA != pr.HeadSHA
+	d.Replies, _ = newReplies(pr, me, said)
+	return d
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,6 +131,9 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 		}
 		return "queued"
 	}
+	if d := tr.Design; d != nil {
+		return designNote(*d)
+	}
 	last := rs.Latest()
 	next := "next one on new commits or replies"
 	if tr.DesignReview {
@@ -151,6 +155,32 @@ func reviewNote(tr tracker.Tracked, rs review.PRStatus, reviews bool, blocked, r
 	}
 	return fmt.Sprintf("up to date: reviewed %s at %s, %s; %s",
 		short(last.Job.PR.HeadSHA), last.Finished.Local().Format("Jan 2 15:04"), cmp.Or(last.PostNote, "not posted"), next)
+}
+
+// designNote says where the user's review of a design PR stands.
+func designNote(d tracker.DesignState) string {
+	if d.ReviewedAt.IsZero() {
+		return "design review: not reviewed by you yet"
+	}
+	var news []string
+	if d.Replies > 0 {
+		news = append(news, plural(d.Replies, "comment"))
+	}
+	if d.NewCommits {
+		news = append(news, "new commits")
+	}
+	when := d.ReviewedAt.Local().Format("Jan 2")
+	if len(news) == 0 || !d.Updated() {
+		return "design review: waiting on the author since your review on " + when
+	}
+	return strings.Join(news, " and ") + " since your review on " + when
+}
+
+func plural(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return fmt.Sprintf("%d %ss", n, what)
 }
 
 func health(tr tracker.Tracked) string {

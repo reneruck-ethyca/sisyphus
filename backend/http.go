@@ -29,6 +29,7 @@ import (
 
 	"github.com/reneruck/sisyphus/internal/app"
 	"github.com/reneruck/sisyphus/internal/config"
+	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/lastmile"
 	"github.com/reneruck/sisyphus/internal/review"
 	"github.com/reneruck/sisyphus/internal/tracker"
@@ -53,6 +54,7 @@ type server struct {
 	configPath string
 	token      string // every /api call needs it: as a Bearer token, or the session cookie made from it
 	codes      *loginCodes
+	gh         *github.API // nil in tests that don't talk to GitHub
 }
 
 // loadAPIToken is the API token in the state dir; a var for tests.
@@ -168,6 +170,7 @@ func newHandler(srv server) http.Handler {
 	markSkills() // once: the handler is built at startup
 	mux := http.NewServeMux()
 	mux.Handle("GET /", spa(uiDist()))
+	designHandlers(mux, srv)
 	// The page trades the token from its URL for an HttpOnly cookie, so the token leaves the address bar.
 	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, r *http.Request) {
 		if srv.token == "" || !srv.codes.use(r.URL.Query().Get("code")) {

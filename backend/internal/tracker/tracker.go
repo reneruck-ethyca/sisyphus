@@ -162,6 +162,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef) bool {
 		t.sync(ctx, tr)
 	}
 	t.classify(ctx, tr)
+	t.readDesign(tr, pr)
 	t.announce(tr)
 	t.save()
 	return true
@@ -224,7 +225,17 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 		unlock()
 	}
 	t.classify(ctx, tr)
+	t.readDesign(tr, pr)
 	t.announce(tr)
+}
+
+// readDesign records where the user's review of a design PR stands.
+func (t *Tracker) readDesign(tr *Tracked, pr github.PR) {
+	tr.Design = nil
+	if tr.DesignReview {
+		d := designState(pr, t.cfg.User)
+		tr.Design = &d
+	}
 }
 
 // classify decides, once per head, whether tr is a design review. Until it
