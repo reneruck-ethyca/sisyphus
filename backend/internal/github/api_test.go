@@ -223,6 +223,9 @@ func TestEnqueueAndAutoMerge(t *testing.T) {
 	if err := a.EnableAutoMerge(context.Background(), "PR_1"); err != nil || !strings.Contains(s.got[1], "enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:SQUASH})") || !strings.Contains(s.got[1], `"id":"PR_1"`) {
 		t.Errorf("auto-merge: %v; calls %v", err, s.got)
 	}
+	if err := a.DisableAutoMerge(context.Background(), "PR_1"); err != nil || !strings.Contains(s.got[2], "disablePullRequestAutoMerge(input:{pullRequestId:$id})") || !strings.Contains(s.got[2], `"id":"PR_1"`) {
+		t.Errorf("auto-merge off: %v; calls %v", err, s.got)
+	}
 }
 
 func TestQueueFailures(t *testing.T) {

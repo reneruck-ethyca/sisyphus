@@ -413,10 +413,12 @@ compared), and the tree goes back to the head it started at. A nested git reposi
 
 Merging: `merge=off` (the default) never merges on its own; `merge=approved` merges once the PR is approved, and
 `merge=auto` once the merge policy below says yes. Where the repo allows GitHub auto-merge, those two turn it on
-(squash) instead and GitHub merges. Otherwise TLM squash-merges on the tick, or, when the base has a merge queue,
-adds the PR to it (state `queued`). The dashboard's merge button (`POST /api/handoffs/<id>/merge`, for an approved
-PR with green checks) merges the same way, without GitHub auto-merge; `PUT /api/handoffs/<id>/merge-mode` with
-`{"mode": "off|shadow|auto|approved"}` changes the mode.
+(squash) as soon as the PR is ready and GitHub decides; going back to `off` or `shadow` turns it off again (only
+auto-merge TLM turned on). Otherwise TLM squash-merges on the tick, or, when the base has a merge queue, adds the
+PR to it (state `queued`), never inside a merge freeze. Every TLM merge needs green checks and a human's approval
+of the current head. The dashboard's merge button (`POST /api/handoffs/<id>/merge`) merges the same way, without
+GitHub auto-merge and regardless of a freeze; `PUT /api/handoffs/<id>/merge-mode` with
+`{"mode": "off|shadow|auto|approved"}` changes the mode (`off` and `shadow` also withdraw a pressed button).
 
 Shadow merge (`merge=shadow`): TLM never merges, but on
 each tick of an open, ready PR it asks the merge policy "would you merge this?" and keeps the verdict on the

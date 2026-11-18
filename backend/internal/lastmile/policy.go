@@ -102,8 +102,13 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 	if len(sig.RiskyPaths) > 0 {
 		b = append(b, "risky paths: "+strings.Join(sig.RiskyPaths, ", "))
 	}
-	if slices.ContainsFunc(cfg.MergeFreeze, func(w config.FreezeWindow) bool { return w.Active(now) }) {
+	if frozen(cfg, now) {
 		b = append(b, "merge freeze")
 	}
 	return Verdict{At: now, Head: s.Head, WouldMerge: len(b) == 0, Blockers: b, Signals: sig}
+}
+
+// frozen says now is inside a merge freeze window.
+func frozen(cfg config.LastMile, now time.Time) bool {
+	return slices.ContainsFunc(cfg.MergeFreeze, func(w config.FreezeWindow) bool { return w.Active(now) })
 }

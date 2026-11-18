@@ -162,6 +162,7 @@ type Handoff struct {
 
 	// Merge bookkeeping (design §7.1, §7.2).
 	MergeRequested bool      `json:"merge_requested,omitempty"` // a person pressed merge
+	AutoMergeSet   bool      `json:"auto_merge_set,omitempty"`  // TLM turned GitHub auto-merge on; one a human turned on is theirs
 	QueueKicks     int       `json:"queue_kicks,omitempty"`     // removals from the merge queue
 	QueueSeen      time.Time `json:"queue_seen,omitzero"`       // the newest queue removal handled
 

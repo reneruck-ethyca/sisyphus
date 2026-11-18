@@ -22,6 +22,7 @@ type GitHub interface {
 	MergeSquash(ctx context.Context, ref github.PRRef, head string) error
 	Enqueue(ctx context.Context, nodeID string) error
 	EnableAutoMerge(ctx context.Context, nodeID string) error
+	DisableAutoMerge(ctx context.Context, nodeID string) error
 	QueueFailures(ctx context.Context, repo, base string, number int) ([]github.Check, error)
 }
 
@@ -29,24 +30,25 @@ var _ GitHub = (*github.API)(nil)
 
 // FakeGitHub is an in-memory GitHub for tests: it records the calls it gets.
 type FakeGitHub struct {
-	Snapshots   map[string]github.PRSnapshot // by PRRef.Key()
-	Created     []github.NewPR
-	NextPR      github.PRRef // what CreatePR returns
-	Edits       []github.PREdit
-	Ready       []github.PRRef
-	Comments    []string
-	Replies     []FakeReply // Reply calls
-	InboxData   github.Inbox
-	nextID      int64
-	Labels      []string
-	Existing    github.PRRef     // the open PR FindPR reports; zero = none
-	Logs        map[int64]string // RunLog by job id
-	Reruns      []int64          // runs RerunFailed was asked for
-	Merged      []github.PRRef   // MergeSquash calls
-	Enqueued    []string         // node ids Enqueue was asked for
-	AutoMerged  []string         // node ids EnableAutoMerge was asked for
-	QueueChecks []github.Check   // what QueueFailures returns
-	Err         error            // returned by every call
+	Snapshots    map[string]github.PRSnapshot // by PRRef.Key()
+	Created      []github.NewPR
+	NextPR       github.PRRef // what CreatePR returns
+	Edits        []github.PREdit
+	Ready        []github.PRRef
+	Comments     []string
+	Replies      []FakeReply // Reply calls
+	InboxData    github.Inbox
+	nextID       int64
+	Labels       []string
+	Existing     github.PRRef     // the open PR FindPR reports; zero = none
+	Logs         map[int64]string // RunLog by job id
+	Reruns       []int64          // runs RerunFailed was asked for
+	Merged       []github.PRRef   // MergeSquash calls
+	Enqueued     []string         // node ids Enqueue was asked for
+	AutoMerged   []string         // node ids EnableAutoMerge was asked for
+	AutoMergeOff []string         // node ids DisableAutoMerge was asked for
+	QueueChecks  []github.Check   // what QueueFailures returns
+	Err          error            // returned by every call
 }
 
 func (f *FakeGitHub) PRView(_ context.Context, ref github.PRRef) (github.PRSnapshot, error) {
@@ -125,6 +127,11 @@ func (f *FakeGitHub) Enqueue(_ context.Context, nodeID string) error {
 
 func (f *FakeGitHub) EnableAutoMerge(_ context.Context, nodeID string) error {
 	f.AutoMerged = append(f.AutoMerged, nodeID)
+	return f.Err
+}
+
+func (f *FakeGitHub) DisableAutoMerge(_ context.Context, nodeID string) error {
+	f.AutoMergeOff = append(f.AutoMergeOff, nodeID)
 	return f.Err
 }
 

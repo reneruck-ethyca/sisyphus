@@ -223,7 +223,7 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	if err := m.requestReviewers(ctx, h, ref, s); err != nil {
 		return err
 	}
-	if state != StateNeedsHuman && (state == StateApproved || s.InQueue) {
+	if state != StateNeedsHuman {
 		var err error
 		if state, reason, err = m.mergeStep(ctx, h, s, state, reason); err != nil {
 			return err

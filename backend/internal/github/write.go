@@ -242,6 +242,12 @@ func (a *API) EnableAutoMerge(ctx context.Context, nodeID string) error {
 		map[string]any{"id": nodeID}, nil)
 }
 
+// DisableAutoMerge turns GitHub's auto-merge off for the PR.
+func (a *API) DisableAutoMerge(ctx context.Context, nodeID string) error {
+	return a.graphql(ctx, `mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){clientMutationId}}`,
+		map[string]any{"id": nodeID}, nil)
+}
+
 // QueueFailures returns the failed jobs of the PR's latest merge-queue attempt:
 // the newest completed merge_group runs on its gh-readonly-queue branch.
 // ponytail: looks at the 100 newest merge_group runs of the repo; a busy queue may push the PR's off the page.

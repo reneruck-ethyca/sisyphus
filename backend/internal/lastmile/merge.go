@@ -34,8 +34,8 @@ func mergeRefusal(h Handoff) string {
 	switch {
 	case Terminal(h.State) || h.State == StateNeedsHuman:
 		return "it is " + h.State
-	case s == nil || !s.Approved():
-		return "the PR is not approved"
+	case s == nil || !humanApproved(*s):
+		return "the PR is not approved by a human on its current head"
 	case s.CI != CIGreen:
 		return "checks are not green (" + s.CI + ")"
 	case s.InQueue:
@@ -54,6 +54,9 @@ func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 			return invalid("handoff %s is already %s", id, h.State)
 		}
 		h.Autonomy.Merge = mode
+		if mode == MergeOff || mode == MergeShadow {
+			h.MergeRequested = false
+		}
 		return nil
 	})
 	if err != nil {
@@ -64,28 +67,49 @@ func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 	return h, nil
 }
 
-// mergeStep merges an approved PR when the button was pressed or the merge mode
-// says so (design §7.1), and tells a PR in the merge queue apart.
+// humanApproved says the PR is approved and a human approved its current head:
+// what any TLM merge needs, whatever the mode.
+func humanApproved(s Snapshot) bool {
+	return s.Approved() && slices.ContainsFunc(s.Approvals, func(a Approval) bool { return !a.Stale && !a.Bot })
+}
+
+// queueable are the states a PR in the merge queue shows as queued; the others
+// say there is work to do.
+var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, StateCIRunning}
+
+// mergeStep merges the PR when the button was pressed or the merge mode says so
+// (design §7.1). Where the repo allows it, merge=auto and merge=approved hand the
+// decision to GitHub auto-merge, which TLM turns off again when the mode goes off.
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
-	if s.InQueue {
-		return StateQueued, "", nil
-	}
 	mode := h.Autonomy.Merge
-	want := h.MergeRequested || (mode == MergeApproved && s.Approved()) ||
-		(mode == MergeAuto && evaluate(*h, s, m.cfg.LastMile, m.now()).WouldMerge)
-	if !want {
-		return state, reason, nil
-	}
-	if s.AutoMergeAllowed && !h.MergeRequested {
-		if !s.AutoMerge {
-			if err := m.GH.EnableAutoMerge(ctx, s.NodeID); err != nil {
+	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved)
+	switch {
+	case native && !s.Draft && !s.AutoMerge:
+		if err := m.GH.EnableAutoMerge(ctx, s.NodeID); err != nil {
+			return state, reason, err
+		}
+		h.AutoMergeSet = true
+		logEvent(h, m.now(), "merge", "GitHub auto-merge enabled")
+	case h.AutoMergeSet && !h.MergeRequested && (mode == MergeOff || mode == MergeShadow):
+		if s.AutoMerge {
+			if err := m.GH.DisableAutoMerge(ctx, s.NodeID); err != nil {
 				return state, reason, err
 			}
-			logEvent(h, m.now(), "merge", "GitHub auto-merge enabled")
+			logEvent(h, m.now(), "merge", "GitHub auto-merge disabled")
+		}
+		h.AutoMergeSet = false
+	}
+	if s.InQueue {
+		if slices.Contains(queueable, state) {
+			return StateQueued, "", nil
 		}
 		return state, reason, nil
 	}
-	if s.CI != CIGreen || !s.Approved() {
+	if native || state != StateApproved || s.CI != CIGreen || !humanApproved(s) {
+		return state, reason, nil
+	}
+	if !h.MergeRequested && (frozen(m.cfg.LastMile, m.now()) || mode == MergeOff || mode == MergeShadow ||
+		(mode == MergeAuto && !evaluate(*h, s, m.cfg.LastMile, m.now()).WouldMerge)) {
 		return state, reason, nil
 	}
 	if s.MergeQueue {
