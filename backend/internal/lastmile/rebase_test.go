@@ -63,6 +63,7 @@ func stackFixture(t *testing.T, childReq Request) (m *Manager, gh *FakeGitHub, p
 }
 
 func TestStackParentResolution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m, gh, parent, child, _ := stackFixture(t, Request{})
 	if child.StackParent != parent.ID || child.Base != "feature/x" || gh.Created[1].Base != "feature/x" || child.PRNumber != 8 {
@@ -108,6 +109,7 @@ func TestStackParentResolution(t *testing.T) {
 }
 
 func TestStackChildWaitsOnParentThenDashboardGroups(t *testing.T) {
+	t.Parallel()
 	m, _, parent, child, _ := stackFixture(t, Request{})
 	views := m.Views()
 	if len(views) != 2 || views[0].ID != parent.ID || views[0].Depth != 0 || views[1].ID != child.ID || views[1].Depth != 1 || views[1].WaitingOn != parent.ID {
@@ -120,6 +122,7 @@ func TestStackChildWaitsOnParentThenDashboardGroups(t *testing.T) {
 }
 
 func TestStackParentMergedRetargetsAndRebasesOnto(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m, gh, parent, child, events := stackFixture(t, Request{})
 	// The parent lands as a squash commit: its own sha is gone, and its change differs textually.
@@ -164,6 +167,7 @@ func TestStackParentMergedRetargetsAndRebasesOnto(t *testing.T) {
 }
 
 func TestStackParentClosed(t *testing.T) {
+	t.Parallel()
 	m, _, parent, child, events := stackFixture(t, Request{})
 	m.handoffs[0].State = StateClosed
 	m.tick(context.Background())
@@ -177,6 +181,7 @@ func TestStackParentClosed(t *testing.T) {
 }
 
 func TestDriftCleanRebase(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tasks := &fakeTasks{}
 	m, gh, _, id := opened(t, Request{})
@@ -233,6 +238,7 @@ func TestDriftCleanRebase(t *testing.T) {
 }
 
 func TestMergeTreePrediction(t *testing.T) {
+	t.Parallel()
 	m, _, _, id := opened(t, Request{})
 	dir := m.must(t, id).Worktree
 	ctx := context.Background()
@@ -286,6 +292,7 @@ func resolver(file string) func(string) {
 }
 
 func TestConflictAgentResolves(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, edit: resolver("a.txt")}
 	m, _, id, pre := conflictFixture(t, tasks, "a.txt", false)
 	m.tick(context.Background())
@@ -326,6 +333,7 @@ func TestConflictAgentResolves(t *testing.T) {
 }
 
 func TestConflictAgentTwoStopsAndRoundLimit(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, edit: resolver("a.txt")}
 	m, _, id, _ := conflictFixture(t, tasks, "a.txt", true)
 	m.tickWait(t)
@@ -359,6 +367,7 @@ func assertRolledBack(t *testing.T, h Handoff, pre string) {
 }
 
 func TestConflictAgentRejections(t *testing.T) {
+	t.Parallel()
 	escalate := `{"summary":"","confidence":"low","escalate":true,"escalate_reason":"semantic clash"}`
 	for _, c := range []struct {
 		name   string
@@ -406,6 +415,7 @@ func TestConflictAgentRejections(t *testing.T) {
 func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 func TestConflictWithoutAgentOrOnProtectedPath(t *testing.T) {
+	t.Parallel()
 	// fix-ci off: merge-tree predicts the conflict, no rebase is started, a human is told.
 	m, _, id, pre := conflictFixture(t, &fakeTasks{}, "a.txt", false)
 	m.handoffs[0].Autonomy.FixCI = false
@@ -438,6 +448,7 @@ func TestConflictWithoutAgentOrOnProtectedPath(t *testing.T) {
 }
 
 func TestStaleRebaseIsAborted(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	h := m.must(t, id)
 	pre := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
@@ -459,6 +470,7 @@ func TestStaleRebaseIsAborted(t *testing.T) {
 }
 
 func TestHumanRebaseIsKept(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	h := m.must(t, id)
 	pre := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
@@ -481,6 +493,7 @@ func rebaseCmd(t *testing.T, dir string) (string, error) {
 }
 
 func TestForceWithLeaseRefusesWhenOriginMoved(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, edit: resolver("a.txt")}
 	m, _, id, pre := conflictFixture(t, tasks, "a.txt", false)
 	h := m.must(t, id)
@@ -507,6 +520,7 @@ func TestForceWithLeaseRefusesWhenOriginMoved(t *testing.T) {
 }
 
 func TestStackParentHeadKeepsForkPointAfterParentRewrite(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m, gh, parent, child, _ := stackFixture(t, Request{})
 	fork := child.ParentHead

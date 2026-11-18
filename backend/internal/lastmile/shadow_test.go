@@ -20,6 +20,7 @@ this is not json
 `
 
 func TestShadowReport(t *testing.T) {
+	t.Parallel()
 	m, _, _ := fixture(t)
 	if rep, err := m.ShadowReport(ShadowQuery{}); err != nil || rep.Totals.Observed != 0 || rep.PRs == nil {
 		t.Fatalf("no log: %+v %v", rep, err)

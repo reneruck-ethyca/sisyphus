@@ -55,6 +55,7 @@ func (m *Manager) must(t *testing.T, id string) Handoff {
 }
 
 func TestOpenPR(t *testing.T) {
+	t.Parallel()
 	m, clone, _ := fixture(t)
 	gh := m.GH.(*FakeGitHub)
 	gh.NextPR = prRef
@@ -110,6 +111,7 @@ func TestOpenPR(t *testing.T) {
 }
 
 func TestOpenPRFailureStays(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	m.mu.Lock()
 	m.handoffs[0].PRNumber, m.handoffs[0].State = 0, StateHandedOff
@@ -122,6 +124,7 @@ func TestOpenPRFailureStays(t *testing.T) {
 }
 
 func TestStateMachine(t *testing.T) {
+	t.Parallel()
 	green := []github.Check{chk("a", "COMPLETED", "SUCCESS"), chk("b", "COMPLETED", "SKIPPED"), chk("c", "COMPLETED", "NEUTRAL")}
 	cases := []struct {
 		name      string
@@ -165,6 +168,7 @@ func TestStateMachine(t *testing.T) {
 }
 
 func TestLifecycle(t *testing.T) {
+	t.Parallel()
 	m, gh, events, id := opened(t, Request{Reviewers: []string{"carol"}})
 	snap := github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Draft: true, Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
 	gh.Snapshots[prRef.Key()] = snap
@@ -207,6 +211,7 @@ func TestLifecycle(t *testing.T) {
 }
 
 func TestDraftHandoffStaysDraft(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{Draft: true, Reviewers: []string{"carol"}})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", Draft: true, Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
 	m.tick(context.Background())
@@ -216,6 +221,7 @@ func TestDraftHandoffStaysDraft(t *testing.T) {
 }
 
 func TestNoChecksGrace(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	if rollup(nil, now, now.Add(time.Minute)) != CIPending || rollup(nil, now, now.Add(noChecksGrace)) != CIGreen {
 		t.Error("a PR without checks is pending only at first")
@@ -223,6 +229,7 @@ func TestNoChecksGrace(t *testing.T) {
 }
 
 func TestSnapshotApprovals(t *testing.T) {
+	t.Parallel()
 	t0 := time.Now()
 	s := buildSnapshot(github.PRSnapshot{HeadSHA: "new", Reviews: []github.SnapReview{
 		{User: "a", State: "APPROVED", CommitSHA: "old", SubmittedAt: t0},
@@ -241,6 +248,7 @@ func TestSnapshotApprovals(t *testing.T) {
 }
 
 func TestPick(t *testing.T) {
+	t.Parallel()
 	roster := []string{"alice", "bob", "carol"}
 	cases := []struct {
 		count, cursor int
@@ -263,6 +271,7 @@ func TestPick(t *testing.T) {
 }
 
 func TestRosterRoundRobinPersists(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	m.cfg.LastMile.Reviewers.Roster = []string{"me", "bob", "carol"}
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
@@ -277,6 +286,7 @@ func TestRosterRoundRobinPersists(t *testing.T) {
 }
 
 func TestRosterCountsReviewersAlreadyOnPR(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	m.cfg.LastMile.Reviewers.Roster = []string{"bob", "carol", "dave"}
 	m.cfg.LastMile.Reviewers.Count = 2
@@ -302,6 +312,7 @@ func TestRosterCountsReviewersAlreadyOnPR(t *testing.T) {
 }
 
 func TestNoReviewersWarns(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
 	m.tick(context.Background())
@@ -311,6 +322,7 @@ func TestNoReviewersWarns(t *testing.T) {
 }
 
 func TestRemovedNeverReAdded(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{Reviewers: []string{"alice", "bob"}})
 	snap := github.PRSnapshot{State: "OPEN", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")},
 		RequestedUsers: []string{"ethycabot", "alice", "bob", "dave"}} // dave: added by a human
@@ -350,6 +362,7 @@ func TestRemovedNeverReAdded(t *testing.T) {
 }
 
 func TestReviewerOverrideDiff(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{Reviewers: []string{"alice"}})
 	if _, err := m.SetReviewers(id, []string{"bob", "bob"}); err != nil { // before the request: replaces the plan
 		t.Fatal(err)
@@ -383,6 +396,7 @@ func TestReviewerOverrideDiff(t *testing.T) {
 }
 
 func TestCommitKeepsConcurrentReviewerEdit(t *testing.T) {
+	t.Parallel()
 	m, _, _, id := opened(t, Request{})
 	before := m.must(t, id)
 	after := before
@@ -397,6 +411,7 @@ func TestCommitKeepsConcurrentReviewerEdit(t *testing.T) {
 }
 
 func TestCommitKeepsConcurrentReAdd(t *testing.T) {
+	t.Parallel()
 	m, _, _, id := opened(t, Request{})
 	if _, err := m.update(id, func(h *Handoff) error {
 		h.Requested, h.Removed, h.HumansRequested = []string{"alice"}, []string{"alice"}, true
@@ -415,6 +430,7 @@ func TestCommitKeepsConcurrentReAdd(t *testing.T) {
 }
 
 func TestCommitKeepsRunMarkedMidTick(t *testing.T) {
+	t.Parallel()
 	m, _, _, id := opened(t, Request{})
 	before := m.must(t, id)
 	m.markRun(id, &RunMark{Trigger: TriggerDirty}) // DirtyAgent launched while the tick ran
@@ -425,6 +441,7 @@ func TestCommitKeepsRunMarkedMidTick(t *testing.T) {
 }
 
 func TestTickWaitsForGitHubToSeeAPush(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix}
 	m, gh, id, head := redFixture(t, tasks)
 	wt := m.must(t, id).Worktree

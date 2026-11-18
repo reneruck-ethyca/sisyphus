@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/reneruck/sisyphus/internal/proc"
@@ -31,14 +32,22 @@ func Commit(t *testing.T, dir, file, content string) string {
 	return Git(t, dir, "rev-parse", "HEAD")
 }
 
+// isolate keeps git from the user's config and gives commits an identity, for
+// the whole test binary: the same for every test, so they may run in parallel
+// (t.Setenv would forbid that).
+var isolate = sync.OnceFunc(func() {
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+		"GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"} {
+		if err := os.Setenv(k, v); err != nil {
+			panic(err)
+		}
+	}
+})
+
 // Setup returns an upstream repo and a clone with feature/x checked out.
 func Setup(t *testing.T) (upstream, clone string) {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_AUTHOR_NAME", "t")
-	t.Setenv("GIT_AUTHOR_EMAIL", "t@t")
-	t.Setenv("GIT_COMMITTER_NAME", "t")
-	t.Setenv("GIT_COMMITTER_EMAIL", "t@t")
+	isolate()
 	root := t.TempDir()
 	upstream, clone = filepath.Join(root, "up"), filepath.Join(root, "clone")
 	if err := os.Mkdir(upstream, 0o755); err != nil {

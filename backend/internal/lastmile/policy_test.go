@@ -24,6 +24,7 @@ func policyCfg() config.LastMile {
 }
 
 func TestEvaluate(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC) // a Thursday
 	cases := []struct {
 		name    string
@@ -80,6 +81,7 @@ func TestEvaluate(t *testing.T) {
 }
 
 func TestFreezeWindows(t *testing.T) {
+	t.Parallel()
 	ny := "America/New_York"
 	cases := []struct {
 		name string
@@ -103,6 +105,7 @@ func TestFreezeWindows(t *testing.T) {
 }
 
 func TestSignals(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	h := Handoff{FixRounds: map[string]int{TriggerCI: 2}, FlakeTotal: 3, ReadyAt: now.Add(-90 * time.Second),
 		Events: []Event{{Kind: "commit"}, {Kind: "reply"}, {Kind: "commit"}}}
@@ -154,6 +157,7 @@ func shadowLines(t *testing.T, m *Manager) []map[string]any {
 }
 
 func TestShadowLogChangeOnlyAndHourly(t *testing.T) {
+	t.Parallel()
 	m, gh, id, tick := shadowTicks(t)
 	at := m.now()
 	tick()
@@ -188,6 +192,7 @@ func TestShadowLogChangeOnlyAndHourly(t *testing.T) {
 }
 
 func TestShadowOffAndDraft(t *testing.T) {
+	t.Parallel()
 	// merge=off: the verdict is kept for the UI, nothing is logged.
 	m, gh, _, id := opened(t, Request{Reviewers: []string{"carol"}})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
@@ -205,6 +210,7 @@ func TestShadowOffAndDraft(t *testing.T) {
 }
 
 func TestShadowOutcome(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ state, outcome, by string }{{"MERGED", "merged", "carol"}, {"CLOSED", "closed", ""}} {
 		t.Run(c.outcome, func(t *testing.T) {
 			m, gh, _, tick := shadowTicks(t)
@@ -238,6 +244,7 @@ func TestShadowOutcome(t *testing.T) {
 }
 
 func TestAgentCommitsOutlastTheEventCap(t *testing.T) {
+	t.Parallel()
 	var h Handoff
 	logEvent(&h, time.Time{}, "commit", "pushed a")
 	for range maxEvents {

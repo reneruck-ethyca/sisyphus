@@ -14,6 +14,20 @@ import (
 	"github.com/reneruck/sisyphus/internal/tracker"
 )
 
+// TestMain points HOME at a scratch dir for the whole package, so config
+// defaults stay out of the user's, and its tests can run in parallel.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "lastmile-test-home")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", home)
+	flockPoll = 10 * time.Millisecond
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
+}
+
 // fixture is a clone on feature/x, one commit ahead of origin/main, whose origin
 // reads as ethyca/fidesplus on GitHub but fetches from the local upstream.
 func fixture(t *testing.T) (*Manager, string, string) {
@@ -22,9 +36,7 @@ func fixture(t *testing.T) (*Manager, string, string) {
 	gittest.Git(t, clone, "config", "url."+upstream+".insteadOf", "https://github.com/ethyca/fidesplus.git")
 	gittest.Git(t, clone, "remote", "set-url", "origin", "https://github.com/ethyca/fidesplus.git")
 	gittest.Git(t, upstream, "config", "receive.denyCurrentBranch", "ignore") // handoffs push the branch it has checked out
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfg, err := config.Load(filepath.Join(home, "none.json"))
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "none.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +57,7 @@ func invalidWith(t *testing.T, err error, want string) {
 }
 
 func TestHandoffAccepts(t *testing.T) {
+	t.Parallel()
 	m, clone, dir := fixture(t)
 	os.WriteFile(filepath.Join(clone, "untracked.env"), []byte("x"), 0o644) // wtp hooks copy such files in
 	h, err := m.Handoff(context.Background(), Request{Worktree: clone, Base: "main", Jira: "ENG-12", Labels: []string{" a "},
@@ -74,6 +87,7 @@ func TestHandoffAccepts(t *testing.T) {
 }
 
 func TestHandoffRelease(t *testing.T) {
+	t.Parallel()
 	m, clone, _ := fixture(t)
 	h, err := m.Handoff(context.Background(), Request{Worktree: clone, Base: "main", Title: "t"})
 	if err != nil {
@@ -87,6 +101,7 @@ func TestHandoffRelease(t *testing.T) {
 }
 
 func TestHandoffRejects(t *testing.T) {
+	t.Parallel()
 	m, clone, _ := fixture(t)
 	ctx := context.Background()
 	ok := Request{Worktree: clone, Base: "main"}
@@ -141,6 +156,7 @@ func TestHandoffRejects(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"https://github.com/ethyca/fidesplus.git": "ethyca/fidesplus",
 		"https://github.com/ethyca/fidesplus":     "ethyca/fidesplus",
@@ -160,6 +176,7 @@ func TestParseRepo(t *testing.T) {
 }
 
 func TestNotifyIsInert(t *testing.T) {
+	t.Parallel()
 	evil := `'; rm -rf / #`
 	dir := t.TempDir()
 	h := Handoff{ID: "x-1", Repo: "o/r", Branch: "b", Worktree: dir, Requester: evil, Reason: "a'b\"c$(touch pwned)`touch pwned`",
@@ -181,6 +198,7 @@ func TestNotifyIsInert(t *testing.T) {
 }
 
 func TestRenderNotify(t *testing.T) {
+	t.Parallel()
 	h := Handoff{ID: "i", PRNumber: 7, Branch: "it's"}
 	got, err := renderNotify("go {{.ID}} {{.PRNumber}} {{.Branch}} [{{.PRURL}}]", h, EventMerged)
 	if err != nil || got != `go 'i' '7' 'it'\''s' ['']` {
@@ -192,6 +210,7 @@ func TestRenderNotify(t *testing.T) {
 }
 
 func TestActionsNotifyOnceWithoutTheLock(t *testing.T) {
+	t.Parallel()
 	m, clone, _ := fixture(t)
 	changes := 0
 	m.OnChange = func() {

@@ -49,6 +49,7 @@ func hashOf(t *testing.T, m *Manager, id string) string {
 }
 
 func TestDirtyFilesShowBeforeTheAssessment(t *testing.T) {
+	t.Parallel()
 	m, _, id, _ := redFixture(t, &fakeTasks{result: okFix})
 	release := make(chan struct{})
 	var mu sync.Mutex
@@ -107,6 +108,7 @@ func TestDirtyFilesShowBeforeTheAssessment(t *testing.T) {
 }
 
 func TestDirtyAssessmentFailureKeepsThePanel(t *testing.T) {
+	t.Parallel()
 	m, _, id, _ := redFixture(t, &fakeTasks{result: okFix})
 	m.Assess = func(context.Context, string) (string, error) { return "", errors.New("no claude") }
 	writeFile(t, m.must(t, id).Worktree, "wip.txt", "x")
@@ -120,6 +122,7 @@ func TestDirtyAssessmentFailureKeepsThePanel(t *testing.T) {
 }
 
 func TestDirtyOldFormatIsRebuilt(t *testing.T) {
+	t.Parallel()
 	m, id, _ := dirtyFixture(t, map[string]string{"wip.txt": "x"})
 	st := m.must(t, id).Dirty.Status
 	if _, err := m.update(id, func(h *Handoff) error {
@@ -135,6 +138,7 @@ func TestDirtyOldFormatIsRebuilt(t *testing.T) {
 }
 
 func TestDirtyCommitSomePathsPushesAndResumes(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"a.txt": "edited", "wip.txt": "mine", "other.txt": "not this"})
 	h, err := m.DirtyCommit(context.Background(), id, hashOf(t, m, id), []string{"a.txt", "wip.txt"}, "  My own subject\n\nbody  ")
 	if err != nil {
@@ -159,6 +163,7 @@ func TestDirtyCommitSomePathsPushesAndResumes(t *testing.T) {
 
 // A file named like a pathspec glob commits only itself, not every file it would match.
 func TestDirtyCommitTakesPathsLiterally(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"*.txt": "glob-named", "other.txt": "not this"})
 	if _, err := m.DirtyCommit(context.Background(), id, hashOf(t, m, id), []string{"*.txt"}, "m"); err != nil {
 		t.Fatal(err)
@@ -172,6 +177,7 @@ func TestDirtyCommitTakesPathsLiterally(t *testing.T) {
 }
 
 func TestDirtyCommitRefusesBadInput(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"wip.txt": "x"})
 	hash := hashOf(t, m, id)
 	for _, c := range []struct {
@@ -196,6 +202,7 @@ func TestDirtyCommitRefusesBadInput(t *testing.T) {
 }
 
 func TestDirtyCommitFailureKeepsTheWork(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, file string
 		setup      func(wt string)
@@ -227,6 +234,7 @@ func TestDirtyCommitFailureKeepsTheWork(t *testing.T) {
 }
 
 func TestDirtyStashAndLeave(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{"wip.txt": "x", "debug.log": "y"}
 	t.Run("stash", func(t *testing.T) {
 		m, id, wt := dirtyFixture(t, files)
@@ -262,6 +270,7 @@ func TestDirtyStashAndLeave(t *testing.T) {
 }
 
 func TestDirtyActionRefusesAChangedWorktree(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"wip.txt": "x"})
 	hash := hashOf(t, m, id)
 	writeFile(t, wt, "new.txt", "x")
@@ -274,6 +283,7 @@ func TestDirtyActionRefusesAChangedWorktree(t *testing.T) {
 }
 
 func TestDirtyDiff(t *testing.T) {
+	t.Parallel()
 	m, id, _ := dirtyFixture(t, map[string]string{"a.txt": "edited", "wip.txt": "mine", "blob.bin": "\x00"})
 	ctx := context.Background()
 	if d, err := m.DirtyDiff(ctx, id, "a.txt"); err != nil || !strings.Contains(d, "-two") || !strings.Contains(d, "+edited") {
@@ -290,6 +300,7 @@ func TestDirtyDiff(t *testing.T) {
 }
 
 func TestDirtyAgentPushesBothCommitsAndResumes(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"wip.txt": "half"})
 	tasks := &fakeTasks{result: okFix, edit: func(dir string) { writeFile(t, dir, "wip.txt", "whole") }}
 	m.Tasks = tasks
@@ -314,6 +325,7 @@ func TestDirtyAgentPushesBothCommitsAndResumes(t *testing.T) {
 }
 
 func TestDirtyAgentFailureGivesTheChangesBack(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"wip.txt": "precious", "a.txt": "edited"})
 	head := gittest.Git(t, wt, "rev-parse", "HEAD")
 	m.Tasks = &fakeTasks{result: `{"summary":"x","escalate":true,"escalate_reason":"wrong PR"}`,
@@ -342,6 +354,7 @@ func TestDirtyAgentFailureGivesTheChangesBack(t *testing.T) {
 }
 
 func TestDirtyAgentLostRunIsUnwrapped(t *testing.T) {
+	t.Parallel()
 	m, id, wt := dirtyFixture(t, map[string]string{"wip.txt": "precious"})
 	head := gittest.Git(t, wt, "rev-parse", "HEAD")
 	gittest.Git(t, wt, "add", "wip.txt")
@@ -366,6 +379,7 @@ func TestDirtyAgentLostRunIsUnwrapped(t *testing.T) {
 }
 
 func TestDirtyAssessmentKeepsWIP(t *testing.T) {
+	t.Parallel()
 	m, _, id, _ := redFixture(t, &fakeTasks{result: okFix})
 	release := make(chan struct{})
 	m.Assess = func(context.Context, string) (string, error) { <-release; return okAdvice, nil }

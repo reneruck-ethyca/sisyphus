@@ -20,6 +20,7 @@ import (
 )
 
 func TestParseCheckURL(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		url      string
 		run, job int64
@@ -39,6 +40,7 @@ func TestParseCheckURL(t *testing.T) {
 }
 
 func TestFingerprint(t *testing.T) {
+	t.Parallel()
 	a := "2026-11-05T10:00:01.123Z FAILED tests/test_a.py::t - AssertionError: expected 5 got 7 in /tmp/pytest-12/x.py at 3f2a9c1\n" +
 		"2026-11-05T10:00:01.200Z ok chatter"
 	b := "2026-11-06T11:30:59.001Z FAILED tests/test_a.py::t - AssertionError: expected 9 got 1 in /tmp/pytest-99/x.py at deadbeef01\n" +
@@ -56,6 +58,7 @@ func TestFingerprint(t *testing.T) {
 }
 
 func TestTail(t *testing.T) {
+	t.Parallel()
 	var lines []string
 	for i := range 400 {
 		lines = append(lines, strings.Repeat("x", i%7+1))
@@ -67,6 +70,7 @@ func TestTail(t *testing.T) {
 }
 
 func TestGlobAndProtected(t *testing.T) {
+	t.Parallel()
 	m, _, _ := fixture(t)
 	m.cfg.LastMile.AllowPaths = []string{"**/go.sum", "db/migrations/0001_*.sql"}
 	for p, want := range map[string]bool{
@@ -147,6 +151,7 @@ func (m *Manager) tickWait(t *testing.T) {
 }
 
 func TestFixAgentCommitsAndPushes(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, edit: func(dir string) { os.WriteFile(filepath.Join(dir, "a.txt"), []byte("fixed"), 0o644) }}
 	m, _, id, head := redFixture(t, tasks)
 	m.tick(context.Background())
@@ -180,6 +185,7 @@ func TestFixAgentCommitsAndPushes(t *testing.T) {
 }
 
 func TestFixAgentDoesNotBlockTick(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, release: make(chan struct{})}
 	m, _, id, _ := redFixture(t, tasks)
 	m.tick(context.Background()) // launches and returns while the agent waits
@@ -221,6 +227,7 @@ func TestFixAgentDoesNotBlockTick(t *testing.T) {
 }
 
 func TestFixAgentOutcomes(t *testing.T) {
+	t.Parallel()
 	write := func(name, content string) func(string) {
 		return func(dir string) {
 			os.MkdirAll(filepath.Join(dir, filepath.Dir(name)), 0o755)
@@ -292,6 +299,7 @@ func TestFixAgentOutcomes(t *testing.T) {
 }
 
 func TestRoundCapAndSameFailure(t *testing.T) {
+	t.Parallel()
 	edit := func(dir string) { os.WriteFile(filepath.Join(dir, "a.txt"), []byte(time.Now().String()), 0o644) }
 	tasks := &fakeTasks{result: okFix, edit: edit}
 	m, gh, id, _ := redFixture(t, tasks)
@@ -328,6 +336,7 @@ func TestRoundCapAndSameFailure(t *testing.T) {
 }
 
 func TestFlakeRerunBudget(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix}
 	m, gh, id, head := redFixture(t, tasks)
 	m.cfg.LastMile.Flakes = []string{`ECONNRESET`}
@@ -357,6 +366,7 @@ func TestFlakeRerunBudget(t *testing.T) {
 }
 
 func TestFlakeRerunWithoutFixCI(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{})
 	m.cfg.LastMile.Flakes = []string{`timeout`}
 	gh.Logs = map[int64]string{22: "step timeout\n"}
@@ -368,6 +378,7 @@ func TestFlakeRerunWithoutFixCI(t *testing.T) {
 }
 
 func TestNonActionsCheckHasNoLog(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix}
 	m, gh, id, _ := redFixture(t, tasks)
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{{Name: "ext", Status: "COMPLETED", Conclusion: "FAILURE", URL: "https://ci.example.com/1"}}}
@@ -380,6 +391,7 @@ func TestNonActionsCheckHasNoLog(t *testing.T) {
 }
 
 func TestResumeAndCancel(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: `{"escalate":true,"escalate_reason":"no"}`}
 	m, gh, id, _ := redFixture(t, tasks)
 	m.tickWait(t)
@@ -419,6 +431,7 @@ func TestResumeAndCancel(t *testing.T) {
 }
 
 func TestTickDiscardedAfterConcurrentEdit(t *testing.T) {
+	t.Parallel()
 	m, _, _, id := opened(t, Request{})
 	before := m.must(t, id)
 	after := before
@@ -444,6 +457,7 @@ func (b bumpOnLabel) CreateLabel(ctx context.Context, repo, name, color, desc st
 }
 
 func TestRunOutcomeSurvivesARejectedCommit(t *testing.T) {
+	t.Parallel()
 	m, gh, id, _ := redFixture(t, &fakeTasks{result: okFix}) // no edits: "agent made no changes"
 	m.tickWait(t)
 	var once sync.Once
@@ -456,6 +470,7 @@ func TestRunOutcomeSurvivesARejectedCommit(t *testing.T) {
 }
 
 func TestLostRunIsCleanedUp(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, release: make(chan struct{})}
 	m, gh, id, _ := redFixture(t, tasks)
 	m.tick(context.Background()) // the fix agent starts, and sisyphus dies mid-run
@@ -490,6 +505,7 @@ func TestLostRunIsCleanedUp(t *testing.T) {
 }
 
 func TestHandoffUntrackedFilesStayTheHumans(t *testing.T) {
+	t.Parallel()
 	m, clone, _ := fixture(t)
 	writeFile(t, clone, ".env.local", "SECRET=1") // a wtp hook copied it in; not gitignored
 	gh := m.GH.(*FakeGitHub)
@@ -517,6 +533,7 @@ func TestHandoffUntrackedFilesStayTheHumans(t *testing.T) {
 }
 
 func TestLostRunFailsClosed(t *testing.T) {
+	t.Parallel()
 	m, _, _ := fixture(t)
 	h := Handoff{ID: "x-1", Worktree: t.TempDir(), State: StateCIRed, PRNumber: 7, Run: &RunMark{Trigger: TriggerCI}} // not a git dir: ls-files fails
 	m.lostRun(context.Background(), &h)
@@ -526,6 +543,7 @@ func TestLostRunFailsClosed(t *testing.T) {
 }
 
 func TestLostRunFlagsNodeModulesAfterSetup(t *testing.T) {
+	t.Parallel()
 	m, _, id, head := redFixture(t, &fakeTasks{result: okFix})
 	h := m.must(t, id)
 	writeFile(t, h.Worktree, ".git/info/exclude", "node_modules/\n")
@@ -539,6 +557,7 @@ func TestLostRunFlagsNodeModulesAfterSetup(t *testing.T) {
 }
 
 func TestAgentsNeedReviews(t *testing.T) {
+	t.Parallel()
 	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{failCheck("unit", "22")}}
 	m.tick(context.Background())
@@ -548,6 +567,7 @@ func TestAgentsNeedReviews(t *testing.T) {
 }
 
 func TestSetupFilesAreNotTheAgents(t *testing.T) {
+	t.Parallel()
 	tasks := &fakeTasks{result: okFix, setup: func(dir string) {
 		os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("node_modules/\n"), 0o644)
 		os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755)
@@ -566,7 +586,7 @@ func TestSetupFilesAreNotTheAgents(t *testing.T) {
 }
 
 func TestWorktreeLockSpansManagers(t *testing.T) {
-	flockPoll = 10 * time.Millisecond
+	t.Parallel()
 	dir := t.TempDir()
 	newM := func() *Manager {
 		m, err := New(config.Config{}, &FakeGitHub{}, &tracker.Locks{}, dir)
