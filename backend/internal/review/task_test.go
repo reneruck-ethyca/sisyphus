@@ -182,3 +182,13 @@ func TestRunTaskGatesAgentOnSetup(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusLeavesOutRunningTasks(t *testing.T) {
+	f := newFixture(t)
+	f.r.mu.Lock()
+	f.r.active["task:h1"] = func(error) {}
+	f.r.mu.Unlock()
+	if _, ok := f.r.Status()["task:h1"]; ok {
+		t.Error("a running task shows up as a PR status")
+	}
+}

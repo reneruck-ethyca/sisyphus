@@ -702,7 +702,7 @@ func (r *Reviewer) dispatch(ctx context.Context) (recheck time.Duration) {
 		runID := newRunID(now)
 		run := Run{ID: runID, Job: j, Image: r.cfg.Repos[j.PR.Repo].Image, Started: now, Status: Running,
 			Dir: filepath.Join(r.dir, "runs", prPath(id), runID)}
-		r.appendRunLocked(run) // saved with the dequeue, so a crash here is seen as "lost"
+		r.appendRunLocked(run.Job.PR.Key(), run) // saved with the dequeue, so a crash here is seen as "lost"
 		runCtx, cancel := context.WithCancelCause(ctx)
 		r.active[id] = cancel
 		starts = append(starts, start{run, runCtx})
@@ -1559,12 +1559,10 @@ func (r *Reviewer) poke() {
 
 // --- records ---
 
-func (r *Reviewer) appendRunLocked(run Run) {
-	runs := append(r.st.Runs[run.Job.PR.Key()], run)
-	if len(runs) > keepRuns {
-		runs = runs[len(runs)-keepRuns:]
-	}
-	r.st.Runs[run.Job.PR.Key()] = runs
+// appendRunLocked records run under key (a PR's ID, or a task's), keeping the last keepRuns.
+func (r *Reviewer) appendRunLocked(key string, run Run) {
+	runs := append(r.st.Runs[key], run)
+	r.st.Runs[key] = runs[max(0, len(runs)-keepRuns):]
 	r.writeRunJSON(run)
 }
 
@@ -1630,7 +1628,9 @@ func (r *Reviewer) Status() map[string]PRStatus {
 		out[j.PR.Key()] = s
 	}
 	for id := range r.active {
-		set(id, StateRunning)
+		if !strings.HasPrefix(id, taskPrefix) {
+			set(id, StateRunning)
+		}
 	}
 	for _, s := range out {
 		for i := range s.Runs {

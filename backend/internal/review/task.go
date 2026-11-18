@@ -80,9 +80,7 @@ func (r *Reviewer) RunTask(ctx context.Context, t Task) (TaskResult, error) {
 		Job: Job{PR: tracker.Tracked{PRRef: github.PRRef{Repo: t.Repo}, Worktree: t.Worktree}, Agent: t.Agent, Reason: "task"},
 		Dir: filepath.Join(r.dir, "tasks", t.ID, runID)}
 	r.mu.Lock()
-	runs := append(r.st.Runs[key], run)
-	r.st.Runs[key] = runs[max(0, len(runs)-keepRuns):]
-	r.writeRunJSON(run)
+	r.appendRunLocked(key, run)
 	r.saveLocked()
 	r.mu.Unlock()
 	r.changed()
