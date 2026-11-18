@@ -481,6 +481,9 @@ func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func
 		if appCtx.Err() != nil {
 			return // shutting down again; try next start
 		}
+		if run.Stack != nil { // while it still holds the worktree, as finish does
+			r.stopStack(run.Stack.Project)
+		}
 		unlock()
 		r.mu.Lock()
 		delete(r.active, id)
@@ -555,6 +558,7 @@ func (r *Reviewer) waitRuntime(ctx context.Context) error {
 // unless a newer one is queued.
 func (r *Reviewer) lose(run Run, err error) {
 	slog.Warn("review lost, requeueing", "pr", run.Job.PR.Key(), "run", run.ID, "err", err)
+	dropRelated(run)
 	r.record(run.Job.PR.Key(), run.ID, func(x *Run) { x.Status, x.Error, x.Finished = Lost, err.Error(), time.Now() })
 	r.requeue(run.Job)
 }
@@ -1270,6 +1274,9 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.removeContainer(context.WithoutCancel(appCtx), run.ID, run.Container)
 		drainLogs()
 		if reattached {
+			if run.Stack != nil {
+				r.stopStack(run.Stack.Project)
+			}
 			unlock()
 			r.mu.Lock()
 			delete(r.active, id)

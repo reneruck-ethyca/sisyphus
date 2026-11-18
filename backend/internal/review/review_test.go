@@ -332,12 +332,17 @@ func TestReattachLostRunIsRequeued(t *testing.T) {
 	f := newFixture(t)
 	f.r.st.Runs[refA.Key()] = []Run{{ID: "r1", Job: Job{PR: f.tr, Reason: "commits"}, Status: Running, Container: "gone",
 		Started: time.Now(), Dir: filepath.Join(f.dir, "runs", "r1")}}
+	related := relatedDir(f.r.st.Runs[refA.Key()][0])
+	os.MkdirAll(related, 0o755)
 	orphan := f.rt.Seed(map[string]string{"sisyphus": "1", "sisyphus.run": "zz"}, true, 0, "")
 	f.r.Reattach(context.Background())
 	waitFor(t, "lost and requeued", func() bool {
 		st := f.r.Status()[refA.Key()]
 		return st.State == "queued" && st.Runs[0].Status == Lost
 	})
+	if _, err := os.Stat(related); !os.IsNotExist(err) {
+		t.Errorf("lost run's related checkout left behind: %v", err)
+	}
 	waitFor(t, "orphan removed", func() bool {
 		return !slices.ContainsFunc(f.containers(), func(c container.Info) bool { return c.ID == orphan })
 	})
