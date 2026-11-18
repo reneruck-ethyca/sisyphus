@@ -360,7 +360,7 @@ function RunPage({ status: s, pr, runs, runID, archive }: { status: Status; pr: 
 
     {rf.data && <section class="card" aria-labelledby="written">
       <div class="card-h"><h2 id="written">{run.posted ? "Posted to GitHub" : "Written, not posted"}</h2>
-        {run.posted && <><span>{!!run.posted.comments && plural(run.posted.comments, "inline comment")}{!!run.posted.replies && ` · ${run.posted.replies} replies`}
+        {run.posted && <><span>{!!run.posted.comments && plural(run.posted.comments, "inline comment")}{!!run.posted.replies && ` · ${plural(run.posted.replies, "reply", "replies")}`}
           {run.posted.fallback && " · as a plain comment (GitHub refused the review)"}</span>
           {run.posted.url && <Ext class="end" href={run.posted.url}>View on GitHub ↗</Ext>}</>}</div>
       <div class="card-b review-body"><Md text={rf.data.body} /></div>

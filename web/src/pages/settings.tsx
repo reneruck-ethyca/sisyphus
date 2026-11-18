@@ -2,7 +2,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { get, post, put, type Field, type Settings as SettingsData, type SkillStatus, type Status } from "../api";
 import { Loading, Page, useSkills } from "../components";
-import { profiles, withCurrent } from "../format";
+import { plural, profiles, withCurrent } from "../format";
 import { useFetch } from "../live";
 
 // shown is a field's value as the form holds it; a bool with Invert shows the other way round.
@@ -95,7 +95,7 @@ export function Settings({ status }: { status?: Status }) {
       </form>
     </main>
     {(changed.length > 0 || savedOK || msg) && <div class="savebar" role="region" aria-label="Unsaved changes">
-      <span role="status">{changed.length && !savedOK ? `${changed.length} unsaved change${changed.length > 1 ? "s" : ""}` : msg}</span>
+      <span role="status">{changed.length && !savedOK ? plural(changed.length, "unsaved change") : msg}</span>
       {savedOK ? <button type="button" class="btn" disabled={restarting} onClick={restart}>Restart sisyphus</button> : <>
         <button type="button" class="btn quiet" onClick={() => { setValues(base); setMsg(""); }}>Discard</button>
         <button type="submit" class="btn" form="settings">Save</button></>}

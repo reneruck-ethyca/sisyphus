@@ -5,7 +5,7 @@ import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { PRView, Status } from "../api";
 import { Ago, Chip, Ext, Page } from "../components";
-import { isZero, rel } from "../format";
+import { isZero, plural, rel } from "../format";
 import { designAPI, isStale, type DesignPR, type DocFile, type Mode, type ReviewEvent, type Thread } from "../design/api";
 import { blockForLine, blocksInRange, buildComment, placeThread, selectionRange, type Placement, type Range } from "../design/anchor";
 import { blocks, decode, markChanged, renderMarkdown, renderMermaid, rewriteLinks, sanitize } from "../design/render";
@@ -267,13 +267,13 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
       <b class="grow">{title}</b>
       {!updated && <label class="toggle"><input type="checkbox" checked={mode !== "none"}
         onChange={(e) => setMode(e.currentTarget.checked ? "all" : "none")} /> Show changes</label>}
-      {pending > 0 && <Chip tone="changes">Pending review · {pending} comment{pending === 1 ? "" : "s"}</Chip>}
+      {pending > 0 && <Chip tone="changes">Pending review · {plural(pending, "comment")}</Chip>}
       {pr && <Ext class="btn quiet small" href={pr.url}>GitHub ↗</Ext>}
       <button class="btn small" disabled={!pr} onClick={() => dialogRef.current!.showModal()}>Submit review</button>
     </div>
     {updated && <div class="dr-since" role="status">
       <b>Since your review <Ago t={reviewed!.reviewed_at} />:</b>
-      <span>{[d!.new_commits && "new commits", newComments > 0 && `${newComments} new comment${newComments === 1 ? "" : "s"}`].filter(Boolean).join(" · ") || "nothing new on the docs"}</span>
+      <span>{[d!.new_commits && "new commits", newComments > 0 && plural(newComments, "new comment")].filter(Boolean).join(" · ") || "nothing new on the docs"}</span>
       <span class="grow" />
       <span>Highlight</span>
       <div class="seg" role="group" aria-label="Which changes to highlight">
@@ -307,7 +307,7 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
           const news = xs.reduce((n, x) => n + x.unread, 0);
           return <button class={"badge" + (news ? " new" : "")} style={{ top: topOf(el) }} onClick={() => focusThread(xs[0].t.id)}
             onMouseEnter={() => highlight({ start: +el.dataset.lineStart!, end: +el.dataset.lineEnd! })} onMouseLeave={() => highlight(null)}
-            aria-label={`${xs.length} thread${xs.length === 1 ? "" : "s"}${news ? `, ${news} new` : ""}`}>
+            aria-label={plural(xs.length, "thread") + (news ? `, ${news} new` : "")}>
             {news ? `${news} new` : xs.length}
           </button>;
         })}
@@ -362,7 +362,7 @@ function TreeLevel({ node, ...p }: TreeProps & { node: TreeNode }) {
           <a href={"#" + encodeURIComponent(doc.path)} aria-current={doc.path === p.path ? "page" : undefined} title={doc.path}
             onClick={(e) => { e.preventDefault(); p.onSelect(doc.path); }}>
             <span>{p.news.has(doc.path) && <span class="dot" aria-label="new comments" />}{k.name}</span>
-            <small>{doc.status}{n > 0 && ` · ${n} thread${n === 1 ? "" : "s"}`}</small>
+            <small>{doc.status}{n > 0 && ` · ${plural(n, "thread")}`}</small>
           </a>
         </li>;
       }
@@ -524,7 +524,7 @@ function SubmitDialog({ ref_, pr, threads, api, fail, author, onDone }: {
   return <dialog ref={ref_} class="dr-dialog" aria-labelledby="dr-submit-h">
     <h2 id="dr-submit-h">Submit your review</h2>
     {pending.length > 0 ? <div>
-      <div class="muted small">{pending.length} pending comment{pending.length === 1 ? "" : "s"} go out with it</div>
+      <div class="muted small">{plural(pending.length, "pending comment")} go{pending.length === 1 && "es"} out with it</div>
       <ul>{pending.map(({ t, c }) => <li key={c.id}><code>{t.path.split("/").pop()}</code> · {text(c.bodyHTML).slice(0, 90)}</li>)}</ul>
     </div> : <p class="muted small">No pending comments: this posts the verdict and summary alone.</p>}
     <label for="dr-sum"><b>Summary</b> <span class="muted">(optional)</span></label>
