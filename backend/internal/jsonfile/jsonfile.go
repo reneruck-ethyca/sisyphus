@@ -9,9 +9,13 @@ import (
 	"path/filepath"
 )
 
-// Save writes v as indented JSON via temp file + rename, so a crash never
-// leaves half a file.
+// Save writes v as indented JSON via temp file + fsync + rename, so a crash or
+// power loss never leaves half a file. A symlink at path (a dotfiles repo's
+// config, say) stays: its target is written.
 func Save(path string, v any) error {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -25,6 +29,10 @@ func Save(path string, v any) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return err
 	}
