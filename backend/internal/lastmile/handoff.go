@@ -135,7 +135,7 @@ func (m *Manager) parse(req Request) (Handoff, error) {
 	return h, nil
 }
 
-// parseAutonomy reads "fix-ci,address-reviews,merge=off|shadow"; "" allows nothing.
+// parseAutonomy reads "fix-ci,address-reviews,merge=off|shadow|auto|approved"; "" allows nothing.
 func parseAutonomy(s string) (Autonomy, error) {
 	a := Autonomy{Merge: MergeOff}
 	for _, tok := range strings.Split(s, ",") {
@@ -145,12 +145,12 @@ func parseAutonomy(s string) (Autonomy, error) {
 			a.FixCI = true
 		case "address-reviews":
 			a.AddressReviews = true
-		case "merge=" + MergeOff, "merge=" + MergeShadow:
-			a.Merge = strings.TrimPrefix(tok, "merge=")
-		case "merge=" + MergeAuto:
-			return a, invalid("merge=auto is not supported yet")
 		default:
-			return a, invalid("autonomy %q isn't fix-ci, address-reviews or merge=off|shadow", tok)
+			mode, ok := strings.CutPrefix(tok, "merge=")
+			if !ok || !slices.Contains(mergeModes, mode) {
+				return a, invalid("autonomy %q isn't fix-ci, address-reviews or merge=off|shadow|auto|approved", tok)
+			}
+			a.Merge = mode
 		}
 	}
 	return a, nil

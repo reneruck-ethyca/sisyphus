@@ -604,7 +604,7 @@ func TestHTTPHandoffs(t *testing.T) {
 
 	for name, c := range map[string]struct{ body, want string }{
 		"owned":      {`{"worktree": ` + strconv.Quote(clone) + `, "base": "main"}`, "already owned"},
-		"merge auto": {`{"worktree": ` + strconv.Quote(clone) + `, "base": "main", "autonomy": "merge=auto"}`, "not supported yet"},
+		"merge mode": {`{"worktree": ` + strconv.Quote(clone) + `, "base": "main", "autonomy": "merge=yes"}`, "merge=yes"},
 		"no base":    {`{"worktree": ` + strconv.Quote(clone) + `}`, "base"},
 	} {
 		if code, body := post(t, srv.URL+"/api/handoffs", c.body); code != 400 || !strings.Contains(body, c.want) {
@@ -686,6 +686,29 @@ func TestHTTPHandoffResumeCancel(t *testing.T) {
 	}
 	if code, _ := post(t, srv.URL+"/api/handoffs/nope/resume", ""); code != 404 {
 		t.Errorf("unknown resume = %d", code)
+	}
+	if code, body := post(t, srv.URL+"/api/handoffs/"+h.ID+"/merge", ""); code != 400 || !strings.Contains(body, "not approved") {
+		t.Errorf("merge of an unapproved = %d %s", code, body)
+	}
+	putMode := func(id, body string) (int, string) {
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/handoffs/"+id+"/merge-mode", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+apiTokenForTests)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, body := putMode(h.ID, `{"mode": "approved"}`); code != 200 || !strings.Contains(body, `"merge":"approved"`) {
+		t.Errorf("merge mode = %d %s", code, body)
+	}
+	if code, _ := putMode(h.ID, `{"mode": "yes"}`); code != 400 {
+		t.Errorf("bad merge mode = %d", code)
+	}
+	if code, _ := putMode("nope", `{"mode": "off"}`); code != 404 {
+		t.Errorf("unknown merge mode = %d", code)
 	}
 	code, body := post(t, srv.URL+"/api/handoffs/"+h.ID+"/cancel", "")
 	if code != 200 || !strings.Contains(body, `"state":"cancelled"`) {

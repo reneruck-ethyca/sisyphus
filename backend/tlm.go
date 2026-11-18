@@ -21,7 +21,7 @@ import (
 )
 
 const tlmUsage = `usage: tlm handoff --base <branch> [--worktree dir] [--title t] [--body-file f] [--jira KEY] [--labels a,b]
-                   [--reviewers a,b] [--draft] [--autonomy fix-ci,address-reviews,merge=off|shadow]
+                   [--reviewers a,b] [--draft] [--autonomy fix-ci,address-reviews,merge=off|shadow|auto|approved]
                    [--notify 'cmd template'] [--notify-on merged,needs-human,closed] [--agent vendor:model:effort]
                    [--max-fix-rounds n] [--stack-parent id|branch] [--requester who]
        tlm status <id> [--json]
@@ -129,7 +129,7 @@ func tlmHandoff(args []string, stdout, stderr io.Writer) error {
 		labels      = fs.String("labels", "", "comma-separated PR labels")
 		reviewers   = fs.String("reviewers", "", "comma-separated reviewers, instead of the roster")
 		draft       = fs.Bool("draft", false, "open the PR as a draft")
-		autonomy    = fs.String("autonomy", "", "fix-ci,address-reviews,merge=off|shadow")
+		autonomy    = fs.String("autonomy", "", "fix-ci,address-reviews,merge=off|shadow|auto|approved")
 		notify      = fs.String("notify", "", "command template to run on --notify-on events")
 		notifyOn    = fs.String("notify-on", "", "pr-opened,merged,needs-human,closed,stack-parent-merged (default: merged,needs-human,closed)")
 		agent       = fs.String("agent", "", "vendor:model:effort (default: review.agent)")

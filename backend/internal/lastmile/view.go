@@ -10,6 +10,7 @@ type View struct {
 	Depth     int      `json:"depth"`                // how far down a stack: 0 for a root or a handoff on its own
 	WaitingOn string   `json:"waiting_on,omitempty"` // the open parent this stacked handoff sits on
 	DirtyHash string   `json:"dirty_hash,omitempty"` // Dirty.Hash, which the dirty panel's actions send back
+	CanMerge  bool     `json:"can_merge"`            // the merge button may be pressed
 
 	// The agent run in flight for this handoff: its trigger (Trigger*) and start; "" = none.
 	// A finished run waiting for the next tick to apply it doesn't count.
@@ -24,7 +25,7 @@ func (m *Manager) Views() []View {
 	byID := map[string]View{}
 	kids := map[string][]string{} // parent id -> children ids, oldest first
 	for _, h := range hs {
-		v := View{Handoff: h, Over: Terminal(h.State), Reviewing: h.Reviewers}
+		v := View{Handoff: h, Over: Terminal(h.State), Reviewing: h.Reviewers, CanMerge: mergeRefusal(h) == ""}
 		if h.Snapshot != nil {
 			v.Reviewing = h.Snapshot.Requested
 		}

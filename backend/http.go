@@ -319,6 +319,21 @@ func newHandler(srv server) http.Handler {
 	mux.HandleFunc("GET /api/skill", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, skillsStatus())
 	})
+	mux.HandleFunc("POST /api/handoffs/{id}/merge", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		h, err := lm.Merge(context.WithoutCancel(r.Context()), r.PathValue("id"))
+		writeLastMile(w, r, http.StatusOK, h, err)
+	}))
+	mux.HandleFunc("PUT /api/handoffs/{id}/merge-mode", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		h, err := lm.SetMerge(r.PathValue("id"), body.Mode)
+		writeLastMile(w, r, http.StatusOK, h, err)
+	}))
 	for _, verb := range []string{"resume", "cancel"} {
 		mux.HandleFunc("POST /api/handoffs/{id}/"+verb, withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
 			var h lastmile.Handoff

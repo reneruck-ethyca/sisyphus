@@ -29,8 +29,9 @@ tlm handoff --worktree ~/Dev/.worktrees/fidesplus/ENG-1234 --base dev \
   --notify 'orca orchestration send --to orchestrator --message "TLM $TLM_EVENT $TLM_ID $TLM_PRURL $TLM_REASON"'
 ```
 
-- `--autonomy` takes only `fix-ci`, `address-reviews`, `merge=off`, `merge=shadow`. A left-out token stays
-  with a human. `merge=auto` is refused.
+- `--autonomy` takes only `fix-ci`, `address-reviews` and one of `merge=off` (default), `merge=shadow`,
+  `merge=auto` (merge once the merge policy is satisfied), `merge=approved` (merge once approved). A left-out
+  token stays with a human; merge only when the user asked for it.
 - `--title` defaults to the last commit's subject; `--jira` prefixes it with `ENG-1234: `.
 - `--reviewers a,b` replaces the reviewer roster.
 - TLM pushes the branch; don't push first.

@@ -20,6 +20,7 @@ const (
 	StateFeedback       = "feedback"
 	StateApproved       = "approved"
 	StateMergeable      = "mergeable"
+	StateQueued         = "queued" // in the base's merge queue
 	StateConflict       = "conflict"
 	StateMerged         = "merged"
 	StateNeedsHuman     = "needs-human"
@@ -56,10 +57,13 @@ var defaultNotifyOn = []string{EventMerged, EventNeedsHuman, EventClosed}
 
 // Merge modes of an Autonomy.
 const (
-	MergeOff    = "off"
-	MergeShadow = "shadow"
-	MergeAuto   = "auto" // not supported yet
+	MergeOff      = "off"
+	MergeShadow   = "shadow"
+	MergeAuto     = "auto"     // merge once the evaluator says so
+	MergeApproved = "approved" // merge once approved
 )
+
+var mergeModes = []string{MergeOff, MergeShadow, MergeAuto, MergeApproved}
 
 // Autonomy is what TLM may do on its own for a handoff.
 type Autonomy struct {
@@ -80,7 +84,7 @@ type Request struct {
 	Labels       []string `json:"labels,omitempty"`
 	Reviewers    []string `json:"reviewers,omitempty"` // replace the roster
 	Draft        bool     `json:"draft"`
-	Autonomy     string   `json:"autonomy,omitempty"` // "fix-ci,address-reviews,merge=off|shadow"
+	Autonomy     string   `json:"autonomy,omitempty"` // "fix-ci,address-reviews,merge=off|shadow|auto|approved"
 	Notify       string   `json:"notify,omitempty"`   // Go text/template, run through sh -c
 	NotifyOn     []string `json:"notify_on,omitempty"`
 	Agent        string   `json:"agent,omitempty"` // "vendor:model:effort"; "" = review.agent
@@ -155,6 +159,11 @@ type Handoff struct {
 	Dirty    *Dirty    `json:"dirty,omitempty"`    // needs-human with uncommitted changes in the worktree: what, and advice on them
 	Shadow   *Verdict  `json:"shadow,omitempty"`   // the merge policy's latest verdict (design §7); refreshed when it changes, else hourly
 	ReadyAt  time.Time `json:"ready_at,omitempty"` // the PR was first seen out of draft: where time in review starts
+
+	// Merge bookkeeping (design §7.1, §7.2).
+	MergeRequested bool      `json:"merge_requested,omitempty"` // a person pressed merge
+	QueueKicks     int       `json:"queue_kicks,omitempty"`     // removals from the merge queue
+	QueueSeen      time.Time `json:"queue_seen,omitzero"`       // the newest queue removal handled
 
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State

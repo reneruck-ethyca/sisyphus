@@ -33,8 +33,8 @@ type Signals struct {
 	ApprovalsStale  bool           `json:"approvals_stale"`
 }
 
-// Verdict is what the merge policy says about a PR at one moment. Nothing
-// merges on it yet: merge=shadow only logs it.
+// Verdict is what the merge policy says about a PR at one moment: merge=auto
+// merges on it, merge=shadow logs it.
 type Verdict struct {
 	At         time.Time `json:"at"`
 	Head       string    `json:"head"`

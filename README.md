@@ -411,7 +411,14 @@ Whatever an agent leaves behind on any exit (a failed run, an invalid result, an
 gitignored files are removed, changed ones are named in the reason (size, mtime, mode, inode and ctime are
 compared), and the tree goes back to the head it started at. A nested git repository or `.git` entry is refused.
 
-Shadow merge (`merge=shadow`; `merge=off` is the default, `merge=auto` is refused): TLM never merges, but on
+Merging: `merge=off` (the default) never merges on its own; `merge=approved` merges once the PR is approved, and
+`merge=auto` once the merge policy below says yes. Where the repo allows GitHub auto-merge, those two turn it on
+(squash) instead and GitHub merges. Otherwise TLM squash-merges on the tick, or, when the base has a merge queue,
+adds the PR to it (state `queued`). The dashboard's merge button (`POST /api/handoffs/<id>/merge`, for an approved
+PR with green checks) merges the same way, without GitHub auto-merge; `PUT /api/handoffs/<id>/merge-mode` with
+`{"mode": "off|shadow|auto|approved"}` changes the mode.
+
+Shadow merge (`merge=shadow`): TLM never merges, but on
 each tick of an open, ready PR it asks the merge policy "would you merge this?" and keeps the verdict on the
 handoff (`shadow`, shown for `merge=off` handoffs too). The policy says yes when there is a current approval from
 a human (not a bot) and GitHub's decision isn't `CHANGES_REQUESTED`/`REVIEW_REQUIRED`, no approval is stale, all
@@ -431,7 +438,7 @@ A corrupt log line is skipped. A merge freeze window is `{"weekday": "friday", "
 ```
 tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
   --labels a,b --reviewers alice,bob --draft \
-  --autonomy fix-ci,address-reviews,merge=off|shadow \
+  --autonomy fix-ci,address-reviews,merge=off|shadow|auto|approved \
   --notify '<command template>' --notify-on merged,needs-human,closed \
   --agent claude:opus:medium --max-fix-rounds 3 --stack-parent <id|branch> --requester <who>
 tlm status <id> [--json]

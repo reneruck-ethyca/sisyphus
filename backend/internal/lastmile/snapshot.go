@@ -54,6 +54,12 @@ type Snapshot struct {
 	NewFeedback []FeedbackRef  `json:"new_feedback,omitempty"` // items new since the cursor
 	BotReplies  map[string]int `json:"bot_replies,omitempty"`  // TLM's replies per bot thread, by thread id
 	BodyEdited  bool           `json:"body_edited"`            // a human changed the PR body since TLM wrote it
+
+	NodeID           string `json:"node_id"`
+	AutoMergeAllowed bool   `json:"auto_merge_allowed"` // the repo allows GitHub auto-merge
+	MergeQueue       bool   `json:"merge_queue"`        // the base has a merge queue
+	InQueue          bool   `json:"in_queue"`
+	AutoMerge        bool   `json:"auto_merge"` // GitHub auto-merge is on for the PR
 }
 
 // Ready says the PR is out of draft.
@@ -70,7 +76,8 @@ func (s Snapshot) Approved() bool {
 func buildSnapshot(p github.PRSnapshot, opened, now time.Time, botLogins []string) Snapshot {
 	s := Snapshot{Head: p.HeadSHA, Author: p.Author, Draft: p.Draft, Mergeable: p.Mergeable, MergeState: p.MergeState,
 		ReviewDecision: p.ReviewDecision, Requested: p.RequestedUsers, Checks: p.Checks, Base: p.BaseRef,
-		Additions: p.Additions, Deletions: p.Deletions, Files: p.Files}
+		Additions: p.Additions, Deletions: p.Deletions, Files: p.Files,
+		NodeID: p.NodeID, AutoMergeAllowed: p.AutoMergeAllowed, MergeQueue: p.MergeQueue, InQueue: p.InQueue, AutoMerge: p.AutoMerge}
 	s.CI = rollup(p.Checks, opened, now)
 
 	// A user's latest approval or change request stands; a plain comment doesn't replace it.

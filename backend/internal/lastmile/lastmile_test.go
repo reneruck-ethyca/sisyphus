@@ -116,7 +116,7 @@ func TestHandoffRejects(t *testing.T) {
 		{"no base", with(func(r *Request) { r.Base = "" }), "base"},
 		{"flag-like base", with(func(r *Request) { r.Base = "-x" }), "base"},
 		{"bad jira", with(func(r *Request) { r.Jira = "nope" }), "jira"},
-		{"merge auto", with(func(r *Request) { r.Autonomy = "fix-ci,merge=auto" }), "merge=auto is not supported yet"},
+		{"unknown merge mode", with(func(r *Request) { r.Autonomy = "fix-ci,merge=yes" }), "merge=yes"},
 		{"unknown autonomy", with(func(r *Request) { r.Autonomy = "yolo" }), "autonomy"},
 		{"bad agent", with(func(r *Request) { r.Agent = "claude" }), "vendor:model:effort"},
 		{"unknown vendor", with(func(r *Request) { r.Agent = "gemini:x:y" }), "vendor"},
