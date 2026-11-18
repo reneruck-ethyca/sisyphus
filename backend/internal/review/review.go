@@ -1281,7 +1281,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.finish(run, Errored, 0, err, unlock)
 		return
 	}
-	drainLogs() // the result line is in by now
+	drainLogs()                                                            // the result line is in by now
 	if status == Succeeded && runCtx.Err() != nil && appCtx.Err() == nil { // exited just as it was cancelled: still don't post
 		status, why = Cancelled, context.Cause(runCtx)
 	}

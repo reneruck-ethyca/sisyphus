@@ -114,7 +114,6 @@ func TestBoardQueued(t *testing.T) {
 	}
 }
 
-
 func TestDesignVerdict(t *testing.T) {
 	reviewed := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	for _, c := range []struct {

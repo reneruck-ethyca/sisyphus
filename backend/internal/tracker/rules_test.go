@@ -139,7 +139,9 @@ func TestNewRepliesCountsInlineOnlyReview(t *testing.T) {
 
 func TestDesignState(t *testing.T) {
 	on := func(r github.Review, sha string) github.Review { r.CommitID = sha; return r }
-	cmt := func(user string, m int) github.Comment { return github.Comment{User: user, Body: "x", CreatedAt: at(m)} }
+	cmt := func(user string, m int) github.Comment {
+		return github.Comment{User: user, Body: "x", CreatedAt: at(m)}
+	}
 	pr := func(head string, rs []github.Review, cs ...github.Comment) github.PR {
 		return github.PR{HeadSHA: head, Reviews: rs, Comments: cs}
 	}

@@ -47,4 +47,3 @@ func TestParsePRView(t *testing.T) {
 		t.Error("garbage should fail")
 	}
 }
-

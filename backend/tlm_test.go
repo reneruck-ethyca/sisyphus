@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
