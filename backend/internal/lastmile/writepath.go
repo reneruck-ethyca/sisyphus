@@ -116,7 +116,7 @@ func changedFiles(ctx context.Context, dir string, skip []string) ([]string, err
 // status is git status --porcelain less the untracked files the handoff came with:
 // TLM's one test of a clean worktree (design §2).
 func status(ctx context.Context, h Handoff) (string, error) {
-	out, err := proc.Run(ctx, h.Worktree, "git", "status", "--porcelain", "-z", "-uall")
+	out, err := proc.Run(ctx, h.Worktree, "git", "--no-optional-locks", "status", "--porcelain", "-z", "-uall")
 	if err != nil {
 		return "", err
 	}

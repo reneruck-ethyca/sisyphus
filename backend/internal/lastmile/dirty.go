@@ -205,13 +205,14 @@ func oneLine(s string, n int) string {
 }
 
 // dirtyFiles lists every uncommitted file (untracked directories expanded) with
-// its line counts, less the untracked files in skip.
+// its line counts, less the untracked files in skip. It runs off the worktree
+// lock, so git mustn't take index.lock to refresh the index meanwhile.
 func dirtyFiles(ctx context.Context, dir string, skip []string) ([]DirtyFile, error) {
-	st, err := proc.Run(ctx, dir, "git", "status", "--porcelain", "-z", "-uall")
+	st, err := proc.Run(ctx, dir, "git", "--no-optional-locks", "status", "--porcelain", "-z", "-uall")
 	if err != nil {
 		return nil, err
 	}
-	nums, err := proc.Run(ctx, dir, "git", "diff", "--numstat", "-z", "--no-renames", "HEAD")
+	nums, err := proc.Run(ctx, dir, "git", "--no-optional-locks", "diff", "--numstat", "-z", "--no-renames", "HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -657,7 +658,7 @@ func (m *Manager) commitHuman(ctx context.Context, dir, msg string, paths []stri
 
 func dirtyPrompt(ctx context.Context, h Handoff, status string) string {
 	log, _ := proc.Run(ctx, h.Worktree, "git", "log", "-5", "--oneline")
-	diff, _ := proc.Run(ctx, h.Worktree, "git", "diff", "HEAD")
+	diff, _ := proc.Run(ctx, h.Worktree, "git", "--no-optional-locks", "diff", "HEAD")
 	cut := ""
 	if len(diff) > maxAssessDiff {
 		diff, cut = diff[:maxAssessDiff], ", cut short"
