@@ -225,9 +225,7 @@ func NewService(cfg config.Config, tr *tracker.Tracker, rev *review.Reviewer) *S
 	tr.OnSave = s.refreshPRs
 	if rev != nil {
 		tr.Events = rev
-		rev.Kick = s.RunNow
-		rev.Refresh = s.tracker.Refresh
-		rev.OnChange = s.publish
+		rev.SetHost(reviewHost{s})
 	}
 	s.refreshPRs(tr.Snapshot(), tr.IgnoredPRs())
 	return s
@@ -522,3 +520,12 @@ func (s *Service) UseLastMile(m *lastmile.Manager) {
 
 // LastMile is the manager that takes handoffs; nil when lastmile.disabled.
 func (s *Service) LastMile() *lastmile.Manager { return s.lastMile }
+
+// reviewHost is the Service as the Reviewer's review.Host.
+type reviewHost struct{ s *Service }
+
+func (h reviewHost) Kick()    { h.s.RunNow() }
+func (h reviewHost) Changed() { h.s.publish() }
+func (h reviewHost) Refresh(ctx context.Context, tr tracker.Tracked) (tracker.Tracked, error) {
+	return h.s.tracker.Refresh(ctx, tr.Key())
+}

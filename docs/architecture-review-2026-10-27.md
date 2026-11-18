@@ -106,6 +106,11 @@ Keeping both is the one option to rule out.
 
 ## 3. `review.Reviewer` as the gathering point
 
+*Partly done 2026-11-18: `Kick`, `Refresh` and `OnChange` are one `review.Host` interface, set with
+`SetHost` (the Service is built after the Reviewer, so not in `New`) and defaulting to a no-op, so
+the nil checks are gone. The spec and script builders moved to `spec.go`, and `follow` and
+`runTask` share one output follower. `review.PR` and the stack package are still open.*
+
 The `review` package is 2,200 lines across six files, and nearly everything is a method on
 `Reviewer` because it needs `r.mu`, `r.st`, or `r.sh`: queue and dispatch, container lifecycle,
 re-attach after restart, log streaming and parsing, posting, compose stacks, the 5-hour budget,

@@ -37,6 +37,18 @@ type fixture struct {
 	dir   string
 	tr    tracker.Tracked // a PR whose worktree is a real clone at its head
 	kicks atomic.Int32
+	// refresh, if set, stands in for the tracker's Refresh; else the job's head is trusted.
+	refresh func(context.Context, tracker.Tracked) (tracker.Tracked, error)
+}
+
+// fixture is its Reviewer's Host.
+func (f *fixture) Kick()    { f.kicks.Add(1) }
+func (f *fixture) Changed() {}
+func (f *fixture) Refresh(ctx context.Context, tr tracker.Tracked) (tracker.Tracked, error) {
+	if f.refresh != nil {
+		return f.refresh(ctx, tr)
+	}
+	return tr, nil
 }
 
 func newFixture(t *testing.T, mutate ...func(*config.Review)) *fixture {
@@ -61,7 +73,7 @@ func (f *fixture) newReviewer(t *testing.T, cfg config.Review) *Reviewer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Kick = func() { f.kicks.Add(1) }
+	r.SetHost(f)
 	return r
 }
 
@@ -1064,7 +1076,7 @@ func TestShellIsTheReviewContainerWithBash(t *testing.T) {
 func TestRunRefreshesHeadFirst(t *testing.T) {
 	f := newFixture(t)
 	var refreshed atomic.Int32
-	f.r.Refresh = func(context.Context, string) (tracker.Tracked, error) {
+	f.refresh = func(context.Context, tracker.Tracked) (tracker.Tracked, error) {
 		refreshed.Add(1)
 		tr := f.tr
 		tr.HeadSHA = "newer"
@@ -1077,7 +1089,7 @@ func TestRunRefreshesHeadFirst(t *testing.T) {
 		t.Fatalf("refreshed %d, started %d", refreshed.Load(), len(f.rt.Started()))
 	}
 
-	f.r.Refresh = func(context.Context, string) (tracker.Tracked, error) { return f.tr, nil }
+	f.refresh = func(context.Context, tracker.Tracked) (tracker.Tracked, error) { return f.tr, nil }
 	f.r.Tracked(f.tr)
 	waitFor(t, "start at an unchanged head", f.started(1))
 }

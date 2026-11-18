@@ -132,6 +132,26 @@ type store struct {
 	Stacks map[string]*StackRun `json:"stacks,omitempty"` // each PR's latest stack, until removed
 }
 
+// Host is what a Reviewer asks of the app around it, from any goroutine.
+type Host interface {
+	Kick() // ask for a tick soon: a reclaimed worktree is free
+	// Refresh fetches tr's head and syncs its worktree before a run starts.
+	Refresh(ctx context.Context, tr tracker.Tracked) (tracker.Tracked, error)
+	Changed() // something the UIs show changed
+}
+
+// nopHost is a Reviewer's host until SetHost: it trusts the job's head.
+type nopHost struct{}
+
+func (nopHost) Kick()    {}
+func (nopHost) Changed() {}
+func (nopHost) Refresh(_ context.Context, tr tracker.Tracked) (tracker.Tracked, error) {
+	return tr, nil
+}
+
+// SetHost connects r to the app; call it before Run and Reattach.
+func (r *Reviewer) SetHost(h Host) { r.host = h }
+
 type Reviewer struct {
 	cfg   config.Review
 	rt    container.Runtime
@@ -139,10 +159,7 @@ type Reviewer struct {
 	dir   string // reviews.json and runs/ live here
 
 	GitHub GitHub // host-side GitHub access: discussion files, posting; nil = neither
-	Kick   func() // asks for a tick soon; called once a reclaimed worktree is free
-	// Refresh fetches a PR's head and syncs its worktree before a run starts; nil = trust the job's.
-	Refresh  func(ctx context.Context, id string) (tracker.Tracked, error)
-	OnChange func() // called after every change, on any goroutine
+	host   Host   // see SetHost
 
 	wg          sync.WaitGroup // goroutines Run and Reattach start; Wait for them after ctx ends
 	mu          sync.Mutex
@@ -160,7 +177,7 @@ type Reviewer struct {
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
 	r := &Reviewer{cfg: cfg, rt: rt, locks: locks, dir: dir, st: store{Runs: map[string][]Run{}},
 		active: map[string]context.CancelCauseFunc{}, wake: make(chan struct{}, 1),
-		subs: map[chan runEvent]struct{}{}, skipped: map[string]bool{}, sh: shell}
+		subs: map[chan runEvent]struct{}{}, skipped: map[string]bool{}, sh: shell, host: nopHost{}}
 	if err := jsonfile.Load(r.storePath(), &r.st); err != nil {
 		return nil, err
 	}
@@ -485,8 +502,8 @@ func (r *Reviewer) reattach(appCtx, runCtx context.Context, run Run, unlock func
 		delete(r.active, id)
 		r.mu.Unlock()
 		r.lose(run, err)
-		if errors.Is(err, errReclaimed) && r.Kick != nil {
-			r.Kick()
+		if errors.Is(err, errReclaimed) {
+			r.host.Kick()
 		}
 		r.poke()
 	}
@@ -736,17 +753,15 @@ func newRunID(now time.Time) string {
 func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 	tr := run.Job.PR
 	id := tr.Key()
-	if r.Refresh != nil {
-		fresh, err := r.Refresh(runCtx, id)
-		if err != nil {
-			r.endEarly(appCtx, runCtx, run, err, nil)
-			return
-		}
-		if fresh.HeadSHA != tr.HeadSHA { // the tracker queues the new head once it's synced
-			r.cancel(id, errSuperseded)
-			r.endEarly(appCtx, runCtx, run, errSuperseded, nil)
-			return
-		}
+	fresh, err := r.host.Refresh(runCtx, tr)
+	if err != nil {
+		r.endEarly(appCtx, runCtx, run, err, nil)
+		return
+	}
+	if fresh.HeadSHA != tr.HeadSHA { // the tracker queues the new head once it's synced
+		r.cancel(id, errSuperseded)
+		r.endEarly(appCtx, runCtx, run, errSuperseded, nil)
+		return
 	}
 	unlock, err := r.locks.Lock(runCtx, id)
 	if err != nil {
@@ -798,8 +813,8 @@ func (r *Reviewer) endEarly(appCtx, runCtx context.Context, run Run, err error, 
 	if runCtx.Err() != nil { // superseded, reclaimed or dropped while starting
 		why := context.Cause(runCtx)
 		r.finish(run, Cancelled, 0, why, unlock)
-		if errors.Is(why, errReclaimed) && r.Kick != nil {
-			r.Kick()
+		if errors.Is(why, errReclaimed) {
+			r.host.Kick()
 		}
 		return
 	}
@@ -1000,8 +1015,8 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		cleanupErr = worktree.Reset(bg, run.Job.PR.Worktree, run.Job.PR.HeadSHA)
 	}
 	r.finish(run, status, code, errors.Join(why, cleanupErr), unlock)
-	if errors.Is(why, errReclaimed) && r.Kick != nil {
-		r.Kick() // the tracker is waiting for this worktree
+	if errors.Is(why, errReclaimed) {
+		r.host.Kick() // the tracker is waiting for this worktree
 	}
 }
 
@@ -1255,9 +1270,7 @@ func (r *Reviewer) record(prID, runID string, fn func(*Run)) {
 		r.saveLocked()
 	}
 	r.mu.Unlock()
-	if r.OnChange != nil { // not changed(): a record alone frees no slot, and dispatch may ask docker
-		r.OnChange()
-	}
+	r.host.Changed() // not changed(): a record alone frees no slot, and dispatch may ask docker
 }
 
 func (r *Reviewer) writeRunJSON(run Run) {
@@ -1276,9 +1289,7 @@ func (r *Reviewer) saveLocked() {
 
 func (r *Reviewer) changed() {
 	r.poke()
-	if r.OnChange != nil {
-		r.OnChange()
-	}
+	r.host.Changed()
 }
 
 // Status returns every PR's review state and recent runs, by PR ID.
