@@ -1048,14 +1048,7 @@ func (r *Reviewer) codexScript(agent config.Agent) string {
 // prepareCodexHome keeps Codex credentials in a dedicated directory rather
 // than exposing the user's entire ~/.codex to a review container. Existing CLI
 // sign-ins are copied once; Codex maintains its refreshed auth there afterward.
-func prepareCodexHome(home string) error {
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		home = filepath.Join(userHome, ".config", "sisyphus", "codex")
-	}
+func prepareCodexHome(home string) error { // config.Load always sets it
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return fmt.Errorf("codex_home: %w", err)
 	}

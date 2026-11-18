@@ -161,11 +161,6 @@ type skillStatus struct {
 	Error  string       `json:"error,omitempty"`
 }
 
-// Stale says whether any agent has an out-of-date copy, for the Settings tab's dot.
-func (s skillStatus) Stale() bool {
-	return slices.ContainsFunc(s.Agents, func(a agentSkill) bool { return a.State == "stale" })
-}
-
 func skillsStatus() skillStatus {
 	skills.Lock()
 	defer skills.Unlock()

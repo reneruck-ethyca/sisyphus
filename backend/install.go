@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/reneruck/sisyphus/internal/config"
 )
 
 // tlmInstall links `tlm` into a directory on PATH, pointing at this binary (so a
@@ -50,7 +52,7 @@ func tlmInstall(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	if d := ask("Install tlm into", dir); d != "" {
 		dir = d
 	}
-	dir, err = filepath.Abs(expandHome(dir))
+	dir, err = filepath.Abs(config.ExpandHome(dir))
 	if err != nil {
 		return err
 	}
@@ -131,12 +133,4 @@ func binDir() string {
 		}
 	}
 	return filepath.Join(home, ".local", "bin")
-}
-
-func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, strings.TrimPrefix(p, "~"))
-	}
-	return p
 }

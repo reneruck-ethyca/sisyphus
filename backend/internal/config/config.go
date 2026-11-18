@@ -327,7 +327,7 @@ whether the new and changed tests verify what their ticket asks for:
 }
 
 func DefaultPath() string {
-	return expandHome("~/.config/sisyphus/config.json")
+	return ExpandHome("~/.config/sisyphus/config.json")
 }
 
 // Load reads path over the defaults. A missing file means all defaults.
@@ -337,25 +337,25 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	cfg.Path = path
-	cfg.ReposRoot = expandHome(cfg.ReposRoot)
+	cfg.ReposRoot = ExpandHome(cfg.ReposRoot)
 	r := &cfg.Review
-	r.EnvFile, r.PromptFile, r.ClaudeSettings = expandHome(r.EnvFile), expandHome(r.PromptFile), expandHome(r.ClaudeSettings)
-	r.CodexHome = expandHome(cmp.Or(r.CodexHome, "~/.config/sisyphus/codex"))
+	r.EnvFile, r.PromptFile, r.ClaudeSettings = ExpandHome(r.EnvFile), ExpandHome(r.PromptFile), ExpandHome(r.ClaudeSettings)
+	r.CodexHome = ExpandHome(cmp.Or(r.CodexHome, "~/.config/sisyphus/codex"))
 	for name, repo := range r.Repos {
-		repo.EnvFile, repo.PromptFile = expandHome(repo.EnvFile), expandHome(repo.PromptFile)
+		repo.EnvFile, repo.PromptFile = ExpandHome(repo.EnvFile), ExpandHome(repo.PromptFile)
 		if repo.Stack != nil {
 			st := *repo.Stack // the defaults share theirs
-			st.SafeDir = expandHome(cmp.Or(st.SafeDir, filepath.Join(cfg.ReposRoot, filepath.Base(name))))
+			st.SafeDir = ExpandHome(cmp.Or(st.SafeDir, filepath.Join(cfg.ReposRoot, filepath.Base(name))))
 			repo.Stack = &st
 		}
 		if repo.Related != nil {
 			rel := *repo.Related // the defaults share theirs
-			rel.Clone = expandHome(cmp.Or(rel.Clone, filepath.Join(cfg.ReposRoot, filepath.Base(rel.Repo))))
+			rel.Clone = ExpandHome(cmp.Or(rel.Clone, filepath.Join(cfg.ReposRoot, filepath.Base(rel.Repo))))
 			repo.Related = &rel
 		}
 		r.Repos[name] = repo
 	}
-	cfg.StateFile = expandHome(cfg.StateFile)
+	cfg.StateFile = ExpandHome(cfg.StateFile)
 	return cfg, nil
 }
 
@@ -502,10 +502,11 @@ func (a Agent) Check() error {
 	return nil
 }
 
-func expandHome(p string) string {
-	if !strings.HasPrefix(p, "~/") {
+// ExpandHome replaces a leading "~" or "~/" with the user's home directory.
+func ExpandHome(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, p[2:])
+	return filepath.Join(home, p[1:])
 }
