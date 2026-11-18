@@ -202,3 +202,55 @@ func TestPRViewPagesChecks(t *testing.T) {
 		t.Errorf("checks %+v, %v; calls %v", v.Checks, err, s.got)
 	}
 }
+
+func TestMergeSquash(t *testing.T) {
+	a, s := newStub(map[string][]reply{"PUT /repos/o/r/pulls/3/merge": ok(`{"merged":true}`)})
+	if err := a.MergeSquash(context.Background(), PRRef{Repo: "o/r", Number: 3}, "abc"); err != nil ||
+		len(s.got) != 1 || s.got[0] != `PUT /repos/o/r/pulls/3/merge? {"merge_method":"squash","sha":"abc"}` {
+		t.Errorf("%v; calls %v", err, s.got)
+	}
+	a, _ = newStub(map[string][]reply{"PUT /repos/o/r/pulls/3/merge": {{status: 409, body: `{"message":"Head branch was modified"}`}}})
+	if err := a.MergeSquash(context.Background(), PRRef{Repo: "o/r", Number: 3}, "abc"); !isStatus(err, 409) {
+		t.Errorf("a moved head = %v", err)
+	}
+}
+
+func TestEnqueueAndAutoMerge(t *testing.T) {
+	a, s := newStub(map[string][]reply{"POST /graphql": ok(`{"data":{}}`)})
+	if err := a.Enqueue(context.Background(), "PR_1"); err != nil || !strings.Contains(s.got[0], "enqueuePullRequest(input:{pullRequestId:$id})") || !strings.Contains(s.got[0], `"id":"PR_1"`) {
+		t.Errorf("enqueue: %v; calls %v", err, s.got)
+	}
+	if err := a.EnableAutoMerge(context.Background(), "PR_1"); err != nil || !strings.Contains(s.got[1], "enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:SQUASH})") || !strings.Contains(s.got[1], `"id":"PR_1"`) {
+		t.Errorf("auto-merge: %v; calls %v", err, s.got)
+	}
+}
+
+func TestQueueFailures(t *testing.T) {
+	a, s := newStub(map[string][]reply{
+		"GET /repos/o/r/actions/runs": ok(`{"workflow_runs":[
+			{"id":5,"name":"CI","head_branch":"gh-readonly-queue/dev/pr-30-aaa","head_sha":"s9","conclusion":"success"},
+			{"id":4,"name":"CI","head_branch":"gh-readonly-queue/dev/pr-3-bbb","head_sha":"s2","conclusion":"failure"},
+			{"id":3,"name":"Lint","head_branch":"gh-readonly-queue/dev/pr-3-bbb","head_sha":"s2","conclusion":"failure"},
+			{"id":2,"name":"CI","head_branch":"gh-readonly-queue/dev/pr-3-old","head_sha":"s1","conclusion":"failure"}]}`),
+		"GET /repos/o/r/actions/runs/4/jobs": ok(`{"jobs":[
+			{"name":"pytest","status":"completed","conclusion":"failure","html_url":"https://github.com/o/r/actions/runs/4/job/41"},
+			{"name":"lint","status":"completed","conclusion":"success","html_url":"https://github.com/o/r/actions/runs/4/job/42"}]}`),
+		"GET /repos/o/r/actions/runs/3/jobs": ok(`{"jobs":[
+			{"name":"ruff","status":"completed","conclusion":"timed_out","html_url":"https://github.com/o/r/actions/runs/3/job/31"}]}`),
+	})
+	got, err := a.QueueFailures(context.Background(), "o/r", "dev", 3)
+	want := []Check{
+		{Name: "pytest", Workflow: "CI", Status: "COMPLETED", Conclusion: "FAILURE", URL: "https://github.com/o/r/actions/runs/4/job/41"},
+		{Name: "ruff", Workflow: "Lint", Status: "COMPLETED", Conclusion: "TIMED_OUT", URL: "https://github.com/o/r/actions/runs/3/job/31"},
+	}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("got %+v, %v; calls %v", got, err, s.got)
+	}
+	if !strings.HasPrefix(s.got[0], "GET /repos/o/r/actions/runs?") || !strings.Contains(s.got[0], "event=merge_group") {
+		t.Errorf("runs query = %v", s.got[0])
+	}
+	a, _ = newStub(map[string][]reply{"GET /repos/o/r/actions/runs": ok(`{"workflow_runs":[]}`)})
+	if got, err := a.QueueFailures(context.Background(), "o/r", "dev", 3); err != nil || len(got) != 0 {
+		t.Errorf("no runs: %+v, %v", got, err)
+	}
+}

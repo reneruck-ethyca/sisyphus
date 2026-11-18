@@ -1,4 +1,12 @@
-{"repository": {"pullRequest": {
+{"repository": {"autoMergeAllowed": true, "pullRequest": {
+  "id": "PR_kwDOabc",
+  "isMergeQueueEnabled": true,
+  "isInMergeQueue": false,
+  "autoMergeRequest": {"enabledAt": "2026-11-05T11:00:00Z"},
+  "timelineItems": {"nodes": [
+    {"createdAt": "2026-11-05T12:00:00Z", "reason": "CI failed", "actor": {"login": "alice", "__typename": "User"}},
+    {"createdAt": "2026-11-05T13:00:00Z", "reason": "merge conflict", "actor": {"login": "github-merge-queue", "__typename": "Bot"}}
+  ]},
   "number": 42,
   "url": "https://github.com/ethyca/fidesplus/pull/42",
   "state": "OPEN",

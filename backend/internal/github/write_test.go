@@ -43,6 +43,16 @@ func TestParsePRView(t *testing.T) {
 	if after != "" {
 		t.Errorf("after = %q on the last page of checks", after)
 	}
+	if s.NodeID != "PR_kwDOabc" || !s.AutoMergeAllowed || !s.MergeQueue || s.InQueue || !s.AutoMerge {
+		t.Errorf("merge state = %+v", s)
+	}
+	wantRemovals := []QueueRemoval{
+		{At: time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC), Reason: "CI failed", Actor: "alice"},
+		{At: time.Date(2026, 11, 5, 13, 0, 0, 0, time.UTC), Reason: "merge conflict", Actor: "github-merge-queue", ActorBot: true},
+	}
+	if !reflect.DeepEqual(s.QueueRemovals, wantRemovals) {
+		t.Errorf("removals = %+v", s.QueueRemovals)
+	}
 	if _, _, err := parsePRView([]byte("nope")); err == nil {
 		t.Error("garbage should fail")
 	}

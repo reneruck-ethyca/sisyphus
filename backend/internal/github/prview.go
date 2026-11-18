@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,14 @@ type SnapReview struct {
 	SubmittedAt                  time.Time
 }
 
+// QueueRemoval is one time GitHub took the PR out of the merge queue. Reason is
+// GitHub's free-form String, not an enum, so match it loosely.
+type QueueRemoval struct {
+	At            time.Time
+	Reason, Actor string // Actor is a login; "" if none
+	ActorBot      bool
+}
+
 // PRSnapshot is the PR state one PRView reads. Review threads and failed
 // job logs come from elsewhere.
 type PRSnapshot struct {
@@ -40,6 +49,10 @@ type PRSnapshot struct {
 	MergedBy                       string    // login; "" while unmerged
 	Additions, Deletions           int
 	Files                          []string
+	NodeID                         string // GraphQL id, for Enqueue and EnableAutoMerge
+	AutoMergeAllowed               bool   // the repo allows auto-merge
+	MergeQueue, InQueue, AutoMerge bool   // base has a merge queue; the PR is in it; auto-merge is on
+	QueueRemovals                  []QueueRemoval
 }
 
 // checkNodes is one page of a head commit's checks: check runs and commit statuses.
@@ -47,7 +60,9 @@ const checkNodes = `pageInfo{hasNextPage endCursor} nodes{__typename
 ... on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{workflow{name}}}}
 ... on StatusContext{context state targetUrl}}`
 
-const prViewQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+const prViewQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){autoMergeAllowed pullRequest(number:$number){
+id isMergeQueueEnabled isInMergeQueue autoMergeRequest{enabledAt}
+timelineItems(last:20,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{... on RemovedFromMergeQueueEvent{createdAt reason actor{login __typename}}}}
 number url state isDraft headRefOid headRefName baseRefName mergeable mergeStateStatus reviewDecision body
 author{login __typename} mergedAt closedAt mergedBy{login} additions deletions
 reviews(last:100){nodes{author{login __typename} state body submittedAt commit{oid}}}
@@ -101,7 +116,19 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 	}
 	var v struct {
 		Repository struct {
-			PullRequest struct {
+			AutoMergeAllowed bool `json:"autoMergeAllowed"`
+			PullRequest      struct {
+				ID                  string `json:"id"`
+				IsMergeQueueEnabled bool   `json:"isMergeQueueEnabled"`
+				IsInMergeQueue      bool   `json:"isInMergeQueue"`
+				AutoMergeRequest    *struct {
+					EnabledAt time.Time `json:"enabledAt"`
+				} `json:"autoMergeRequest"`
+				TimelineItems nodes[struct {
+					CreatedAt time.Time `json:"createdAt"`
+					Reason    string    `json:"reason"`
+					Actor     *gqlActor `json:"actor"`
+				}] `json:"timelineItems"`
 				Number           int       `json:"number"`
 				URL              string    `json:"url"`
 				State            string    `json:"state"`
@@ -185,6 +212,12 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 		HeadSHA: p.HeadRefOid, HeadRef: p.HeadRefName, BaseRef: p.BaseRefName,
 		Mergeable: p.Mergeable, MergeState: p.MergeStateStatus, ReviewDecision: p.ReviewDecision,
 		MergedAt: p.MergedAt, ClosedAt: p.ClosedAt, MergedBy: login(p.MergedBy), Additions: p.Additions, Deletions: p.Deletions,
+		NodeID: p.ID, AutoMergeAllowed: v.Repository.AutoMergeAllowed, MergeQueue: p.IsMergeQueueEnabled,
+		InQueue: p.IsInMergeQueue, AutoMerge: p.AutoMergeRequest != nil,
+	}
+	for _, e := range p.TimelineItems.Nodes {
+		s.QueueRemovals = append(s.QueueRemovals, QueueRemoval{At: e.CreatedAt, Reason: e.Reason, Actor: login(e.Actor),
+			ActorBot: e.Actor != nil && (e.Actor.Type == "Bot" || strings.HasSuffix(e.Actor.Login, "[bot]"))})
 	}
 	for _, r := range p.Reviews.Nodes {
 		sr := SnapReview{User: login(r.Author), Bot: r.Author != nil && r.Author.Type == "Bot", State: r.State, Body: r.Body, SubmittedAt: r.SubmittedAt}

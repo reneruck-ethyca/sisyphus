@@ -223,3 +223,68 @@ func failedSteps(log string, steps []jobStep) string {
 	}
 	return b.String()
 }
+
+// MergeSquash squash-merges the PR if its head is still head; a head that
+// moved is GitHub's 409.
+func (a *API) MergeSquash(ctx context.Context, ref PRRef, head string) error {
+	return a.send(ctx, http.MethodPut, pullPath(ref)+"/merge", map[string]string{"merge_method": "squash", "sha": head}, nil)
+}
+
+// Enqueue puts the PR (by GraphQL node id) in its base's merge queue.
+func (a *API) Enqueue(ctx context.Context, nodeID string) error {
+	return a.graphql(ctx, `mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){clientMutationId}}`,
+		map[string]any{"id": nodeID}, nil)
+}
+
+// EnableAutoMerge has GitHub squash-merge the PR once its requirements are met.
+func (a *API) EnableAutoMerge(ctx context.Context, nodeID string) error {
+	return a.graphql(ctx, `mutation($id:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:SQUASH}){clientMutationId}}`,
+		map[string]any{"id": nodeID}, nil)
+}
+
+// QueueFailures returns the failed jobs of the PR's latest merge-queue attempt:
+// the newest completed merge_group runs on its gh-readonly-queue branch.
+// ponytail: looks at the 100 newest merge_group runs of the repo; a busy queue may push the PR's off the page.
+func (a *API) QueueFailures(ctx context.Context, repo, base string, number int) ([]Check, error) {
+	var runs struct {
+		Runs []struct {
+			ID         int64  `json:"id"`
+			Name       string `json:"name"`
+			HeadBranch string `json:"head_branch"`
+			HeadSHA    string `json:"head_sha"`
+			Conclusion string `json:"conclusion"`
+		} `json:"workflow_runs"`
+	}
+	q := url.Values{"event": {"merge_group"}, "status": {"completed"}, "per_page": {"100"}}
+	if err := a.get(ctx, "repos/"+repo+"/actions/runs?"+q.Encode(), &runs); err != nil {
+		return nil, err
+	}
+	prefix := fmt.Sprintf("gh-readonly-queue/%s/pr-%d-", base, number)
+	var checks []Check
+	latest := "" // the runs come newest first; only the newest attempt's head counts
+	for _, r := range runs.Runs {
+		if !strings.HasPrefix(r.HeadBranch, prefix) || (latest != "" && r.HeadSHA != latest) {
+			continue
+		}
+		latest = r.HeadSHA
+		if r.Conclusion == "success" || r.Conclusion == "skipped" {
+			continue
+		}
+		var jobs struct {
+			Jobs []struct {
+				Name       string `json:"name"`
+				Conclusion string `json:"conclusion"`
+				HTMLURL    string `json:"html_url"`
+			} `json:"jobs"`
+		}
+		if err := a.get(ctx, fmt.Sprintf("repos/%s/actions/runs/%d/jobs?filter=latest&per_page=100", repo, r.ID), &jobs); err != nil {
+			return nil, err
+		}
+		for _, j := range jobs.Jobs {
+			if j.Conclusion == "failure" || j.Conclusion == "timed_out" {
+				checks = append(checks, Check{Name: j.Name, Workflow: r.Name, Status: "COMPLETED", Conclusion: strings.ToUpper(j.Conclusion), URL: j.HTMLURL})
+			}
+		}
+	}
+	return checks, nil
+}
