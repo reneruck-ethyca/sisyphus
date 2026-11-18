@@ -221,7 +221,7 @@ type Review struct {
 	EnvFile        string                `json:"env_file"`        // CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, …
 	ClaudeSettings string                `json:"claude_settings"` // settings.json given to the agent ("" = none)
 	PluginsVolume  string                `json:"plugins_volume"`  // Docker volume with Claude plugins ("" = none)
-	Timeout        Duration              `json:"timeout"`         // runs past this are flagged, never stopped
+	Timeout        Duration              `json:"timeout"`         // reviews past this are flagged, never stopped; lastmile tasks are stopped
 	MaxConcurrent  int                   `json:"max_concurrent"`
 	FiveHourPct    float64               `json:"five_hour_percent"`  // share of each 5-hour subscription window reviews may use; 0 = no limit
 	Cleanup        bool                  `json:"cleanup"`            // reset worktrees sisyphus created after each run

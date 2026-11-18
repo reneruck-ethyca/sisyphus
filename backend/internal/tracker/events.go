@@ -6,7 +6,7 @@ import (
 )
 
 // Events is how the tracker tells the review layer what happened. Calls come
-// from the ticking goroutine and must not block. Tracked and Updated fire only
+// under the tracker's lock, from a tick or a PR action, and must not block. Tracked and Updated fire only
 // once the worktree is synced to tr.HeadSHA, so work started from them never
 // sees stale code.
 type Events interface {

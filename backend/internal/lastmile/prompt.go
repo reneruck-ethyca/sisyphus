@@ -51,7 +51,7 @@ Branch: {{.Branch}} (base: {{.Base}})
 ` + "```" + `
 `))
 
-// renderFixPrompt fills the prompt; a template error is a bug, so it panics into the run's failure.
+// renderFixPrompt fills the prompt; a template error is a bug, and fails the run.
 func renderFixPrompt(d fixPromptData) (string, error) {
 	var sb strings.Builder
 	err := fixPrompt.Execute(&sb, d)

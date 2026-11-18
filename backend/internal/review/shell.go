@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,8 +51,8 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run,
 	if !ok {
 		return run, spec, stop, fmt.Errorf("no review.repos entry for %s", tr.Repo)
 	}
-	if f := r.envFilesMissing(tr.Repo, repo); f != "" {
-		return run, spec, stop, fmt.Errorf("env file missing: %s", f)
+	if why := r.envFilesMissing(tr.Repo, repo); why != "" {
+		return run, spec, stop, errors.New(why)
 	}
 	// Its stack would be re-upped and stopped under it.
 	cs, err := r.rt.List(ctx, map[string]string{"sisyphus.pr": tr.Key()})

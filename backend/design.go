@@ -174,7 +174,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 			http.Error(w, "ref must be a full commit SHA", http.StatusBadRequest)
 			return
 		}
-		// The head repo, where a fork's commits live; the tracker only follows PRs from the base repo.
+		// The base repo: the tracker only follows PRs from it, so it holds the head's commits too.
 		b, err := srv.gh.Content(r.Context(), ref.Repo, p, sha)
 		if err != nil {
 			designError(w, err)

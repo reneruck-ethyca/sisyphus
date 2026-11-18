@@ -256,8 +256,7 @@ func (r *Reviewer) Blocked(repo string) string {
 	return r.envFilesMissing(repo, cfg)
 }
 
-// envFilesMissing names the first of repo's env files that isn't there ("" = all
-// are). Each missing file is logged once.
+// envFilesMissing says which of repo's env files isn't there ("" = all are). Each missing file is logged once.
 func (r *Reviewer) envFilesMissing(name string, repo config.RepoReview) string {
 	for _, f := range []string{repo.EnvFile, r.cfg.EnvFile} {
 		if f == "" {

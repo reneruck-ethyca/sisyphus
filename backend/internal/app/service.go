@@ -403,7 +403,7 @@ func (s *Service) do(ctx context.Context, fn func(context.Context) error) error 
 	return fn(context.WithoutCancel(ctx))
 }
 
-// RunOnce runs a single tick (for -once).
+// RunOnce runs a single tick: Run calls it on every tick, -once just once.
 func (s *Service) RunOnce(ctx context.Context) {
 	s.update(func(st *Status) { st.Running = true })
 	slog.Info("run started")

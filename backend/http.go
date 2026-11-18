@@ -308,8 +308,7 @@ func newHandler(srv server) http.Handler {
 	}))
 	// Installs (or updates) or uninstalls the handoff skill for one agent, in the
 	// background; GET /api/skill reports how it went. It only writes or removes
-	// the embedded skill in the agent's skill dir, so like the buttons below it
-	// needs no token.
+	// the embedded skill in the agent's skill dir.
 	mux.HandleFunc("POST /api/skill/{agent}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		if err := startSkillAction(r.PathValue("agent"), r.PathValue("action")); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -320,7 +319,6 @@ func newHandler(srv server) http.Handler {
 	mux.HandleFunc("GET /api/skill", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, skillsStatus())
 	})
-	// The dashboard's buttons call these, so no token (as with the reviewers edit); the API is loopback.
 	for _, verb := range []string{"resume", "cancel"} {
 		mux.HandleFunc("POST /api/handoffs/{id}/"+verb, withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
 			var h lastmile.Handoff

@@ -40,7 +40,7 @@ var fields = []Field{
 	{Key: "review.agent.effort", Type: "text", Group: "Reviews", Label: "Reasoning effort", Options: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, Help: "Reasoning effort used by the selected agent."},
 	{Key: "review.max_turns", Type: "number", Group: "Reviews", Label: "Turn limit", Help: "Hitting it fails the run."},
 	{Key: "review.max_budget_usd", Type: "number", Group: "Reviews", Label: "Spend limit (USD)", Help: "0 means no limit. Only enforced with API-key auth."},
-	{Key: "review.timeout", Type: "text", Group: "Reviews", Label: "Flag runs after", Help: "Longer runs are flagged, never stopped. E.g. 1h."},
+	{Key: "review.timeout", Type: "text", Group: "Reviews", Label: "Flag runs after", Help: "Longer reviews are flagged, never stopped; lastmile fix tasks are stopped. E.g. 1h."},
 	{Key: "review.max_concurrent", Type: "number", Group: "Reviews", Label: "Reviews at a time", Help: "Review containers running at once."},
 	{Key: "review.five_hour_percent", Type: "number", Group: "Reviews", Label: "Share of 5-hour limit (%)", Help: "How much of each 5-hour subscription window reviews may use. Past it, new reviews wait for the window to reset. 0 means no limit."},
 	{Key: "review.retries", Type: "number", Group: "Reviews", Label: "Retries", Help: "Re-runs of a review that failed before Claude started (setup, stack). 0 means none."},

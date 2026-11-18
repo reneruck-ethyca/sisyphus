@@ -66,12 +66,12 @@ func requested(pr github.PR, me string, myTeams []string) bool {
 		slices.ContainsFunc(pr.RequestedTeams, func(t string) bool { return slices.Contains(myTeams, t) })
 }
 
-// newReplies counts human comments and review bodies not by me that are newer
-// than since. latest is the newest timestamp seen on the PR (or since), used to
-// advance the cursor.
 // SisyphusMark ends everything sisyphus posts; such posts are never replies.
 const SisyphusMark = "🤖 Reviewed by sisyphus"
 
+// newReplies counts human comments and review bodies not by me that are newer
+// than since. latest is the newest timestamp seen on the PR (or since), used to
+// advance the cursor.
 func newReplies(pr github.PR, me string, since time.Time) (count int, latest time.Time) {
 	latest = since
 	consider := func(user string, bot bool, body string, ts time.Time, counts bool) {

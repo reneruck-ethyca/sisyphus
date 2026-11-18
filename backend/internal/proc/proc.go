@@ -1,4 +1,4 @@
-// Package proc runs external commands (gh, git, wtp, docker) with a timeout.
+// Package proc runs external commands (git, wtp, docker) with a timeout.
 package proc
 
 import (
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Timeout bounds every gh/git/wtp call so a hung network call can't stall
+// Timeout bounds every git/wtp call so a hung network call can't stall
 // the tick loop. Generous because `wtp add` runs dependency-install hooks.
 var Timeout = 15 * time.Minute
 
