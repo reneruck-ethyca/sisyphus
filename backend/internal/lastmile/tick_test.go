@@ -404,7 +404,7 @@ func TestCommitKeepsConcurrentReviewerEdit(t *testing.T) {
 	if _, err := m.SetReviewers(id, []string{"zed"}); err != nil {
 		t.Fatal(err)
 	}
-	m.commit(before, after)
+	m.commit(context.Background(), before, after)
 	if h := m.must(t, id); h.State != StateCIRunning || !reflect.DeepEqual(h.Reviewers, []string{"zed"}) {
 		t.Errorf("handoff = %+v", h)
 	}
@@ -423,7 +423,7 @@ func TestCommitKeepsConcurrentReAdd(t *testing.T) {
 	if _, err := m.SetReviewers(id, []string{"alice"}); err != nil { // asked for afresh mid-tick
 		t.Fatal(err)
 	}
-	m.commit(before, before)
+	m.commit(context.Background(), before, before)
 	if h := m.must(t, id); slices.Contains(h.Requested, "alice") || slices.Contains(h.Removed, "alice") {
 		t.Errorf("stale tick kept alice as requested before: requested %v, removed %v", h.Requested, h.Removed)
 	}
@@ -434,7 +434,7 @@ func TestCommitKeepsRunMarkedMidTick(t *testing.T) {
 	m, _, _, id := opened(t, Request{})
 	before := m.must(t, id)
 	m.markRun(id, &RunMark{Trigger: TriggerDirty}) // DirtyAgent launched while the tick ran
-	m.commit(before, before)
+	m.commit(context.Background(), before, before)
 	if m.must(t, id).Run == nil {
 		t.Error("a stale tick dropped the run mark")
 	}

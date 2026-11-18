@@ -58,7 +58,7 @@ func TestRetriesOnceAfter401(t *testing.T) {
 		t.Errorf("user = %q, %v after %d calls", u, err, len(s.got))
 	}
 	a, _ = newStub(map[string][]reply{"GET /user": {{status: 401, body: `{"message":"Bad credentials"}`}}})
-	if _, err := a.CurrentUser(context.Background()); !isStatus(err, 401) {
+	if _, err := a.CurrentUser(context.Background()); !IsStatus(err, 401) {
 		t.Errorf("a lasting 401 = %v", err)
 	}
 }
@@ -100,7 +100,7 @@ func TestEditPR(t *testing.T) {
 		t.Errorf("empty edit: %v, calls %v", err, s.got)
 	}
 	a, _ = newStub(nil)
-	if err := a.EditPR(context.Background(), PRRef{Repo: "o/r", Number: 3}, PREdit{RemoveReviewers: []string{"bob"}}); !isStatus(err, 404) {
+	if err := a.EditPR(context.Background(), PRRef{Repo: "o/r", Number: 3}, PREdit{RemoveReviewers: []string{"bob"}}); !IsStatus(err, 404) {
 		t.Errorf("a failed reviewer removal = %v", err)
 	}
 }
@@ -210,7 +210,7 @@ func TestMergeSquash(t *testing.T) {
 		t.Errorf("%v; calls %v", err, s.got)
 	}
 	a, _ = newStub(map[string][]reply{"PUT /repos/o/r/pulls/3/merge": {{status: 409, body: `{"message":"Head branch was modified"}`}}})
-	if err := a.MergeSquash(context.Background(), PRRef{Repo: "o/r", Number: 3}, "abc"); !isStatus(err, 409) {
+	if err := a.MergeSquash(context.Background(), PRRef{Repo: "o/r", Number: 3}, "abc"); !IsStatus(err, 409) {
 		t.Errorf("a moved head = %v", err)
 	}
 }
@@ -225,6 +225,9 @@ func TestEnqueueAndAutoMerge(t *testing.T) {
 	}
 	if err := a.DisableAutoMerge(context.Background(), "PR_1"); err != nil || !strings.Contains(s.got[2], "disablePullRequestAutoMerge(input:{pullRequestId:$id})") || !strings.Contains(s.got[2], `"id":"PR_1"`) {
 		t.Errorf("auto-merge off: %v; calls %v", err, s.got)
+	}
+	if err := a.Dequeue(context.Background(), "PR_1"); err != nil || !strings.Contains(s.got[3], "dequeuePullRequest(input:{id:$id})") || !strings.Contains(s.got[3], `"id":"PR_1"`) {
+		t.Errorf("dequeue: %v; calls %v", err, s.got)
 	}
 }
 

@@ -53,7 +53,7 @@ func (m *Manager) tick(ctx context.Context) {
 		}
 		m.judge(&next)
 		changed := !reflect.DeepEqual(h, next)
-		if changed && !m.commit(h, next) {
+		if changed && !m.commit(ctx, h, next) {
 			continue // a finished run stays in memory: the next tick applies it to the fresh handoff
 		}
 		if finished {
@@ -297,8 +297,7 @@ func (m *Manager) escalate(ctx context.Context, h *Handoff, reason string) {
 	if err != nil {
 		slog.Warn("lastmile needs-human label failed", "id", h.ID, "err", err)
 	}
-	m.disarm(ctx, *h)
-	h.AutoMergeSet = false
+	m.letGoLogged(ctx, h)
 	h.PrevState = h.State
 	m.setState(h, StateNeedsHuman, reason)
 }
@@ -325,13 +324,22 @@ func (m *Manager) afterCommit(ctx context.Context, before, after Handoff) {
 
 // commit stores what a tick did to h. A reviewer edit that arrived while the
 // tick ran wins over the tick's copy of the list.
-func (m *Manager) commit(before, after Handoff) bool {
+func (m *Manager) commit(ctx context.Context, before, after Handoff) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	i := slices.IndexFunc(m.handoffs, func(o Handoff) bool { return o.ID == after.ID })
 	if i < 0 || m.handoffs[i].Gen != before.Gen {
-		return false // gone, or resumed or cancelled while the tick ran: its view is stale
+		// gone, or resumed or cancelled while the tick ran: its view is stale
+		var release *Handoff
+		if i >= 0 {
+			release = m.keepArmed(i, before, after)
+		}
+		m.mu.Unlock()
+		if release != nil {
+			m.letGoLogged(ctx, release)
+		}
+		return false
 	}
+	defer m.mu.Unlock()
 	cur := m.handoffs[i]
 	if after.Run != nil || before.Run == nil {
 		after.Run = cur.Run // markRun's copy: it may have the setup's end, or be a run launched since
@@ -347,6 +355,40 @@ func (m *Manager) commit(before, after Handoff) bool {
 		slog.Error("lastmile save failed", "err", err)
 	}
 	return true
+}
+
+// keepArmed hands what a discarded tick armed on GitHub (auto-merge, a place in
+// the merge queue) to the stored handoff i, so TLM still knows it's there; or,
+// when that handoff no longer merges, returns it with them for the caller to
+// let go of. The caller holds m.mu.
+func (m *Manager) keepArmed(i int, before, after Handoff) *Handoff {
+	armed := after.AutoMergeSet && !before.AutoMergeSet
+	queued := !after.EnqueuedAt.IsZero() && !after.EnqueuedAt.Equal(before.EnqueuedAt)
+	if !armed && !queued {
+		return nil
+	}
+	cur := &m.handoffs[i]
+	var release *Handoff
+	if mode := cur.Autonomy.Merge; Terminal(cur.State) || cur.State == StateNeedsHuman ||
+		(!cur.MergeRequested && (mode == MergeOff || mode == MergeShadow)) {
+		rel := *cur
+		rel.Snapshot, rel.AutoMergeSet, rel.EnqueuedAt = after.Snapshot, armed, time.Time{}
+		if queued {
+			rel.EnqueuedAt, cur.DequeuedAt = after.EnqueuedAt, m.now()
+		}
+		release = &rel
+	} else {
+		if armed {
+			cur.AutoMergeSet, cur.AutoMergeHead, cur.AutoMergeKicks = true, after.AutoMergeHead, after.AutoMergeKicks
+		}
+		if queued {
+			cur.EnqueuedAt, cur.EnqueuedHead = after.EnqueuedAt, after.EnqueuedHead
+		}
+	}
+	if err := m.saveLocked(); err != nil {
+		slog.Error("lastmile save failed", "err", err)
+	}
+	return release
 }
 
 // githubLagging says the worktree holds a push GitHub doesn't report yet: HEAD

@@ -3,6 +3,7 @@ package lastmile
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -89,6 +90,13 @@ var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, State
 // decision to GitHub auto-merge, which TLM turns off again when the mode goes off.
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
 	mode := h.Autonomy.Merge
+	if h.AutoMergeSet && (mode == MergeAuto || mode == MergeApproved) && !s.AutoMerge &&
+		s.Head == h.AutoMergeHead && h.QueueKicks == h.AutoMergeKicks {
+		// GitHub drops auto-merge on a push or a removal from the queue; with neither, a person turned it off.
+		h.Autonomy.Merge, mode = MergeOff, MergeOff
+		h.AutoMergeSet, h.MergeRequested = false, false
+		logEvent(h, m.now(), "merge", "auto-merge turned off on GitHub; merge mode set to off")
+	}
 	// GitHub won't enable auto-merge on a PR that is already mergeable ("clean"): TLM merges that one itself.
 	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved) &&
 		(s.AutoMerge || s.MergeState != "CLEAN")
@@ -96,21 +104,20 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	case native && !s.Draft && !s.AutoMerge:
 		switch err := m.GH.EnableAutoMerge(ctx, s.NodeID); {
 		case err == nil:
-			h.AutoMergeSet = true
+			h.AutoMergeSet, h.AutoMergeHead, h.AutoMergeKicks = true, s.Head, h.QueueKicks
+			if h.Snapshot != nil {
+				h.Snapshot.AutoMerge = true
+			}
 			logEvent(h, m.now(), "merge", "GitHub auto-merge enabled")
 		case strings.Contains(err.Error(), "clean status"):
 			native = false
 		default:
 			return state, reason, err
 		}
-	case h.AutoMergeSet && !h.MergeRequested && (mode == MergeOff || mode == MergeShadow):
-		if s.AutoMerge {
-			if err := m.GH.DisableAutoMerge(ctx, s.NodeID); err != nil {
-				return state, reason, err
-			}
-			logEvent(h, m.now(), "merge", "GitHub auto-merge disabled")
+	case !h.MergeRequested && (mode == MergeOff || mode == MergeShadow):
+		if err := m.letGo(ctx, h); err != nil {
+			return state, reason, err
 		}
-		h.AutoMergeSet = false
 	}
 	if s.InQueue {
 		if slices.Contains(queueable, state) {
@@ -127,13 +134,13 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	}
 	if s.MergeQueue {
 		// GitHub may not show the PR in the queue for a tick or two after it was added.
-		if m.now().Sub(h.EnqueuedAt) < enqueueGrace && !h.QueueSeen.After(h.EnqueuedAt) {
+		if m.enqueuing(*h) {
 			return StateQueued, "", nil
 		}
 		if err := m.GH.Enqueue(ctx, s.NodeID); err != nil {
 			return state, reason, err
 		}
-		h.EnqueuedAt = m.now()
+		h.EnqueuedAt, h.EnqueuedHead = m.now(), s.Head
 		logEvent(h, m.now(), "merge", "added to the merge queue")
 		return StateQueued, "", nil
 	}
@@ -144,15 +151,51 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	return state, reason, nil
 }
 
-// disarm turns off the GitHub auto-merge TLM turned on for h, as TLM gives the
-// PR up; the caller clears AutoMergeSet. A failure is logged: the handoff moves on.
-func (m *Manager) disarm(ctx context.Context, h Handoff) {
-	if !h.AutoMergeSet || h.Snapshot == nil || h.Snapshot.NodeID == "" {
-		return
+// enqueuing says TLM added the PR to the merge queue a moment ago, and GitHub
+// may not show it there yet.
+func (m *Manager) enqueuing(h Handoff) bool {
+	return m.now().Sub(h.EnqueuedAt) < enqueueGrace && !h.QueueSeen.After(h.EnqueuedAt)
+}
+
+// letGo undoes what TLM armed on GitHub for h as it lets the PR go: its
+// auto-merge and its place in the merge queue. What it undid is cleared on h;
+// what failed stays set, and the error says why.
+func (m *Manager) letGo(ctx context.Context, h *Handoff) error {
+	s := h.Snapshot
+	if s == nil || s.NodeID == "" {
+		return nil
 	}
-	if err := m.GH.DisableAutoMerge(ctx, h.Snapshot.NodeID); err != nil {
-		slog.Warn("lastmile disabling auto-merge failed", "id", h.ID, "err", err)
+	var errs []error
+	if h.AutoMergeSet && s.AutoMerge {
+		if err := m.GH.DisableAutoMerge(ctx, s.NodeID); err != nil {
+			errs = append(errs, err)
+		} else {
+			h.AutoMergeSet = false
+			logEvent(h, m.now(), "merge", "GitHub auto-merge disabled")
+		}
+	} else {
+		h.AutoMergeSet = false
 	}
+	if !h.EnqueuedAt.IsZero() && (s.InQueue || m.enqueuing(*h)) {
+		if err := m.GH.Dequeue(ctx, s.NodeID); err != nil {
+			errs = append(errs, err)
+		} else {
+			h.EnqueuedAt, h.DequeuedAt = time.Time{}, m.now()
+			logEvent(h, m.now(), "merge", "taken out of the merge queue")
+		}
+	} else {
+		h.EnqueuedAt = time.Time{}
+	}
+	return errors.Join(errs...)
+}
+
+// letGoLogged is letGo for a handoff TLM gives up on whatever happens: a failure
+// is logged, and h forgets what it armed.
+func (m *Manager) letGoLogged(ctx context.Context, h *Handoff) {
+	if err := m.letGo(ctx, h); err != nil {
+		slog.Warn("lastmile letting go of the merge failed", "id", h.ID, "err", err)
+	}
+	h.AutoMergeSet, h.EnqueuedAt = false, time.Time{}
 }
 
 const (
@@ -167,8 +210,12 @@ const (
 // mergeStep re-queues while TLM still wants the merge.
 func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (state, reason string, handled bool, err error) {
 	// Removals from before the handoff (an adopted PR) are someone else's history.
+	// TLM's own dequeue shows as a removal by the user it acts as, a moment after it.
+	ours := func(r github.QueueRemoval) bool {
+		return !h.DequeuedAt.IsZero() && r.At.After(h.DequeuedAt.Add(-time.Minute)) && r.At.Before(h.DequeuedAt.Add(enqueueGrace))
+	}
 	fresh := slices.DeleteFunc(slices.Clone(s.QueueRemovals), func(r github.QueueRemoval) bool {
-		return !r.At.After(h.QueueSeen) || !r.At.After(h.PROpened)
+		return !r.At.After(h.QueueSeen) || !r.At.After(h.PROpened) || ours(r)
 	})
 	if len(fresh) == 0 {
 		return "", "", false, nil
@@ -181,10 +228,8 @@ func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (st
 		h.QueueSeen = last.At // a merge TLM wasn't making: not its to answer
 		return "", "", false, nil
 	}
-	if human(last) {
-		h.QueueSeen = last.At
-		h.MergeRequested, h.Autonomy.Merge = false, MergeOff
-		logEvent(h, m.now(), "merge", last.Actor+" removed the PR from the merge queue: merge mode off")
+	if h.EnqueuedHead != "" && s.Head != h.EnqueuedHead {
+		h.QueueSeen = last.At // a push took it out; the new head goes back in once approved
 		return "", "", false, nil
 	}
 	conflict := s.Mergeable == "CONFLICTING" || strings.Contains(strings.ToLower(last.Reason), "conflict")
@@ -196,9 +241,16 @@ func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (st
 		}
 		failed = m.failures(ctx, *h, checks)
 	}
+	// TLM queues as the user, so their login on a removal says little: a cause makes it a kick-out.
+	if !conflict && len(failed) == 0 && human(last) {
+		h.QueueSeen = last.At
+		h.MergeRequested, h.Autonomy.Merge = false, MergeOff
+		logEvent(h, m.now(), "merge", last.Actor+" removed the PR from the merge queue: merge mode off")
+		return "", "", false, nil
+	}
 	h.QueueSeen = last.At
 	for _, r := range fresh {
-		if !human(r) {
+		if !human(r) || r.At.Equal(last.At) {
 			h.QueueKicks++
 		}
 	}

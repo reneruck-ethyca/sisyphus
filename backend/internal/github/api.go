@@ -59,7 +59,7 @@ func (a *API) call(fn func(*api.RESTClient, *api.GraphQLClient) error) error {
 		return err
 	}
 	err = fn(rest, gql)
-	if isStatus(err, http.StatusUnauthorized) {
+	if IsStatus(err, http.StatusUnauthorized) {
 		if rest, gql, ferr := a.clients(true); ferr == nil {
 			err = fn(rest, gql)
 		}
@@ -146,7 +146,8 @@ func nextPage(link string) string {
 	return ""
 }
 
-func isStatus(err error, code int) bool {
+// IsStatus says err is GitHub answering with HTTP status code.
+func IsStatus(err error, code int) bool {
 	var he *api.HTTPError
 	return errors.As(err, &he) && he.StatusCode == code
 }

@@ -439,7 +439,7 @@ func TestTickDiscardedAfterConcurrentEdit(t *testing.T) {
 	if _, err := m.Cancel(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	if m.commit(before, after) || m.must(t, id).State != StateCancelled {
+	if m.commit(context.Background(), before, after) || m.must(t, id).State != StateCancelled {
 		t.Error("a stale tick overwrote the cancel")
 	}
 }

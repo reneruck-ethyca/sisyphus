@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/reneruck/sisyphus/internal/github"
 )
@@ -94,14 +95,15 @@ func (m *Manager) dropNeedsHumanLabel(ctx context.Context, h Handoff) {
 	}
 }
 
-// Cancel ends TLM's care of a handoff, freeing its branch. GitHub is left as it is.
+// Cancel ends TLM's care of a handoff, freeing its branch. GitHub is left as it
+// is, except what TLM armed there: its auto-merge and its place in the merge queue.
 func (m *Manager) Cancel(ctx context.Context, id string) (Handoff, error) {
 	var armed Handoff
 	h, err := m.update(id, func(h *Handoff) error {
 		if Terminal(h.State) {
 			return invalid("handoff %s is already %s", id, h.State)
 		}
-		armed, h.AutoMergeSet = *h, false
+		armed, h.AutoMergeSet, h.EnqueuedAt = *h, false, time.Time{}
 		m.setState(h, StateCancelled, "")
 		return nil
 	})
@@ -109,7 +111,7 @@ func (m *Manager) Cancel(ctx context.Context, id string) (Handoff, error) {
 		return h, err
 	}
 	m.running.cancel(id)
-	m.disarm(ctx, armed)
+	m.letGoLogged(ctx, &armed)
 	slog.Info("lastmile cancelled", "id", id)
 	m.changed()
 	return h, nil

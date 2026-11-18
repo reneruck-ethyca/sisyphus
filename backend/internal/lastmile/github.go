@@ -22,6 +22,7 @@ type GitHub interface {
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 	MergeSquash(ctx context.Context, ref github.PRRef, head string) error
 	Enqueue(ctx context.Context, nodeID string) error
+	Dequeue(ctx context.Context, nodeID string) error
 	EnableAutoMerge(ctx context.Context, nodeID string) error
 	DisableAutoMerge(ctx context.Context, nodeID string) error
 	QueueFailures(ctx context.Context, repo, base string, number int) ([]github.Check, error)
@@ -46,6 +47,7 @@ type FakeGitHub struct {
 	Reruns       []int64          // runs RerunFailed was asked for
 	Merged       []github.PRRef   // MergeSquash calls
 	Enqueued     []string         // node ids Enqueue was asked for
+	Dequeued     []string         // node ids Dequeue was asked for
 	AutoMerged   []string         // node ids EnableAutoMerge was asked for
 	AutoMergeOff []string         // node ids DisableAutoMerge was asked for
 	AutoMergeErr error            // returned by EnableAutoMerge
@@ -124,6 +126,11 @@ func (f *FakeGitHub) MergeSquash(_ context.Context, ref github.PRRef, _ string) 
 
 func (f *FakeGitHub) Enqueue(_ context.Context, nodeID string) error {
 	f.Enqueued = append(f.Enqueued, nodeID)
+	return f.Err
+}
+
+func (f *FakeGitHub) Dequeue(_ context.Context, nodeID string) error {
+	f.Dequeued = append(f.Dequeued, nodeID)
 	return f.Err
 }
 

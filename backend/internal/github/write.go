@@ -92,7 +92,7 @@ func (a *API) EditPR(ctx context.Context, ref PRRef, e PREdit) error {
 	}
 	for _, l := range e.RemoveLabels {
 		// A label that's already off is what we wanted.
-		if err := a.send(ctx, http.MethodDelete, issuePath(ref)+"/labels/"+url.PathEscape(l), nil, nil); err != nil && !isStatus(err, http.StatusNotFound) {
+		if err := a.send(ctx, http.MethodDelete, issuePath(ref)+"/labels/"+url.PathEscape(l), nil, nil); err != nil && !IsStatus(err, http.StatusNotFound) {
 			return err
 		}
 	}
@@ -123,7 +123,7 @@ func (a *API) Comment(ctx context.Context, ref PRRef, body string) (int64, error
 func (a *API) CreateLabel(ctx context.Context, repo, name, color, description string) error {
 	in := map[string]string{"name": name, "color": color, "description": description}
 	err := a.send(ctx, http.MethodPost, "repos/"+repo+"/labels", in, nil)
-	if isStatus(err, http.StatusUnprocessableEntity) { // already_exists
+	if IsStatus(err, http.StatusUnprocessableEntity) { // already_exists
 		delete(in, "name")
 		err = a.send(ctx, http.MethodPatch, "repos/"+repo+"/labels/"+url.PathEscape(name), in, nil)
 	}
@@ -233,6 +233,12 @@ func (a *API) MergeSquash(ctx context.Context, ref PRRef, head string) error {
 // Enqueue puts the PR (by GraphQL node id) in its base's merge queue.
 func (a *API) Enqueue(ctx context.Context, nodeID string) error {
 	return a.graphql(ctx, `mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){clientMutationId}}`,
+		map[string]any{"id": nodeID}, nil)
+}
+
+// Dequeue takes the PR (by GraphQL node id) out of its base's merge queue.
+func (a *API) Dequeue(ctx context.Context, nodeID string) error {
+	return a.graphql(ctx, `mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}`,
 		map[string]any{"id": nodeID}, nil)
 }
 

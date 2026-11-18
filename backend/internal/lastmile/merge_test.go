@@ -631,3 +631,159 @@ func TestCleanupFailureWarns(t *testing.T) {
 		t.Errorf("warning %q", got.Warning)
 	}
 }
+
+func hasEvent(h Handoff, text string) bool {
+	return slices.ContainsFunc(h.Events, func(e Event) bool { return strings.Contains(e.Text, text) })
+}
+
+func TestAutoMergeTurnedOffOnGitHub(t *testing.T) {
+	t.Parallel()
+	armed := func(t *testing.T) (*Manager, *FakeGitHub, string, github.PRSnapshot) {
+		m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+		p := mergeable()
+		p.AutoMergeAllowed = true
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		p.AutoMerge = true
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		p.AutoMerge = false
+		return m, gh, id, p
+	}
+
+	m, gh, id, p := armed(t) // a person turned it off: same head, no removal
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	m.tick(context.Background())
+	if h := m.must(t, id); h.Autonomy.Merge != MergeOff || h.AutoMergeSet || h.MergeRequested || len(gh.AutoMerged) != 1 || len(gh.Merged) != 0 ||
+		!hasEvent(h, "auto-merge turned off on GitHub; merge mode set to off") {
+		t.Errorf("turned off: merge %s set %v auto-merged %v merged %v events %+v", h.Autonomy.Merge, h.AutoMergeSet, gh.AutoMerged, gh.Merged, h.Events)
+	}
+
+	m, gh, id, p = armed(t) // a push: GitHub dropped it
+	p.HeadSHA = "h2"
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); h.Autonomy.Merge != MergeApproved || !h.AutoMergeSet || len(gh.AutoMerged) != 2 || h.AutoMergeHead != "h2" {
+		t.Errorf("head moved: merge %s set %v head %q auto-merged %v", h.Autonomy.Merge, h.AutoMergeSet, h.AutoMergeHead, gh.AutoMerged)
+	}
+
+	m, gh, id, p = armed(t) // a removal from the merge queue: GitHub dropped it
+	m.set(t, id, func(h *Handoff) { h.QueueKicks++ })
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); h.Autonomy.Merge != MergeApproved || len(gh.AutoMerged) != 2 {
+		t.Errorf("removed: merge %s auto-merged %v", h.Autonomy.Merge, gh.AutoMerged)
+	}
+}
+
+func TestStaleTickReleasesWhatItArmed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	ticked := func(t *testing.T) (*Manager, *FakeGitHub, string, Handoff, Handoff) {
+		m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+		before := m.must(t, id)
+		after := before
+		after.Snapshot = &Snapshot{NodeID: "PR_7", Head: "h", AutoMerge: true}
+		return m, gh, id, before, after
+	}
+
+	m, gh, id, before, after := ticked(t) // merge set off while the tick turned auto-merge on
+	after.AutoMergeSet, after.AutoMergeHead = true, "h"
+	if _, err := m.SetMerge(id, MergeOff); err != nil {
+		t.Fatal(err)
+	}
+	if m.commit(ctx, before, after) {
+		t.Fatal("stale tick stored")
+	}
+	if h := m.must(t, id); h.AutoMergeSet || !slices.Equal(gh.AutoMergeOff, []string{"PR_7"}) {
+		t.Errorf("merge off: set %v off %v", h.AutoMergeSet, gh.AutoMergeOff)
+	}
+
+	m, gh, id, before, after = ticked(t) // cancelled while the tick queued it
+	after.EnqueuedAt, after.EnqueuedHead = time.Now(), "h"
+	if _, err := m.Cancel(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	m.commit(ctx, before, after)
+	if h := m.must(t, id); !h.EnqueuedAt.IsZero() || !slices.Equal(gh.Dequeued, []string{"PR_7"}) {
+		t.Errorf("cancelled: enqueued %v dequeued %v", h.EnqueuedAt, gh.Dequeued)
+	}
+
+	m, gh, id, before, after = ticked(t) // an unrelated edit: TLM still merges, and remembers what it armed
+	after.AutoMergeSet, after.AutoMergeHead, after.EnqueuedAt = true, "h", time.Now()
+	if _, err := m.SetReviewers(id, []string{"alice"}); err != nil {
+		t.Fatal(err)
+	}
+	m.commit(ctx, before, after)
+	if h := m.must(t, id); !h.AutoMergeSet || h.AutoMergeHead != "h" || h.EnqueuedAt.IsZero() || len(gh.AutoMergeOff)+len(gh.Dequeued) != 0 {
+		t.Errorf("kept: set %v head %q enqueued %v off %v dequeued %v", h.AutoMergeSet, h.AutoMergeHead, h.EnqueuedAt, gh.AutoMergeOff, gh.Dequeued)
+	}
+}
+
+func TestLettingGoDequeues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	inQueue := func(t *testing.T) (*Manager, *FakeGitHub, string, github.PRSnapshot) {
+		m, gh, id, p := queued(t, Request{}, nil)
+		p.InQueue = true
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(ctx)
+		return m, gh, id, p
+	}
+
+	m, gh, id, _ := inQueue(t)
+	if _, err := m.Cancel(ctx, id); err != nil || !slices.Equal(gh.Dequeued, []string{"PR_7"}) {
+		t.Errorf("cancel: %v dequeued %v", err, gh.Dequeued)
+	}
+
+	m, gh, id, _ = inQueue(t)
+	h := m.must(t, id)
+	m.escalate(ctx, &h, "x")
+	if !slices.Equal(gh.Dequeued, []string{"PR_7"}) || !h.EnqueuedAt.IsZero() {
+		t.Errorf("escalate: dequeued %v enqueued %v", gh.Dequeued, h.EnqueuedAt)
+	}
+
+	m, gh, id, p := inQueue(t)
+	if _, err := m.SetMerge(id, MergeOff); err != nil {
+		t.Fatal(err)
+	}
+	m.tick(ctx)
+	if h := m.must(t, id); !slices.Equal(gh.Dequeued, []string{"PR_7"}) || !h.EnqueuedAt.IsZero() || h.DequeuedAt.IsZero() {
+		t.Fatalf("merge off: dequeued %v enqueued %v dequeued at %v", gh.Dequeued, h.EnqueuedAt, h.DequeuedAt)
+	}
+	// GitHub credits TLM's dequeue to the user's login: not a person's dequeue.
+	if _, err := m.SetMerge(id, MergeApproved); err != nil {
+		t.Fatal(err)
+	}
+	p.InQueue = false
+	removed(gh, p, github.QueueRemoval{At: time.Now(), Reason: "manually removed", Actor: "me"})
+	m.tick(ctx)
+	if h := m.must(t, id); h.Autonomy.Merge != MergeApproved || h.QueueKicks != 0 {
+		t.Errorf("own dequeue: merge %s kicks %d", h.Autonomy.Merge, h.QueueKicks)
+	}
+}
+
+func TestQueueRemovalWithCauseIsKickOut(t *testing.T) {
+	t.Parallel()
+	m, gh, id, p := queued(t, Request{}, nil)
+	p.Mergeable = "CONFLICTING" // TLM queues as the user: their login on the removal says nothing
+	removed(gh, p, github.QueueRemoval{At: time.Now(), Reason: "manually removed", Actor: "me"})
+	m.tick(context.Background())
+	if h := m.must(t, id); h.QueueKicks != 1 || !h.MergeRequested {
+		t.Errorf("kicks %d requested %v", h.QueueKicks, h.MergeRequested)
+	}
+}
+
+func TestQueueRemovalAfterPushIgnored(t *testing.T) {
+	t.Parallel()
+	tasks := &fakeTasks{result: `{"action":"escalate","summary":"x"}`}
+	m, gh, id, p := queued(t, Request{}, tasks)
+	p.HeadSHA = "pushed"
+	at := time.Now()
+	removed(gh, p, github.QueueRemoval{At: at, Reason: "something odd"})
+	m.tickWait(t)
+	if h := m.must(t, id); h.QueueKicks != 0 || !h.QueueSeen.Equal(at) || tasks.n() != 0 || h.State == StateNeedsHuman {
+		t.Errorf("kicks %d seen %v agent runs %d, handoff %s", h.QueueKicks, h.QueueSeen, tasks.n(), h.State)
+	}
+}
