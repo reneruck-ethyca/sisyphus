@@ -327,6 +327,7 @@ function RunPage({ status: s, pr, runs, runID, archive }: { status: Status; pr: 
   useEffect(() => {
     if (!running || !log.data) return;
     const src = stream(`${files}/events?from=${log.data.next}`);
+    src.onopen = () => setLive([]); // a reconnect resends everything from ?from= on
     src.onmessage = (m) => {
       const follow = innerHeight + scrollY >= document.body.scrollHeight - 40;
       setLive((l) => [...l, JSON.parse(m.data)]);
