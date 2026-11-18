@@ -104,7 +104,8 @@ One per handoff:
 handed-off → pr-open → ci-running ─┬→ ci-red ──[fix agent]──→ ci-running
                                     └→ ci-green → awaiting-review
 awaiting-review ─┬→ feedback ──[review-response agent]──→ ci-running
-                 ├→ approved → mergeable? ──[merge policy]──→ merged ✔
+                 ├→ approved ──[merge mode / button]──→ (queued →) merged ✔ ──→ cleanup, history
+queued ──(kicked out)──→ flake: re-queue │ CI red: fix │ conflict: rebase │ else: queue agent
                  └→ conflict ──[rebase; agent only on conflict]──→ ci-running
 any state ──(budget/rounds exhausted, repeated failure, policy)──→ needs-human ⏸
 closed by a human ──→ closed ✖
@@ -125,7 +126,7 @@ closed by a human ──→ closed ✖
 | CI red (not a known flake) | snapshot, failed log excerpts, diff | edits in the worktree + `{summary, confidence, escalate?}` |
 | New review threads | snapshot, threads, diff, current PR body | edits + `[{thread_id, action: fix\|reply\|defer\|skip, reply}]` + optional `{body, reason}` |
 | Rebase conflict | conflicted files, both sides | resolved files, or `escalate` |
-| Merge decision (later) | snapshot | advisory verdict only |
+| Kicked out of the merge queue, cause unknown (§7.2) | snapshot, removal reason, failed logs | edits + `{action: requeue\|escalate, summary}` |
 
 ### PR snapshot
 
@@ -272,17 +273,116 @@ too, by the rule above.
 1. **`merge=off` (default).** TLM gets the PR to green and approved, notifies, and stops.
 2. **`merge=shadow`.** Every tick logs `would-merge: yes/no + signals`, and when I merge by hand TLM
    records what I did. The comparison is the dataset.
-3. **`merge=auto`** for a rule set that has earned it, for example:
+3. **`merge=auto`**: merge once the evaluator below is satisfied.
+4. **`merge=approved`**: merge as soon as the PR is approved; the evaluator is not consulted.
+
+The evaluator's rule set:
    - required approvals present, none stale
    - all required checks green on the current head
-   - zero unresolved threads
-   - base up to date
+   - no unresolved threads, except threads whose last comment is ours (the `gh` login): answered
+     threads don't block
+   - base up to date, unless the PR touches no migration (`lastmile.migration_paths`); a PR without
+     migrations may merge while behind
    - no risky paths touched (migrations, auth, infra)
-   - diff under N lines
    - outside a merge-freeze window
+
+There is no diff-size rule (dropped 2026-11-18).
+
+### 7.1 How a merge happens
+
+- **The repo allows GitHub auto-merge** (`autoMergeAllowed`): for `merge=auto` and `merge=approved`
+  TLM enables GitHub's auto-merge (squash) on the PR and GitHub decides when. The evaluator still
+  runs and is logged, but it decides nothing. TLM keeps tracking the PR until it is merged or
+  closed, and applies the same retries and error handling as its own merges: red CI, conflicts,
+  and removals from the merge queue (§7.2). If GitHub drops auto-merge (for example after a
+  removal), TLM turns it back on once the cause is dealt with.
+- **It doesn't:** TLM merges itself, on the tick, per the mode above.
+- **By hand:** once the PR is approved, the dashboard shows **Squash and merge**. The dashboard can
+  also turn auto-merge on or off for a handoff (`off`, `when checks pass`, `when approved`; just
+  on/off where GitHub auto-merge is used).
+
+Every merge TLM makes itself (button, `approved`, `auto`) needs a current human approval: one
+that isn't stale and isn't a bot's. The merge is pinned to that head. A merge freeze holds
+`approved` and `auto`, not the button, and not GitHub's own auto-merge, whose timing is GitHub's.
+A PR GitHub reports as already mergeable can't get auto-merge, so TLM merges it itself. Turning the mode to `off` (or `shadow`) withdraws a pressed
+button and turns off GitHub auto-merge that TLM turned on; auto-merge a person set on GitHub is
+left alone. TLM also turns its own auto-merge off when it escalates to needs-human or the handoff is
+cancelled: when TLM lets go, nothing it armed keeps going.
+
+Whatever starts it, a merge squashes. If the base branch uses a merge queue, merging means adding
+the PR to the queue (`enqueuePullRequest`), and the handoff goes to a new state, **`queued`**. TLM
+keeps ticking until GitHub reports the PR merged.
+
+### 7.2 Kicked out of the merge queue
+
+GitHub records each removal (`RemovedFromMergeQueueEvent`, with a reason). TLM counts them per
+handoff, and on the **10th** removal it escalates to needs-human. Before that, by cause:
+
+| Cause | TLM |
+|---|---|
+| Known flaky check | re-queue |
+| Real CI failure | fix agent (only with `fix-ci`, otherwise needs-human), then re-queue |
+| Conflict with the base | rebase (agent on conflict, as §4), then re-queue |
+| Anything else | a **queue agent** investigates: it gets the snapshot, the removal reason and failed logs, and returns `requeue`, edits to commit, or `escalate` |
+
+The queue's CI runs on the merge group, not on the PR head, so failed logs come from the
+`merge_group` run.
+
+A removal by a person (dequeued by hand) is not a kick-out: TLM counts nothing, sets the handoff's
+merge mode to `off` and leaves it to them. "Ours", for answered threads, means the last comment is
+by the PR's author (the `gh` login TLM acts as) or one TLM posted.
+
+Removals count only while TLM means to merge the PR (the button was pressed, or the mode is `auto`
+or `approved`); a PR a person queued by hand is theirs. Removals from before the handoff or from a
+needs-human stretch don't count, and Resume after the 10th starts the count again. A fix pushed
+after a removal makes the approval stale, so the PR goes back into the queue once someone approves
+the new head.
+
+### 7.3 After a merge
+
+When a handoff reaches `merged`, TLM removes its worktree and local branch (`wtp rm
+--with-branch`); the remote branch is left to the repo's delete-on-merge setting. A worktree with
+uncommitted changes, unpushed commits, or that isn't a linked worktree is kept and the handoff
+says so. Finished handoffs (merged, closed,
+cancelled) move to a **History** section of the Last mile page. The `merged` pill is purple.
 
 Signals to collect from the start, even before they're used: diff size, touched-path risk, number of
 fix rounds, reviewer identity (human or bot), time spent in review, CI flake count.
+
+### 7.4 Downrev bumps (fidesplus)
+
+A PR that adds an alembic migration goes stale every time another migration lands on the base: its
+first migration's `down_revision` must point at the base's new head. Each bump used to cost a full
+CI run, during which the next migration could land. fidesplus has a `downrev-only` label that makes
+CI, on the PR and in the merge queue, run only the migration checks.
+
+- **Bump without an agent.** When TLM rebases a PR onto a moved base (§4) and, per alembic
+  versions directory, the PR's own chain hangs off a revision that is no longer the base's single
+  head, TLM rewrites the `down_revision` of the PR's first migration to the base head and commits
+  it as its own commit, in the same run as the rebase, before the push. Several heads on the base,
+  or a PR migration TLM can't parse, goes to needs-human.
+- **Label only when provably downrev-only.** TLM adds `downrev-only` when the rebase was clean (no
+  conflict agent), the head before it was fully green, and the only commit TLM added is the bump.
+  It records the head it labelled.
+- **Label off as soon as anything else changes.** Any other head (an agent's commit, a person's
+  push, a rebase without a bump) removes the label before the new head's CI matters.
+- **Approval carries over.** A human approval of the head before a labelled bump counts as an
+  approval of the bumped head (§7.1's fresh-approval rule), since the label vouches that nothing
+  else changed. GitHub may still demand re-approval if branch protection dismisses stale reviews.
+- **Scope:** per repo in config (`lastmile.downrev_labels`, `{"ethyca/fidesplus": "downrev-only"}`);
+  other repos still get the bump, without a label.
+- **As built:** one bump commit per versions directory, rewriting the `down_revision` value
+  (quotes and a trailing comment kept) and the docstring's `Revises:` line. The base's head is
+  read from the base branch only, never from files the PR changed, and every revision id must be
+  plain (`[A-Za-z0-9_]+`). The label goes on before the push, since fidesplus CI reads labels off
+  the push's event; a failed push takes it off again, a failed label means a push without it. A
+  stack child's rebase after its parent merged also gets the bump, never the label. The label
+  stays on while GitHub still shows the pre-bump head (it lags the push), and comes off on cancel.
+  The carry-over spans a chain of rebase+bump-only heads: an approval of the head before the first
+  of them counts for the last.
+  Every other TLM push from a labelled head (an agent's commit, a rebase without a bump) takes the
+  label off before pushing, and goes to needs-human if it can't. A person's push while the label is
+  on can't be pre-empted; fidesplus's `check_downrev_only.py` and the merge queue are the backstop.
 
 ## 8. Milestones
 
@@ -493,3 +593,36 @@ None right now.
 - **2026-11-18:** Resume is refused while an agent run is in flight on the handoff. The dashboard offered
   Resume during a dirty-agent run; if the agent then failed, its outcome only set the reason on a handoff
   already back at pr-open, so the human's unwrapped changes sat in the worktree without an escalation.
+- **2026-11-18:** Merging (§7). TLM can now merge: `merge=auto` (evaluator) and the new `merge=approved`
+  (approval alone), using GitHub's auto-merge where the repo allows it, plus a **Squash and merge** button
+  once approved. Merge-queue repos get a `queued` state; TLM tracks the PR until it merges, re-queues by
+  cause after a removal (a queue agent for unknown causes) and escalates on the 10th. The evaluator was too
+  strict: threads answered by us no longer block, a PR without migrations may merge while behind, and the
+  diff-size rule is gone. Merged handoffs clean up their worktree and branch and move to History; the
+  merged pill is purple.
+- **2026-11-18:** Merge safety, from review. Where GitHub auto-merge is allowed, TLM turns it on as soon as
+  the PR is ready, for `auto` too, rather than after its own evaluator agrees: GitHub decides, as §7.1
+  says. Every merge TLM makes itself needs a fresh human approval of the current head and is pinned to it;
+  a freeze holds `approved`/`auto` but not the button; switching to `off` withdraws the button and turns
+  off the auto-merge TLM enabled.
+- **2026-11-18:** GitHub won't take auto-merge on a PR that is already mergeable, so TLM merges such a PR
+  itself, under its own gates. TLM turns off the auto-merge it armed when it escalates or is cancelled.
+- **2026-11-18:** From the whole-branch review. Cleanup also keeps a worktree with unpushed commits or one
+  that isn't a linked worktree. If a person turns GitHub auto-merge off (same head, no removal, after a
+  short grace), TLM takes it as a decision and sets the mode to `off` instead of re-arming. GitHub's
+  auto-merge is used only where GitHub enforces reviews; otherwise TLM merges itself, with a human
+  approval. When TLM lets go (off, cancel, needs-human) it also takes out of the queue a PR it queued. A
+  merge GitHub keeps refusing goes to needs-human instead of being retried forever. Removals caused by a
+  push, or classifiable by cause, are never read as a person's dequeue.
+- **2026-11-18:** Downrev bumps (§7.4), lined up after merging: TLM bumps a stale migration's
+  `down_revision` itself after a rebase and labels the PR `downrev-only` (fidesplus) while that is
+  provably all that changed, so CI and the merge queue run only the migration checks.
+- **2026-11-18:** §7.4 as built: one bump commit per versions directory, `Revises:` left alone,
+  stack-child rebases bump without a label, the label survives GitHub's lag behind the push, and
+  approval carry-over spans one bump, not a chain of them.
+- **2026-11-18:** §7.4 after review: the label goes on before the push (CI reads it off the push's
+  event), comes off on cancel and after a failed push; carry-over spans a chain of consecutive
+  bumps; `Revises:` is rewritten too; the base head is read from the base branch only, with
+  revision ids validated.
+- **2026-11-18:** §7.4: TLM's own non-qualifying pushes from a labelled head take the label off
+  first; a person's push is left to fidesplus's `check_downrev_only.py` and the merge queue.
