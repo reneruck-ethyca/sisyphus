@@ -285,3 +285,32 @@ func TestMergeNativeCleanMergesItself(t *testing.T) {
 		t.Errorf("clean-status error: merged %v", gh.Merged)
 	}
 }
+
+func TestGivingUpDisarmsAutoMerge(t *testing.T) {
+	t.Parallel()
+	armed := func(t *testing.T) (*Manager, *FakeGitHub, string, github.PRSnapshot) {
+		m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+		p := mergeable()
+		p.AutoMergeAllowed = true
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		if h := m.must(t, id); !h.AutoMergeSet {
+			t.Fatal("auto-merge not armed")
+		}
+		return m, gh, id, p
+	}
+
+	m, gh, id, p := armed(t)
+	p.AutoMerge, p.Checks = true, []github.Check{chk("a", "COMPLETED", "FAILURE")}
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); h.State != StateNeedsHuman || h.AutoMergeSet || !slices.Equal(gh.AutoMergeOff, []string{"PR_7"}) {
+		t.Errorf("escalated: %s set %v off %v", h.State, h.AutoMergeSet, gh.AutoMergeOff)
+	}
+
+	m, gh, id, _ = armed(t)
+	h, err := m.Cancel(context.Background(), id)
+	if err != nil || h.AutoMergeSet || !slices.Equal(gh.AutoMergeOff, []string{"PR_7"}) {
+		t.Errorf("cancelled: %v set %v off %v", err, h.AutoMergeSet, gh.AutoMergeOff)
+	}
+}

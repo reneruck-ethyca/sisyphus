@@ -341,7 +341,7 @@ func newHandler(srv server) http.Handler {
 			if verb == "resume" {
 				h, err = lm.Resume(context.WithoutCancel(r.Context()), r.PathValue("id"))
 			} else {
-				h, err = lm.Cancel(r.PathValue("id"))
+				h, err = lm.Cancel(context.WithoutCancel(r.Context()), r.PathValue("id"))
 			}
 			writeLastMile(w, r, http.StatusOK, h, err)
 		}))

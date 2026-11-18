@@ -131,3 +131,14 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	logEvent(h, m.now(), "merge", "squash-merged "+s.Head[:min(len(s.Head), 12)])
 	return state, reason, nil
 }
+
+// disarm turns off the GitHub auto-merge TLM turned on for h, as TLM gives the
+// PR up; the caller clears AutoMergeSet. A failure is logged: the handoff moves on.
+func (m *Manager) disarm(ctx context.Context, h Handoff) {
+	if !h.AutoMergeSet || h.Snapshot == nil || h.Snapshot.NodeID == "" {
+		return
+	}
+	if err := m.GH.DisableAutoMerge(ctx, h.Snapshot.NodeID); err != nil {
+		slog.Warn("lastmile disabling auto-merge failed", "id", h.ID, "err", err)
+	}
+}

@@ -416,11 +416,11 @@ func TestResumeAndCancel(t *testing.T) {
 	}
 
 	edits := len(gh.Edits)
-	c, err := m.Cancel(id)
+	c, err := m.Cancel(context.Background(), id)
 	if err != nil || c.State != StateCancelled || len(gh.Edits) != edits {
 		t.Fatalf("cancel = %+v, %v", c, err)
 	}
-	invalidWith(t, func() error { _, err := m.Cancel(id); return err }(), "already cancelled")
+	invalidWith(t, func() error { _, err := m.Cancel(context.Background(), id); return err }(), "already cancelled")
 	m.tick(context.Background()) // terminal: untouched
 	if m.must(t, id).State != StateCancelled {
 		t.Error("tick moved a cancelled handoff")
@@ -436,7 +436,7 @@ func TestTickDiscardedAfterConcurrentEdit(t *testing.T) {
 	before := m.must(t, id)
 	after := before
 	after.State = StateCIGreen
-	if _, err := m.Cancel(id); err != nil {
+	if _, err := m.Cancel(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
 	if m.commit(before, after) || m.must(t, id).State != StateCancelled {

@@ -241,7 +241,7 @@ func TestActionsNotifyOnceWithoutTheLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("resume", 3)
-	if _, err := m.Cancel(h.ID); err != nil {
+	if _, err := m.Cancel(context.Background(), h.ID); err != nil {
 		t.Fatal(err)
 	}
 	expect("cancel", 4)

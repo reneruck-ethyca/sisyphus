@@ -287,6 +287,8 @@ func (m *Manager) escalate(ctx context.Context, h *Handoff, reason string) {
 	if err != nil {
 		slog.Warn("lastmile needs-human label failed", "id", h.ID, "err", err)
 	}
+	m.disarm(ctx, *h)
+	h.AutoMergeSet = false
 	h.PrevState = h.State
 	m.setState(h, StateNeedsHuman, reason)
 }
