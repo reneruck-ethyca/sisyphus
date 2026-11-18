@@ -236,12 +236,24 @@ func designHandlers(mux *http.ServeMux, srv server) {
 }
 
 // addedLines returns the 1-based lines of now that aren't in before, by a longest
-// common subsequence of whole lines.
-// ponytail: O(n·m) table, ~1M cells for two 1000-line docs; Myers if docs get much longer.
+// common subsequence of whole lines, or nil when the changed middle is too big
+// to compare (the page then highlights the whole PR).
+// ponytail: O(n·m) table on what's left after the common ends, capped at maxLCSCells; Myers if that bites.
 func addedLines(before, now string) []int {
 	a, b := strings.Split(before, "\n"), strings.Split(now, "\n")
 	if before == "" {
 		a = nil
+	}
+	pre := 0
+	for pre < len(a) && pre < len(b) && a[pre] == b[pre] {
+		pre++
+	}
+	for len(a) > pre && len(b) > pre && a[len(a)-1] == b[len(b)-1] {
+		a, b = a[:len(a)-1], b[:len(b)-1]
+	}
+	a, b = a[pre:], b[pre:]
+	if len(a)*len(b) > maxLCSCells {
+		return nil
 	}
 	lcs := make([][]int32, len(a)+1)
 	for i := range lcs {
@@ -264,12 +276,14 @@ func addedLines(before, now string) []int {
 		case i < len(a) && lcs[i+1][j] >= lcs[i][j+1]:
 			i++
 		default:
-			out = append(out, j+1)
+			out = append(out, pre+j+1)
 			j++
 		}
 	}
 	return out
 }
+
+const maxLCSCells = 4 << 20 // 16 MB of int32
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
