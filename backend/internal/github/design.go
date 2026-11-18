@@ -27,13 +27,19 @@ type DesignPR struct {
 	Viewer   string
 }
 
-func splitRepo(repo string) (owner, name string) {
-	owner, name, _ = strings.Cut(repo, "/")
-	return owner, name
+func splitRepo(repo string) (owner, name string, err error) {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return "", "", fmt.Errorf("bad repo %q", repo)
+	}
+	return owner, name, nil
 }
 
 func (a *API) DesignPR(ctx context.Context, ref PRRef) (DesignPR, error) {
-	owner, name := splitRepo(ref.Repo)
+	owner, name, err := splitRepo(ref.Repo)
+	if err != nil {
+		return DesignPR{}, err
+	}
 	var resp struct {
 		Viewer     struct{ Login string }
 		Repository struct {
@@ -44,7 +50,7 @@ func (a *API) DesignPR(ctx context.Context, ref PRRef) (DesignPR, error) {
 			}
 		}
 	}
-	err := a.graphql(ctx, `query($owner:String!,$repo:String!,$number:Int!){ viewer { login }
+	err = a.graphql(ctx, `query($owner:String!,$repo:String!,$number:Int!){ viewer { login }
 		repository(owner:$owner,name:$repo){ pullRequest(number:$number){
 			id title url headRefOid baseRefOid headRepository { nameWithOwner } } } }`,
 		map[string]any{"owner": owner, "repo": name, "number": ref.Number}, &resp)
@@ -68,7 +74,7 @@ type ChangedFile struct {
 }
 
 func (a *API) PRFiles(ctx context.Context, ref PRRef) ([]ChangedFile, error) {
-	return pages[ChangedFile](ctx, a, fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", ref.Repo, ref.Number))
+	return pages[ChangedFile](ctx, a, pullPath(ref)+"/files?per_page=100")
 }
 
 // CompareFiles lists what changed between two commits.
@@ -180,7 +186,10 @@ type threadNode struct {
 
 // Threads returns the PR's review threads on path, or on every file when path is "".
 func (a *API) Threads(ctx context.Context, ref PRRef, path string) ([]DocThread, error) {
-	owner, name := splitRepo(ref.Repo)
+	owner, name, err := splitRepo(ref.Repo)
+	if err != nil {
+		return nil, err
+	}
 	out := []DocThread{}
 	var cursor *string
 	for {
@@ -298,7 +307,10 @@ type PendingReview struct {
 
 // Pending returns the viewer's pending review on the PR, or nil.
 func (a *API) Pending(ctx context.Context, ref PRRef, viewer string) (*PendingReview, error) {
-	owner, name := splitRepo(ref.Repo)
+	owner, name, err := splitRepo(ref.Repo)
+	if err != nil {
+		return nil, err
+	}
 	var resp struct {
 		Repository struct {
 			PullRequest struct {
@@ -312,7 +324,7 @@ func (a *API) Pending(ctx context.Context, ref PRRef, viewer string) (*PendingRe
 			}
 		}
 	}
-	err := a.graphql(ctx, `query($owner:String!,$repo:String!,$number:Int!){
+	err = a.graphql(ctx, `query($owner:String!,$repo:String!,$number:Int!){
 		repository(owner:$owner,name:$repo){ pullRequest(number:$number){
 			reviews(states:PENDING, first:10){ nodes { id author { login } comments { totalCount } } } } } }`,
 		map[string]any{"owner": owner, "repo": name, "number": ref.Number}, &resp)

@@ -130,9 +130,7 @@ func (a *API) PR(ctx context.Context, ref PRRef) (PR, error) {
 }
 
 func (a *API) Files(ctx context.Context, ref PRRef) ([]string, error) {
-	fs, err := pages[struct {
-		Filename string `json:"filename"`
-	}](ctx, a, fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", ref.Repo, ref.Number))
+	fs, err := a.PRFiles(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -175,12 +173,12 @@ type DiscussionFile struct {
 // Discussion fetches a PR, its reviews, its inline review comments and its
 // issue comments, as the GitHub API returns them.
 func (a *API) Discussion(ctx context.Context, ref PRRef) ([]DiscussionFile, error) {
-	base := fmt.Sprintf("repos/%s/pulls/%d", ref.Repo, ref.Number)
+	base := pullPath(ref)
 	files := []DiscussionFile{
 		{Name: "pr.json"}, {Name: "reviews.json"}, {Name: "review_comments.json"}, {Name: "issue_comments.json"},
 	}
 	paths := []string{base, base + "/reviews?per_page=100", base + "/comments?per_page=100",
-		fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", ref.Repo, ref.Number)}
+		issuePath(ref) + "/comments?per_page=100"}
 	for i, p := range paths {
 		b, _, err := a.do(ctx, http.MethodGet, p, nil)
 		if err != nil {
@@ -201,7 +199,7 @@ func (a *API) CreateReview(ctx context.Context, ref PRRef, file string) (string,
 	var r struct {
 		HTMLURL string `json:"html_url"`
 	}
-	return r.HTMLURL, a.send(ctx, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/reviews", ref.Repo, ref.Number), payload, &r)
+	return r.HTMLURL, a.send(ctx, http.MethodPost, pullPath(ref)+"/reviews", payload, &r)
 }
 
 // ReplyToComment answers in the thread of an inline review comment.
@@ -215,7 +213,7 @@ func (a *API) Reply(ctx context.Context, ref PRRef, commentID int64, body string
 	var c struct {
 		ID int64 `json:"id"`
 	}
-	return c.ID, a.send(ctx, http.MethodPost, fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", ref.Repo, ref.Number, commentID),
+	return c.ID, a.send(ctx, http.MethodPost, fmt.Sprintf("%s/comments/%d/replies", pullPath(ref), commentID),
 		map[string]string{"body": body}, &c)
 }
 

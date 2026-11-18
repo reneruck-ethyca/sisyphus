@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -66,9 +65,9 @@ commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100,after:$after){
 // further 100 checks: a failing check must never be missed.
 // ponytail: first 100 files and review requests, last 100 reviews; page when a PR outgrows them.
 func (a *API) PRView(ctx context.Context, ref PRRef) (PRSnapshot, error) {
-	owner, name, ok := strings.Cut(ref.Repo, "/")
-	if !ok {
-		return PRSnapshot{}, fmt.Errorf("bad repo %q", ref.Repo)
+	owner, name, err := splitRepo(ref.Repo)
+	if err != nil {
+		return PRSnapshot{}, err
 	}
 	vars := map[string]any{"owner": owner, "name": name, "number": ref.Number}
 	var data json.RawMessage

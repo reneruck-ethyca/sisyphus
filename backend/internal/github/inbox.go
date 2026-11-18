@@ -47,9 +47,9 @@ comments(last:100){nodes{databaseId body createdAt url author{login __typename}}
 
 // Inbox reads the PR's review threads, review bodies and conversation comments.
 func (a *API) Inbox(ctx context.Context, ref PRRef) (Inbox, error) {
-	owner, name, ok := strings.Cut(ref.Repo, "/")
-	if !ok {
-		return Inbox{}, fmt.Errorf("bad repo %q", ref.Repo)
+	owner, name, err := splitRepo(ref.Repo)
+	if err != nil {
+		return Inbox{}, err
 	}
 	var data json.RawMessage
 	if err := a.graphql(ctx, inboxQuery, map[string]any{"owner": owner, "name": name, "number": ref.Number}, &data); err != nil {
