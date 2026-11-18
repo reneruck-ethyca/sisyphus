@@ -162,7 +162,10 @@ const (
 // and a person's dequeue leave the rest of the tick to it: drift rebases, and
 // mergeStep re-queues while TLM still wants the merge.
 func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (state, reason string, handled bool, err error) {
-	fresh := slices.DeleteFunc(slices.Clone(s.QueueRemovals), func(r github.QueueRemoval) bool { return !r.At.After(h.QueueSeen) })
+	// Removals from before the handoff (an adopted PR) are someone else's history.
+	fresh := slices.DeleteFunc(slices.Clone(s.QueueRemovals), func(r github.QueueRemoval) bool {
+		return !r.At.After(h.QueueSeen) || !r.At.After(h.PROpened)
+	})
 	if len(fresh) == 0 {
 		return "", "", false, nil
 	}
@@ -170,6 +173,10 @@ func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (st
 		return r.Actor != "" && !isBot(r.ActorBot, r.Actor, m.cfg.LastMile.BotLogins)
 	}
 	last := slices.MaxFunc(fresh, func(a, b github.QueueRemoval) int { return a.At.Compare(b.At) })
+	if mode := h.Autonomy.Merge; !h.MergeRequested && mode != MergeAuto && mode != MergeApproved {
+		h.QueueSeen = last.At // a merge TLM wasn't making: not its to answer
+		return "", "", false, nil
+	}
 	if human(last) {
 		h.QueueSeen = last.At
 		h.MergeRequested, h.Autonomy.Merge = false, MergeOff

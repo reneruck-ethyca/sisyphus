@@ -234,6 +234,8 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 	case len(changed) > 0 || ierr != nil:
 		h.EscalatedBy = r.Trigger
 		m.escalate(ctx, h, reason)
+	case r.Trigger == TriggerQueue:
+		logEvent(h, m.now(), "agent", "queue investigation lost to a restart; re-queueing")
 	default:
 		logEvent(h, m.now(), "agent", reason+"; starting over")
 	}

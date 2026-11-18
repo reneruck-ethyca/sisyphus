@@ -68,6 +68,17 @@ func (m *Manager) unescalate(h *Handoff) {
 	if h.EscalatedBy == TriggerCI || h.EscalatedBy == "" {
 		h.FixedFailures = nil // else the failure that sent it here would escalate again at once
 	}
+	if h.EscalatedBy == TriggerQueue {
+		h.QueueKicks = 0
+	}
+	// Removals while it waited are the human's to have dealt with.
+	if s := h.Snapshot; s != nil {
+		for _, r := range s.QueueRemovals {
+			if r.At.After(h.QueueSeen) {
+				h.QueueSeen = r.At
+			}
+		}
+	}
 	h.EscalatedBy, h.PrevState, h.Error = "", "", ""
 	h.Dirty = nil
 	m.setState(h, StatePROpen, "")

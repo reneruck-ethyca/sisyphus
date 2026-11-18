@@ -460,3 +460,68 @@ func TestManualDequeueStopsMerging(t *testing.T) {
 		t.Errorf("merge %s requested %v kicks %d enqueued %v", h.Autonomy.Merge, h.MergeRequested, h.QueueKicks, gh.Enqueued)
 	}
 }
+
+func TestQueueResumeResetsCap(t *testing.T) {
+	t.Parallel()
+	m, gh, id, p := queued(t, Request{}, nil)
+	m.mu.Lock()
+	m.handoffs[0].QueueKicks = 9
+	m.mu.Unlock()
+	first := github.QueueRemoval{At: time.Now(), Reason: "merge conflict"}
+	removed(gh, p, first)
+	m.tick(context.Background())
+	if h := m.must(t, id); h.State != StateNeedsHuman || h.EscalatedBy != TriggerQueue {
+		t.Fatalf("not escalated: %s by %q", h.State, h.EscalatedBy)
+	}
+	p.QueueRemovals = []github.QueueRemoval{first, {At: first.At.Add(time.Second), Reason: "merge conflict"}} // while it waited for a human
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if _, err := m.Resume(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if h := m.must(t, id); h.QueueKicks != 0 || !h.QueueSeen.Equal(first.At.Add(time.Second)) {
+		t.Fatalf("after resume: kicks %d seen %v", h.QueueKicks, h.QueueSeen)
+	}
+	removed(gh, p, github.QueueRemoval{At: time.Now().Add(time.Minute), Reason: "merge conflict"})
+	m.tick(context.Background())
+	if h := m.must(t, id); h.State == StateNeedsHuman || h.QueueKicks != 1 {
+		t.Errorf("after resume: %s %q kicks %d", h.State, h.Reason, h.QueueKicks)
+	}
+}
+
+func TestQueueRemovalBeforeHandoffIgnored(t *testing.T) {
+	t.Parallel()
+	m, gh, id, p := queued(t, Request{}, nil)
+	removed(gh, p, github.QueueRemoval{At: m.must(t, id).PROpened.Add(-time.Second), Reason: "something odd"})
+	m.tick(context.Background())
+	if h := m.must(t, id); h.QueueKicks != 0 || h.State != StateQueued || h.Run != nil {
+		t.Errorf("kicks %d, handoff %s run %+v", h.QueueKicks, h.State, h.Run)
+	}
+}
+
+func TestQueueRemovalWithoutMergeIntent(t *testing.T) {
+	t.Parallel()
+	tasks := &fakeTasks{result: `{"action":"escalate","summary":"x"}`}
+	m, gh, _, id := opened(t, Request{})
+	m.Tasks = tasks
+	p := mergeable()
+	p.MergeQueue, p.BaseRef = true, "main"
+	at := time.Now()
+	p.QueueRemovals = []github.QueueRemoval{{At: at, Reason: "something odd"}} // a person queued it, GitHub took it out
+	gh.Snapshots[prRef.Key()] = p
+	m.tickWait(t)
+	if h := m.must(t, id); h.QueueKicks != 0 || !h.QueueSeen.Equal(at) || tasks.n() != 0 || h.State == StateNeedsHuman || len(gh.Enqueued) != 0 {
+		t.Errorf("kicks %d seen %v agent runs %d, handoff %s, enqueued %v", h.QueueKicks, h.QueueSeen, tasks.n(), h.State, gh.Enqueued)
+	}
+}
+
+func TestQueueLostRunLogged(t *testing.T) {
+	t.Parallel()
+	m, _, id, _ := queued(t, Request{}, nil)
+	h := m.must(t, id)
+	h.Run = &RunMark{Trigger: TriggerQueue, Started: time.Now(), Head: gittest.Git(t, h.Worktree, "rev-parse", "HEAD")}
+	m.lostRun(context.Background(), &h)
+	if !slices.ContainsFunc(h.Events, func(e Event) bool { return strings.Contains(e.Text, "queue investigation lost to a restart") }) || h.State == StateNeedsHuman {
+		t.Errorf("handoff %s, events %+v", h.State, h.Events)
+	}
+}
