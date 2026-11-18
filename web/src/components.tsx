@@ -41,14 +41,14 @@ export function Md({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-// Meter is the 5-hour budget meter; it turns red past three quarters of the share.
+// BudgetMeter is the 5-hour budget meter; it turns red past three quarters of the share.
 export const BudgetMeter = ({ b, label }: { b: Status["budget"]; label?: string }) =>
   <meter min={0} max={b.share} low={b.share * 0.75} high={b.share * 0.75} optimum={0} value={b.used} aria-label={label} />;
 
 let skills: SkillStatus | undefined;
 export function useSkills(): [SkillStatus | undefined, (s: SkillStatus) => void] {
   const [s, set] = useState(skills);
-  useEffect(() => { if (!skills) get<SkillStatus>("/api/skill").then((v) => set((skills = v))); }, []);
+  useEffect(() => { if (!skills) get<SkillStatus>("/api/skill").then((v) => set((skills = v))).catch(() => {}); }, []); // no badge then
   return [s, (v) => set((skills = v))];
 }
 

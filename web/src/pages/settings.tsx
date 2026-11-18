@@ -54,8 +54,10 @@ export function Settings({ status }: { status?: Status }) {
     setRestarting(true);
     await post("/api/restart").catch(() => {});
     setMsg("Restarting…");
+    const until = Date.now() + 60_000;
     const back = async () => {
       try { if ((await fetch("/api/status")).ok) return location.reload(); } catch { /* not back yet */ }
+      if (Date.now() > until) return setMsg("sisyphus hasn't come back after a minute. Check that it's running, then reload this page.");
       setTimeout(back, 1000);
     };
     setTimeout(back, 1500);

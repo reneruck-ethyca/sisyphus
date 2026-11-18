@@ -66,7 +66,13 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
       return p.docs.some((x) => x.path === want) ? want : p.docs[0]?.path ?? "";
     });
   }).catch(fail);
-  const reload = () => Promise.all([api.threads().then(setThreads), api.pr().then(showPR)]).catch(fail);
+  const reloads = useRef(0); // only the latest reload may land: two quick actions answer out of order
+  const reload = () => {
+    const n = ++reloads.current;
+    return Promise.all([api.threads(), api.pr()]).then(([t, p]) => {
+      if (n === reloads.current) { setThreads(t); showPR(p); }
+    }).catch(fail);
+  };
 
   useEffect(() => { loadPR(); api.threads().then(setThreads).catch(fail); }, [id]);
 
@@ -117,7 +123,7 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
     renderMermaid(root).then(() => {
       setLayout((l) => l + 1);
       if (anchor) scrollToAnchor(anchor, "auto"); // diagrams above the target moved it
-    });
+    }).catch(fail); // mermaid itself didn't load (the app was rebuilt under the tab, say)
   }, [file, pr?.url]);
 
   // Change bars: since your review, or everything the PR changed. In an added file every block is new, so
