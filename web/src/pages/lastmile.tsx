@@ -36,11 +36,12 @@ const Row = (v: HandoffView) => <li key={v.id} class={v.depth ? `depth${v.depth}
   <span class="grow"><a class="ttl" href={`/lastmile/${v.id}`}>{v.title}</a>
     <span class="facts"><span class="id">{v.id}</span>{v.pr_url && <> · <Ext href={v.pr_url}>{base(v.repo)} #{v.pr_number}</Ext></>}
       {v.waiting_on && ` · waiting on ${v.waiting_on}`}{v.reason && ` · ${v.reason}`}{v.prev_state && ` · was ${v.prev_state}`}</span>
-    {v.error && <span class="err">{v.error}</span>}{v.warning && <span class="facts">{v.warning}</span>}</span>
+    {v.error && <span class="err">{v.error}</span>}{v.warning && <span class="facts">{v.warning}</span>}
+    {!v.over && <span class="merge"><MergeControls v={v} /></span>}</span>
   <span class="rounds"><Rounds v={v} /></span>
   <span class="rvs"><Reviewers v={v} /></span>
   <span class="t"><Ago t={v.updated} /></span>
-  <span class="acts"><Actions v={v} /></span></li>;
+  <span class="acts"><Actions v={v} merge={false} /></span></li>;
 
 export function Rounds({ v }: { v: HandoffView }) {
   const rounds = Object.entries(v.fix_rounds ?? {}).sort(([a], [b]) => a.localeCompare(b));
@@ -83,14 +84,23 @@ function MergeMode({ v, busy, act }: { v: HandoffView; busy: string; act: (url: 
     {modes.map(([m, l]) => <option key={m} value={m}>{l}</option>)}</select></label>;
 }
 
-export function Actions({ v }: { v: HandoffView }) {
+export function MergeControls({ v }: { v: HandoffView }) {
   const [busy, act] = useAct();
-  const id = encodeURIComponent(v.id), resume = `/api/handoffs/${id}/resume`, cancel = `/api/handoffs/${id}/cancel`, merge = `/api/handoffs/${id}/merge`;
+  const merge = `/api/handoffs/${encodeURIComponent(v.id)}/merge`;
   return <>
-    {v.state === "needs-human" && <><button class="btn small" disabled={!!busy} onClick={() => act(resume)}>Resume</button>{" "}</>}
     {v.merge_requested && !v.over && <><span class="muted">merge pending</span>{" "}</>}
     {v.can_merge && !v.merge_requested && v.state !== "queued" && <><button class="btn small" disabled={!!busy}
       onClick={() => confirm(`Squash and merge ${v.repo}#${v.pr_number}?`) && act(merge)}>Squash and merge</button>{" "}</>}
-    {!v.over && <><MergeMode v={v} busy={busy} act={act} />{" "}<button class="btn quiet small" disabled={!!busy} onClick={() => act(cancel)}>Cancel</button></>}
+    {!v.over && <MergeMode v={v} busy={busy} act={act} />}
+  </>;
+}
+
+export function Actions({ v, merge = true }: { v: HandoffView; merge?: boolean }) {
+  const [busy, act] = useAct();
+  const id = encodeURIComponent(v.id), resume = `/api/handoffs/${id}/resume`, cancel = `/api/handoffs/${id}/cancel`;
+  return <>
+    {v.state === "needs-human" && <><button class="btn small" disabled={!!busy} onClick={() => act(resume)}>Resume</button>{" "}</>}
+    {merge && <MergeControls v={v} />}{" "}
+    {!v.over && <button class="btn quiet small" disabled={!!busy} onClick={() => act(cancel)}>Cancel</button>}
   </>;
 }
