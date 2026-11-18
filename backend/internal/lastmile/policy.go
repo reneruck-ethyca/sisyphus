@@ -55,11 +55,13 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 			sig.RiskyPaths = append(sig.RiskyPaths, f)
 		}
 	}
+	logged := 0 // handoffs from before AgentCommits only have their events
 	for _, e := range h.Events {
 		if e.Kind == "commit" {
-			sig.AgentCommits++
+			logged++
 		}
 	}
+	sig.AgentCommits = max(h.AgentCommits, logged)
 	if !h.ReadyAt.IsZero() {
 		sig.TimeInReviewSec = int64(now.Sub(h.ReadyAt).Seconds())
 	}

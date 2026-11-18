@@ -236,3 +236,14 @@ func TestShadowOutcome(t *testing.T) {
 		t.Errorf("outcome = %v", o)
 	}
 }
+
+func TestAgentCommitsOutlastTheEventCap(t *testing.T) {
+	var h Handoff
+	logEvent(&h, time.Time{}, "commit", "pushed a")
+	for range maxEvents {
+		logEvent(&h, time.Time{}, "state", "x")
+	}
+	if g := evaluate(h, okSnap(), policyCfg(), time.Now()).Signals; g.AgentCommits != 1 {
+		t.Errorf("AgentCommits = %d, want 1 though the event fell off the log", g.AgentCommits)
+	}
+}

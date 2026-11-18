@@ -124,6 +124,7 @@ type Handoff struct {
 	// LastBodyWritten is the PR body TLM last wrote, to tell a human's edit from its own (M2).
 	LastBodyWritten string         `json:"last_body_written,omitempty"`
 	FixRounds       map[string]int `json:"fix_rounds,omitempty"`     // agent rounds used so far, by trigger (Trigger*)
+	AgentCommits    int            `json:"agent_commits,omitempty"`  // "commit" events ever logged: Events keeps only the last maxEvents
 	EscalatedBy     string         `json:"escalated_by,omitempty"`   // the trigger of the last needs-human, for Resume
 	FixedFailures   []string       `json:"fixed_failures,omitempty"` // fingerprints a fix round was spent on
 	FlakeHead       string         `json:"flake_head,omitempty"`     // the head SHA FlakeReruns counts for
@@ -186,6 +187,9 @@ const (
 // logEvent appends to h's log, dropping the oldest beyond maxEvents. It builds a
 // new slice: handoffs are shared by copy.
 func logEvent(h *Handoff, t time.Time, kind, text string) {
+	if kind == "commit" {
+		h.AgentCommits++
+	}
 	ev := append(slices.Clone(h.Events), Event{Time: t, Kind: kind, Text: text})
 	if len(ev) > maxEvents {
 		ev = ev[len(ev)-maxEvents:]
