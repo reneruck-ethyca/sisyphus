@@ -91,10 +91,9 @@ var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, State
 // decision to GitHub auto-merge, which TLM turns off again when the mode goes off.
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
 	mode := h.Autonomy.Merge
-	if h.AutoMergeSet && !s.AutoMerge && m.now().Sub(h.AutoMergeAt) < enqueueGrace {
-		s.AutoMerge = true // GitHub may not show the auto-merge TLM just enabled for a tick or two
-	}
-	if h.AutoMergeSet && (mode == MergeAuto || mode == MergeApproved) && !s.AutoMerge &&
+	s.AutoMerge = m.autoMergeOn(*h, s)
+	// GitHub may clear the auto-merge request as it moves the PR into the queue.
+	if h.AutoMergeSet && (mode == MergeAuto || mode == MergeApproved) && !s.AutoMerge && !s.InQueue &&
 		s.Head == h.AutoMergeHead && h.QueueKicks == h.AutoMergeKicks {
 		// GitHub drops auto-merge on a push or a removal from the queue; with neither, a person turned it off.
 		h.Autonomy.Merge, mode = MergeOff, MergeOff
@@ -106,7 +105,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved) &&
 		s.ReviewDecision != "" && (s.AutoMerge || !slices.Contains(mergeableNow, s.MergeState))
 	switch {
-	case native && !s.Draft && !s.AutoMerge:
+	case native && !s.Draft && !s.AutoMerge && !s.InQueue:
 		switch err := m.GH.EnableAutoMerge(ctx, s.NodeID); {
 		case err == nil:
 			h.AutoMergeSet, h.AutoMergeHead, h.AutoMergeKicks, h.AutoMergeAt = true, s.Head, h.QueueKicks, m.now()
@@ -175,6 +174,12 @@ func (m *Manager) refused(ctx context.Context, h *Handoff, err error, state, rea
 	return StateNeedsHuman, why, nil
 }
 
+// autoMergeOn says GitHub auto-merge is on for the PR, or TLM enabled it a
+// moment ago and GitHub may not show it yet.
+func (m *Manager) autoMergeOn(h Handoff, s Snapshot) bool {
+	return s.AutoMerge || (h.AutoMergeSet && m.now().Sub(h.AutoMergeAt) < enqueueGrace)
+}
+
 // enqueuing says TLM added the PR to the merge queue a moment ago, and GitHub
 // may not show it there yet.
 func (m *Manager) enqueuing(h Handoff) bool {
@@ -190,7 +195,7 @@ func (m *Manager) letGo(ctx context.Context, h *Handoff) error {
 		return nil
 	}
 	var errs []error
-	if h.AutoMergeSet && s.AutoMerge {
+	if h.AutoMergeSet && m.autoMergeOn(*h, *s) {
 		if err := m.GH.DisableAutoMerge(ctx, s.NodeID); err != nil {
 			errs = append(errs, err)
 		} else {
@@ -344,6 +349,10 @@ func (m *Manager) removeWorktree(ctx context.Context, h Handoff) {
 	}
 	if st != "" {
 		warn("worktree kept: it has uncommitted changes")
+		return
+	}
+	if branch, err := proc.Run(ctx, h.Worktree, "git", "symbolic-ref", "--short", "HEAD"); err != nil || branch != h.Branch {
+		warn("worktree kept: it is not on " + h.Branch)
 		return
 	}
 	dirs, err := proc.Run(ctx, h.Worktree, "git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")

@@ -883,3 +883,68 @@ func TestAutoMergeGraceAfterEnabling(t *testing.T) {
 		t.Errorf("after the grace: merge %s set %v auto-merged %v", h.Autonomy.Merge, h.AutoMergeSet, gh.AutoMerged)
 	}
 }
+
+func TestLettingGoInsideAutoMergeGrace(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	lagging := func(t *testing.T) (*Manager, *FakeGitHub, string) {
+		m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+		p := mergeable()
+		p.AutoMergeAllowed = true
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(ctx)
+		m.tick(ctx) // GitHub doesn't show it on yet
+		return m, gh, id
+	}
+
+	m, gh, id := lagging(t)
+	if _, err := m.SetMerge(id, MergeOff); err != nil {
+		t.Fatal(err)
+	}
+	m.tick(ctx)
+	if !slices.Equal(gh.AutoMergeOff, []string{"PR_7"}) {
+		t.Errorf("merge off: auto-merge off %v", gh.AutoMergeOff)
+	}
+
+	m, gh, id = lagging(t)
+	if _, err := m.Cancel(ctx, id); err != nil || !slices.Equal(gh.AutoMergeOff, []string{"PR_7"}) {
+		t.Errorf("cancel: %v auto-merge off %v", err, gh.AutoMergeOff)
+	}
+
+	m, gh, id = lagging(t)
+	h := m.must(t, id)
+	m.escalate(ctx, &h, "x")
+	if !slices.Equal(gh.AutoMergeOff, []string{"PR_7"}) {
+		t.Errorf("escalate: auto-merge off %v", gh.AutoMergeOff)
+	}
+}
+
+func TestAutoMergeOffInQueueIsGitHubs(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.AutoMergeAllowed, p.MergeQueue = true, true
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	m.now = func() time.Time { return time.Now().Add(3 * time.Minute) }
+	p.InQueue = true // GitHub may clear the auto-merge request as it queues the PR
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); h.Autonomy.Merge != MergeApproved || !h.AutoMergeSet || len(gh.AutoMerged) != 1 || h.State != StateQueued {
+		t.Errorf("merge %s set %v auto-merged %v, handoff %s", h.Autonomy.Merge, h.AutoMergeSet, gh.AutoMerged, h.State)
+	}
+}
+
+func TestCleanupKeepsWorktreeOnAnotherBranch(t *testing.T) {
+	t.Parallel()
+	m, h, calls := mergedHandoff(t)
+	h.Branch = "feature/other"
+	m.handoffs = []Handoff{h}
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if len(*calls) != 0 {
+		t.Errorf("removed: %v", *calls)
+	}
+	if got := m.must(t, "h1"); got.Warning != "worktree kept: it is not on feature/other" {
+		t.Errorf("warning %q", got.Warning)
+	}
+}
