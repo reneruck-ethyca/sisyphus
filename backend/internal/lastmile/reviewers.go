@@ -86,10 +86,11 @@ func (m *Manager) rosterPick(h Handoff, author string, have []string) []string {
 // is neither requested now nor has reviewed. They are never requested again.
 func noteRemoved(h *Handoff, p github.PRSnapshot) {
 	for _, u := range h.Requested {
-		if slices.Contains(p.RequestedUsers, u) || slices.Contains(h.Removed, u) {
+		is := func(v string) bool { return strings.EqualFold(v, u) } // logins are case-insensitive
+		if slices.ContainsFunc(p.RequestedUsers, is) || slices.ContainsFunc(h.Removed, is) {
 			continue
 		}
-		if slices.ContainsFunc(p.Reviews, func(r github.SnapReview) bool { return r.User == u }) {
+		if slices.ContainsFunc(p.Reviews, func(r github.SnapReview) bool { return is(r.User) }) {
 			continue // a review ends a request; nobody removed them
 		}
 		h.Removed = append(slices.Clone(h.Removed), u)

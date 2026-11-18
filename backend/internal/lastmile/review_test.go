@@ -540,3 +540,11 @@ func TestNestedReposAndDirectoryEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestNoteRemovedIgnoresLoginCase(t *testing.T) {
+	h := Handoff{Requested: []string{"Alice", "Bob"}}
+	noteRemoved(&h, github.PRSnapshot{RequestedUsers: []string{"alice"}, Reviews: []github.SnapReview{{User: "bob"}}})
+	if len(h.Removed) != 0 {
+		t.Errorf("removed = %v; GitHub only spelled them differently", h.Removed)
+	}
+}
