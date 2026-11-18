@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -153,5 +154,20 @@ func TestTLMInstall(t *testing.T) {
 	run(other + "\ny\nn\n")
 	if got, _ := os.Readlink(filepath.Join(other, "tlm")); got != self {
 		t.Errorf("replaced link = %q", got)
+	}
+}
+
+func TestTLMWaitRidesOutAnOutage(t *testing.T) {
+	defer func(p, o time.Duration) { waitPoll, waitOutage = p, o }(waitPoll, waitOutage)
+	waitPoll, waitOutage = 10*time.Millisecond, 50*time.Millisecond
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close() // nothing answers there
+	code, _, stderr := tlm(t, "wait", "x", "--addr="+addr)
+	if code != 1 || !strings.Contains(stderr, "trying again") || !strings.Contains(stderr, "is sisyphus running?") {
+		t.Errorf("wait = %d %q", code, stderr)
 	}
 }

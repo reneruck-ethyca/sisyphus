@@ -34,6 +34,14 @@ const tlmUsage = `usage: tlm handoff --base <branch> [--worktree dir] [--title t
 // waitPoll is how often `tlm wait` asks; a var for tests.
 var waitPoll = 15 * time.Second
 
+// waitOutage is how long `tlm wait` rides out sisyphus being unreachable (a restart); a var for tests.
+var waitOutage = 10 * time.Minute
+
+// client bounds every call: a hung sisyphus mustn't hang a script.
+var client = &http.Client{Timeout: 2 * time.Minute}
+
+var errUnreachable = errors.New("is sisyphus running?")
+
 // runTLM is the `tlm` command: a thin client of the running app's API. It
 // returns the exit status.
 func runTLM(args []string, stdout, stderr io.Writer) int {
@@ -231,11 +239,23 @@ func tlmWait(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	states := commaList(*until)
+	var down time.Time // since when sisyphus hasn't answered
 	for {
 		var h lastmile.Handoff
 		if err := call(http.MethodGet, apiBase(*addr)+"/api/handoffs/"+id, nil, &h); err != nil {
-			return err
+			if !errors.Is(err, errUnreachable) {
+				return err
+			}
+			if down.IsZero() {
+				down = time.Now()
+				_, _ = fmt.Fprintf(stderr, "tlm wait: %v; trying again for %s\n", err, waitOutage)
+			} else if time.Since(down) > waitOutage {
+				return err
+			}
+			time.Sleep(waitPoll)
+			continue
 		}
+		down = time.Time{}
 		if slices.Contains(states, h.State) || lastmile.Terminal(h.State) {
 			_, _ = fmt.Fprintln(stdout, cmp.Or(h.State, "?"))
 			return nil
@@ -270,9 +290,9 @@ func call(method, url string, body []byte, out any) error {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("is sisyphus running? %w", err)
+		return fmt.Errorf("%w %w", errUnreachable, err)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
