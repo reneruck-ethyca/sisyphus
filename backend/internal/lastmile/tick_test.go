@@ -105,7 +105,7 @@ func TestOpenPR(t *testing.T) {
 	if want := (Cursor{Threads: map[string]int64{"T1": 8}, Reviews: 4, Comments: 6}); !reflect.DeepEqual(got.Cursor, want) {
 		t.Errorf("cursor = %+v, want %+v", got.Cursor, want)
 	}
-	if box := buildInbox(gh.InboxData, got, nil); len(box.New) != 0 {
+	if box := buildInbox(gh.InboxData, got, nil, ""); len(box.New) != 0 {
 		t.Errorf("new after adoption = %+v", box.New)
 	}
 }

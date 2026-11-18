@@ -20,7 +20,7 @@ func okSnap() Snapshot {
 }
 
 func policyCfg() config.LastMile {
-	return config.LastMile{MaxMergeLines: 400, RiskyPaths: []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"}}
+	return config.LastMile{MigrationPaths: []string{"**/migrations/**", "**/alembic/versions/**"}, RiskyPaths: []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"}}
 }
 
 func TestEvaluate(t *testing.T) {
@@ -39,17 +39,12 @@ func TestEvaluate(t *testing.T) {
 		{"review required", func(s *Snapshot, _ *config.LastMile) { s.ReviewDecision = "REVIEW_REQUIRED" }, "review required"},
 		{"ci red", func(s *Snapshot, _ *config.LastMile) { s.CI = CIRed }, "checks not green"},
 		{"ci pending", func(s *Snapshot, _ *config.LastMile) { s.CI = CIPending }, "checks not green"},
-		{"unresolved", func(s *Snapshot, _ *config.LastMile) { s.Unresolved = 2 }, "2 unresolved"},
-		{"behind", func(s *Snapshot, _ *config.LastMile) { s.Behind = 1 }, "base not up to date"},
-		{"merge state behind", func(s *Snapshot, _ *config.LastMile) { s.MergeState = "BEHIND" }, "base not up to date"},
-		{"merge state dirty", func(s *Snapshot, _ *config.LastMile) { s.MergeState = "DIRTY" }, "base not up to date"},
+		{"unanswered", func(s *Snapshot, _ *config.LastMile) { s.Unanswered = 2 }, "2 unanswered"},
 		{"migrations", func(s *Snapshot, _ *config.LastMile) { s.Files = append(s.Files, "app/db/migrations/0001.py") }, "risky paths: app/db/migrations/0001.py"},
 		{"workflow", func(s *Snapshot, _ *config.LastMile) { s.Files = []string{".github/workflows/ci.yml"} }, "risky paths"},
 		{"terraform", func(s *Snapshot, _ *config.LastMile) { s.Files = []string{"deploy/x.tf"} }, "risky paths"},
 		{"dockerfile", func(s *Snapshot, _ *config.LastMile) { s.Files = []string{"svc/Dockerfile.dev"} }, "risky paths"},
 		{"risky off", func(s *Snapshot, c *config.LastMile) { s.Files, c.RiskyPaths = []string{"infra/x"}, nil }, ""},
-		{"at the limit", func(s *Snapshot, _ *config.LastMile) { s.Additions, s.Deletions = 300, 100 }, ""},
-		{"too big", func(s *Snapshot, _ *config.LastMile) { s.Additions, s.Deletions = 300, 101 }, "exceeds 400"},
 		{"freeze", func(_ *Snapshot, c *config.LastMile) {
 			c.MergeFreeze = []config.FreezeWindow{{Start: "11:00", End: "13:00"}}
 		}, "merge freeze"},
@@ -111,10 +106,10 @@ func TestSignals(t *testing.T) {
 		Events: []Event{{Kind: "commit"}, {Kind: "reply"}, {Kind: "commit"}}}
 	s := okSnap()
 	s.Approvals = []Approval{{User: "carol"}, {User: "ethycabot", Bot: true, Stale: true}}
-	s.Unresolved, s.Behind = 1, 2
+	s.Unresolved, s.Unanswered, s.Behind = 1, 1, 2
 	g := evaluate(h, s, policyCfg(), now).Signals
 	if g.Additions != 10 || g.Deletions != 5 || g.Files != 2 || g.FixRounds[TriggerCI] != 2 || g.FlakeReruns != 3 || g.AgentCommits != 2 ||
-		g.TimeInReviewSec != 90 || g.Unresolved != 1 || g.Behind != 2 || !g.ApprovalsStale ||
+		g.TimeInReviewSec != 90 || g.Unresolved != 1 || g.Unanswered != 1 || g.Behind != 2 || !g.ApprovalsStale ||
 		!slices.Equal(g.Approvers, []Approver{{"carol", false}, {"ethycabot", true}}) {
 		t.Errorf("signals = %+v", g)
 	}
@@ -252,5 +247,49 @@ func TestAgentCommitsOutlastTheEventCap(t *testing.T) {
 	}
 	if g := evaluate(h, okSnap(), policyCfg(), time.Now()).Signals; g.AgentCommits != 1 {
 		t.Errorf("AgentCommits = %d, want 1 though the event fell off the log", g.AgentCommits)
+	}
+}
+
+func TestEvaluateAnsweredThreadsDontBlock(t *testing.T) {
+	t.Parallel()
+	s := okSnap()
+	s.Unresolved, s.Unanswered = 2, 0
+	if v := evaluate(Handoff{}, s, policyCfg(), time.Now()); !v.WouldMerge {
+		t.Errorf("answered threads blocked: %v", v.Blockers)
+	}
+	s.Unanswered = 1
+	if v := evaluate(Handoff{}, s, policyCfg(), time.Now()); !slices.Contains(v.Blockers, "1 unanswered threads") {
+		t.Errorf("blockers = %v", v.Blockers)
+	}
+}
+
+func TestEvaluateBehindWithoutMigrations(t *testing.T) {
+	t.Parallel()
+	has := func(s Snapshot, want string) bool {
+		return slices.Contains(evaluate(Handoff{}, s, policyCfg(), time.Now()).Blockers, want)
+	}
+	s := okSnap()
+	s.Behind, s.MergeState, s.Files = 3, "BEHIND", []string{"src/a.py"}
+	if v := evaluate(Handoff{}, s, policyCfg(), time.Now()); !v.WouldMerge {
+		t.Errorf("behind without migrations blocked: %v", v.Blockers)
+	}
+	s.Files = []string{"src/fides/api/alembic/versions/x.py"}
+	if !has(s, "base not up to date (PR has migrations)") {
+		t.Error("behind with migrations not blocked")
+	}
+	for _, f := range [][]string{{"src/a.py"}, {"src/fides/api/alembic/versions/x.py"}} {
+		s.MergeState, s.Files = "DIRTY", f
+		if !has(s, "conflicts with base") {
+			t.Errorf("dirty with %v: no conflict blocker", f)
+		}
+	}
+}
+
+func TestEvaluateNoDiffSizeRule(t *testing.T) {
+	t.Parallel()
+	s := okSnap()
+	s.Additions = 100000
+	if v := evaluate(Handoff{}, s, policyCfg(), time.Now()); !v.WouldMerge {
+		t.Errorf("size blocked: %v", v.Blockers)
 	}
 }

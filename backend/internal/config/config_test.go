@@ -258,7 +258,15 @@ func TestLoadMergeFreeze(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if err := load(`{"lastmile":{"max_merge_lines":0}}`); err == nil {
-		t.Error("max_merge_lines 0 accepted")
+}
+
+func TestConfigIgnoresMaxMergeLines(t *testing.T) {
+	t.Parallel()
+	p := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(p, []byte(`{"lastmile":{"max_merge_lines":400}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err != nil {
+		t.Fatal(err)
 	}
 }

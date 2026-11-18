@@ -73,7 +73,7 @@ func TestBuildInbox(t *testing.T) {
 		Issue:   []github.InboxComment{cm(20, "bob", "seen"), cm(21, "sisyphus", "summary"), cm(105, "me", "tlm")},
 	}
 	h.Posted = append(h.Posted, 405, 406)
-	box := buildInbox(in, h, []string{"ethycabot", "sisyphus"})
+	box := buildInbox(in, h, []string{"ethycabot", "sisyphus"}, "me")
 	var ids []string
 	for _, it := range box.New {
 		ids = append(ids, it.ID)
@@ -110,7 +110,7 @@ func TestBuildInbox(t *testing.T) {
 	// With that cursor and the replies known, nothing is new.
 	h.Cursor = c
 	h.Cursor = advanceCursor(h.Cursor, box.New[1:2])
-	if box2 := buildInbox(in, h, []string{"ethycabot", "sisyphus"}); len(box2.New) != 0 {
+	if box2 := buildInbox(in, h, []string{"ethycabot", "sisyphus"}, "me"); len(box2.New) != 0 {
 		t.Errorf("still new: %+v", box2.New)
 	}
 }
@@ -584,5 +584,20 @@ func TestClipAndCountLines(t *testing.T) {
 		if n, bin := countLines([]byte(c.in)); n != c.n || bin != c.binary {
 			t.Errorf("countLines(%q) = %d, %v", c.in, n, bin)
 		}
+	}
+}
+
+func TestInboxUnanswered(t *testing.T) {
+	t.Parallel()
+	h := Handoff{Posted: []int64{501}}
+	in := github.Inbox{Threads: []github.ReviewThread{
+		th("A", cm(100, "alice", "q"), cm(101, "me", "by the PR author")),
+		th("B", cm(200, "alice", "q"), cm(501, "other", "posted by TLM")),
+		th("C", cm(300, "me", "mine"), cm(301, "alice", "reviewer last")),
+		{ID: "D", Resolved: true, Comments: []github.InboxComment{cm(400, "alice", "r")}},
+	}}
+	box := buildInbox(in, h, nil, "me")
+	if box.Unresolved != 3 || box.Unanswered != 1 {
+		t.Errorf("unresolved = %d, unanswered = %d", box.Unresolved, box.Unanswered)
 	}
 }

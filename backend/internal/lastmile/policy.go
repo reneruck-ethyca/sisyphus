@@ -28,6 +28,7 @@ type Signals struct {
 	FlakeReruns     int            `json:"flake_reruns"`       // over all heads
 	AgentCommits    int            `json:"agent_commits"`
 	Unresolved      int            `json:"unresolved"`
+	Unanswered      int            `json:"unanswered"`
 	Behind          int            `json:"behind"`
 	ApprovalsStale  bool           `json:"approvals_stale"`
 }
@@ -46,7 +47,7 @@ type Verdict struct {
 // the only clock.
 func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict {
 	sig := Signals{Additions: s.Additions, Deletions: s.Deletions, Files: len(s.Files), RiskyPaths: []string{},
-		FixRounds: map[string]int{}, Approvers: []Approver{}, FlakeReruns: h.FlakeTotal, Unresolved: s.Unresolved, Behind: s.Behind}
+		FixRounds: map[string]int{}, Approvers: []Approver{}, FlakeReruns: h.FlakeTotal, Unresolved: s.Unresolved, Unanswered: s.Unanswered, Behind: s.Behind}
 	for k, v := range h.FixRounds {
 		sig.FixRounds[k] = v
 	}
@@ -87,17 +88,19 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 	if s.CI != CIGreen {
 		b = append(b, "checks not green ("+s.CI+")")
 	}
-	if s.Unresolved > 0 {
-		b = append(b, fmt.Sprintf("%d unresolved threads", s.Unresolved))
+	if s.Unanswered > 0 {
+		b = append(b, fmt.Sprintf("%d unanswered threads", s.Unanswered))
 	}
-	if s.Behind > 0 || s.MergeState == "BEHIND" || s.MergeState == "DIRTY" {
-		b = append(b, "base not up to date")
+	switch {
+	case s.MergeState == "DIRTY":
+		b = append(b, "conflicts with base")
+	case (s.Behind > 0 || s.MergeState == "BEHIND") && slices.ContainsFunc(s.Files, func(f string) bool {
+		return slices.ContainsFunc(cfg.MigrationPaths, func(g string) bool { return globMatch(g, f) })
+	}):
+		b = append(b, "base not up to date (PR has migrations)")
 	}
 	if len(sig.RiskyPaths) > 0 {
 		b = append(b, "risky paths: "+strings.Join(sig.RiskyPaths, ", "))
-	}
-	if n := s.Additions + s.Deletions; n > cfg.MaxMergeLines {
-		b = append(b, fmt.Sprintf("diff of %d lines exceeds %d", n, cfg.MaxMergeLines))
 	}
 	if slices.ContainsFunc(cfg.MergeFreeze, func(w config.FreezeWindow) bool { return w.Active(now) }) {
 		b = append(b, "merge freeze")

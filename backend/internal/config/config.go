@@ -71,7 +71,7 @@ type LastMile struct {
 	AllowPaths      []string             `json:"allow_paths"`       // globs an agent may change although the denylist names them
 	BotLogins       []string             `json:"bot_logins"`        // user accounts that act as bots (their feedback counts as bot feedback)
 	RiskyPaths      []string             `json:"risky_paths"`       // globs: a PR touching one would not be merged by TLM
-	MaxMergeLines   int                  `json:"max_merge_lines"`   // additions+deletions above this would not be merged by TLM
+	MigrationPaths  []string             `json:"migration_paths"`   // globs: a PR touching one must be up to date with its base to merge
 	MergeFreeze     []FreezeWindow       `json:"merge_freeze"`      // windows in which TLM would not merge
 }
 
@@ -153,8 +153,8 @@ func (l LastMile) check() error {
 	if l.Interval.Duration <= 0 || l.MaxFixRounds < 1 || l.NeedsHumanLabel == "" {
 		return errors.New("needs a positive interval, max_fix_rounds >= 1 and a needs_human_label")
 	}
-	if l.FlakeReruns < 0 || l.MaxDiffLines < 1 || l.MaxMergeLines < 1 {
-		return errors.New("needs flake_reruns >= 0, max_diff_lines >= 1 and max_merge_lines >= 1")
+	if l.FlakeReruns < 0 || l.MaxDiffLines < 1 {
+		return errors.New("needs flake_reruns >= 0, and max_diff_lines >= 1")
 	}
 	for i, w := range l.MergeFreeze {
 		if _, _, _, _, _, err := w.parse(); err != nil {
@@ -435,7 +435,7 @@ func defaults() Config {
 			NeedsHumanLabel: "tlm:needs-human",
 			FlakeReruns:     2,
 			MaxDiffLines:    400,
-			MaxMergeLines:   400,
+			MigrationPaths:  []string{"**/migrations/**", "**/alembic/versions/**"},
 			RiskyPaths:      []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"},
 			BotLogins:       []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},

@@ -110,12 +110,13 @@ func isBot(gh bool, login string, logins []string) bool {
 type Inbox struct {
 	New        []Item         // items with something new, threads first
 	Unresolved int            // review threads not resolved
+	Unanswered int            // unresolved threads whose last comment is neither the PR author's nor TLM's
 	BotReplies map[string]int // TLM's replies in each bot-started thread
 }
 
 // buildInbox marks authors, drops what TLM posted itself from "new", and picks
 // the items with something new since the cursor. Resolved threads are history.
-func buildInbox(in github.Inbox, h Handoff, botLogins []string) Inbox {
+func buildInbox(in github.Inbox, h Handoff, botLogins []string, author string) Inbox {
 	own := func(id int64) bool { return slices.Contains(h.Posted, id) }
 	conv := func(c github.InboxComment, cursor int64) Comment {
 		tlm := own(c.ID)
@@ -128,6 +129,9 @@ func buildInbox(in github.Inbox, h Handoff, botLogins []string) Inbox {
 			continue
 		}
 		out.Unresolved++
+		if last := t.Comments[len(t.Comments)-1]; last.Author != author && !own(last.ID) {
+			out.Unanswered++
+		}
 		it := Item{ID: t.ID, Kind: KindThread, Path: t.Path, Line: t.Line, Outdated: t.Outdated}
 		for _, c := range t.Comments {
 			it.Comments = append(it.Comments, conv(c, h.Cursor.Threads[t.ID]))

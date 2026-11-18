@@ -23,8 +23,8 @@ func (m *Manager) feedback(ctx context.Context, h *Handoff, p github.PRSnapshot,
 	if err != nil {
 		return state, reason, fmt.Errorf("reading reviews: %w", err)
 	}
-	box := buildInbox(in, *h, m.cfg.LastMile.BotLogins)
-	s.Unresolved, s.NewFeedback, s.BotReplies = box.Unresolved, box.Refs(), box.BotReplies
+	box := buildInbox(in, *h, m.cfg.LastMile.BotLogins, s.Author)
+	s.Unresolved, s.Unanswered, s.NewFeedback, s.BotReplies = box.Unresolved, box.Unanswered, box.Refs(), box.BotReplies
 	if len(box.New) == 0 {
 		return state, reason, nil
 	}

@@ -50,6 +50,7 @@ type Snapshot struct {
 	Failures       []Failure      `json:"failures,omitempty"` // the failed checks, when CI is red
 
 	Unresolved  int            `json:"unresolved"`             // review threads not resolved
+	Unanswered  int            `json:"unanswered"`             // of those, the ones whose last comment is a reviewer's
 	NewFeedback []FeedbackRef  `json:"new_feedback,omitempty"` // items new since the cursor
 	BotReplies  map[string]int `json:"bot_replies,omitempty"`  // TLM's replies per bot thread, by thread id
 	BodyEdited  bool           `json:"body_edited"`            // a human changed the PR body since TLM wrote it
