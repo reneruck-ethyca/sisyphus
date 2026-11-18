@@ -391,8 +391,8 @@ func parse(path string, b []byte) (Config, error) {
 			cfg.Review.Agent.Model = raw.Review.CodexModel
 		}
 	}
-	if cfg.Interval.Duration <= 0 {
-		return cfg, fmt.Errorf("config %s: interval must be positive", path)
+	if cfg.Interval.Duration <= 0 || cfg.HookTimeout.Duration <= 0 {
+		return cfg, fmt.Errorf("config %s: interval and hook_timeout must be positive", path)
 	}
 	if err := cfg.Review.check(); err != nil {
 		return cfg, fmt.Errorf("config %s: review: %w", path, err)

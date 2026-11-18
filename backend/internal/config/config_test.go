@@ -84,11 +84,13 @@ func TestLoadConfigOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadConfigBadInterval(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "c.json")
-	os.WriteFile(p, []byte(`{"interval":"soon"}`), 0o644)
-	if _, err := Load(p); err == nil {
-		t.Fatal("want error")
+func TestLoadConfigBadDurations(t *testing.T) {
+	for _, c := range []string{`{"interval":"soon"}`, `{"interval":"0s"}`, `{"hook_timeout":"0s"}`, `{"hook_timeout":"-1m"}`} {
+		p := filepath.Join(t.TempDir(), "c.json")
+		os.WriteFile(p, []byte(c), 0o644)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: want error", c)
+		}
 	}
 }
 
