@@ -263,3 +263,25 @@ func TestQueuedKeepsWorkStates(t *testing.T) {
 		t.Errorf("ci-running in queue = %s", got)
 	}
 }
+
+func TestMergeNativeCleanMergesItself(t *testing.T) {
+	t.Parallel()
+	m, gh, _, _ := opened(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.AutoMergeAllowed, p.MergeState = true, "CLEAN"
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) || len(gh.AutoMerged) != 0 {
+		t.Errorf("CLEAN: merged %v auto-merged %v", gh.Merged, gh.AutoMerged)
+	}
+
+	// GitHub's refusal says the same: TLM merges.
+	m, gh, _, _ = opened(t, Request{Autonomy: "merge=approved"})
+	p.MergeState = "BLOCKED"
+	gh.Snapshots[prRef.Key()] = p
+	gh.AutoMergeErr = errors.New(`enablePullRequestAutoMerge: Pull request is in clean status`)
+	m.tick(context.Background())
+	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
+		t.Errorf("clean-status error: merged %v", gh.Merged)
+	}
+}

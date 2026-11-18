@@ -82,14 +82,20 @@ var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, State
 // decision to GitHub auto-merge, which TLM turns off again when the mode goes off.
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
 	mode := h.Autonomy.Merge
-	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved)
+	// GitHub won't enable auto-merge on a PR that is already mergeable ("clean"): TLM merges that one itself.
+	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved) &&
+		(s.AutoMerge || s.MergeState != "CLEAN")
 	switch {
 	case native && !s.Draft && !s.AutoMerge:
-		if err := m.GH.EnableAutoMerge(ctx, s.NodeID); err != nil {
+		switch err := m.GH.EnableAutoMerge(ctx, s.NodeID); {
+		case err == nil:
+			h.AutoMergeSet = true
+			logEvent(h, m.now(), "merge", "GitHub auto-merge enabled")
+		case strings.Contains(err.Error(), "clean status"):
+			native = false
+		default:
 			return state, reason, err
 		}
-		h.AutoMergeSet = true
-		logEvent(h, m.now(), "merge", "GitHub auto-merge enabled")
 	case h.AutoMergeSet && !h.MergeRequested && (mode == MergeOff || mode == MergeShadow):
 		if s.AutoMerge {
 			if err := m.GH.DisableAutoMerge(ctx, s.NodeID); err != nil {

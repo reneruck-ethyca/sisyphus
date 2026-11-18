@@ -1,6 +1,7 @@
 package lastmile
 
 import (
+	"cmp"
 	"context"
 
 	"github.com/reneruck/sisyphus/internal/github"
@@ -47,6 +48,7 @@ type FakeGitHub struct {
 	Enqueued     []string         // node ids Enqueue was asked for
 	AutoMerged   []string         // node ids EnableAutoMerge was asked for
 	AutoMergeOff []string         // node ids DisableAutoMerge was asked for
+	AutoMergeErr error            // returned by EnableAutoMerge
 	QueueChecks  []github.Check   // what QueueFailures returns
 	Err          error            // returned by every call
 }
@@ -127,7 +129,7 @@ func (f *FakeGitHub) Enqueue(_ context.Context, nodeID string) error {
 
 func (f *FakeGitHub) EnableAutoMerge(_ context.Context, nodeID string) error {
 	f.AutoMerged = append(f.AutoMerged, nodeID)
-	return f.Err
+	return cmp.Or(f.AutoMergeErr, f.Err)
 }
 
 func (f *FakeGitHub) DisableAutoMerge(_ context.Context, nodeID string) error {
