@@ -591,7 +591,7 @@ func TestInboxUnanswered(t *testing.T) {
 	t.Parallel()
 	h := Handoff{Posted: []int64{501}}
 	in := github.Inbox{Threads: []github.ReviewThread{
-		th("A", cm(100, "alice", "q"), cm(101, "me", "by the PR author")),
+		th("A", cm(100, "alice", "q"), cm(101, "Me", "by the PR author, logins ignore case")),
 		th("B", cm(200, "alice", "q"), cm(501, "other", "posted by TLM")),
 		th("C", cm(300, "me", "mine"), cm(301, "alice", "reviewer last")),
 		{ID: "D", Resolved: true, Comments: []github.InboxComment{cm(400, "alice", "r")}},

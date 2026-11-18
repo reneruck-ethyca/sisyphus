@@ -129,7 +129,7 @@ func buildInbox(in github.Inbox, h Handoff, botLogins []string, author string) I
 			continue
 		}
 		out.Unresolved++
-		if last := t.Comments[len(t.Comments)-1]; last.Author != author && !own(last.ID) {
+		if last := t.Comments[len(t.Comments)-1]; !strings.EqualFold(last.Author, author) && !own(last.ID) {
 			out.Unanswered++
 		}
 		it := Item{ID: t.ID, Kind: KindThread, Path: t.Path, Line: t.Line, Outdated: t.Outdated}

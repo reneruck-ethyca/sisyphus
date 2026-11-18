@@ -154,7 +154,7 @@ func (l LastMile) check() error {
 		return errors.New("needs a positive interval, max_fix_rounds >= 1 and a needs_human_label")
 	}
 	if l.FlakeReruns < 0 || l.MaxDiffLines < 1 {
-		return errors.New("needs flake_reruns >= 0, and max_diff_lines >= 1")
+		return errors.New("needs flake_reruns >= 0 and max_diff_lines >= 1")
 	}
 	for i, w := range l.MergeFreeze {
 		if _, _, _, _, _, err := w.parse(); err != nil {
