@@ -376,6 +376,26 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
+// Wait gives the runs that Run's ctx ending interrupted up to d to write their
+// last records; a container left running is reattached on the next start.
+func (s *Service) Wait(d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if s.rev != nil {
+			s.rev.Wait()
+		}
+		if s.lastMile != nil {
+			s.lastMile.Wait()
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		slog.Warn("shutting down with runs still going", "waited", d)
+	}
+}
+
 // do runs a PR action to completion: the caller's ctx (a request's, say) going
 // away mid-way must not leave a half-removed worktree or stack behind.
 func (s *Service) do(ctx context.Context, fn func(context.Context) error) error {

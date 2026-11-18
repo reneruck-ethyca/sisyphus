@@ -1254,8 +1254,9 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	status, why := Succeeded, error(nil)
 	switch {
 	case err == nil:
-	case appCtx.Err() != nil:
-		return // shutting down: leave the container running and the record "running"
+	case appCtx.Err() != nil: // shutting down: leave the container running and the record "running"
+		drainLogs() // so the log goroutine doesn't write the record after Wait
+		return
 	case runCtx.Err() != nil: // superseded, reclaimed or dropped
 		why = context.Cause(runCtx)
 		status = Cancelled

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"time"
 
 	"github.com/reneruck/sisyphus/internal/app"
 	"github.com/reneruck/sisyphus/internal/config"
@@ -72,6 +73,7 @@ func runApp(cfg config.Config, srv server) error {
 			status.SetLabel(trayStatus(svc.Status()))
 		}
 	}()
+	wapp.OnShutdown(func() { svc.Wait(30 * time.Second) }) // runs after wapp.Context() is cancelled
 	wapp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go svc.Run(wapp.Context())
 	})
