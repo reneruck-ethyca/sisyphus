@@ -346,12 +346,8 @@ func (t *Tracker) forget(ctx context.Context, id, reason string) error {
 	}
 	defer unlock()
 	if _, err := os.Stat(tr.Worktree); errors.Is(err, os.ErrNotExist) {
-		t.forgetMissing(ctx, tr) // already gone: nothing for wtp to remove
-		t.archive(*tr, reason)
-		t.save()
-		return nil
-	}
-	if tr.CreatedWorktree {
+		t.pruneMissing(ctx, tr) // already gone: nothing for wtp to remove
+	} else if tr.CreatedWorktree {
 		if err := worktree.Remove(ctx, t.repoDir(tr.Repo), tr.HeadRef, tr.CreatedBranch); err != nil {
 			return err
 		}
@@ -449,9 +445,18 @@ func (t *Tracker) ClearHistory() {
 }
 
 // forgetMissing handles a worktree deleted outside sisyphus: drop the entry (the
-// next tick re-tracks the PR if it's still eligible) and delete our branch, but
-// only if it holds nothing unpushed (`git branch -d` refuses otherwise).
+// next tick re-tracks the PR if it's still eligible) and prune what's left.
 func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
+	t.pruneMissing(ctx, tr)
+	t.archive(*tr, "worktree deleted outside sisyphus")
+	delete(t.state.PRs, tr.Key())
+	slog.Info("worktree deleted outside sisyphus, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
+	t.Events.Dropped(*tr, "worktree deleted outside sisyphus")
+}
+
+// pruneMissing clears git's record of tr's deleted worktree and deletes our
+// branch, but only if it holds nothing unpushed (`git branch -d` refuses otherwise).
+func (t *Tracker) pruneMissing(ctx context.Context, tr *Tracked) {
 	repoDir := t.repoDir(tr.Repo)
 	if _, err := proc.Run(ctx, repoDir, "git", "worktree", "prune"); err != nil {
 		slog.Warn("pruning worktrees", "pr", tr.Key(), "err", err)
@@ -461,10 +466,6 @@ func (t *Tracker) forgetMissing(ctx context.Context, tr *Tracked) {
 			slog.Warn("keeping branch of deleted worktree", "pr", tr.Key(), "branch", tr.HeadRef, "err", err)
 		}
 	}
-	t.archive(*tr, "worktree deleted outside sisyphus")
-	delete(t.state.PRs, tr.Key())
-	slog.Info("worktree deleted outside sisyphus, forgot PR", "pr", tr.Key(), "worktree", tr.Worktree)
-	t.Events.Dropped(*tr, "worktree deleted outside sisyphus")
 }
 
 func (t *Tracker) sync(ctx context.Context, tr *Tracked) {

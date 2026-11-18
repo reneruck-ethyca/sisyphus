@@ -386,11 +386,16 @@ func TestForgetWorktreeAlreadyGone(t *testing.T) {
 	ref := github.PRRef{Repo: "ethyca/clone", Number: 1}
 	tr.state.PRs[ref.Key()] = &Tracked{PRRef: ref, HeadRef: "gone-branch", Worktree: filepath.Join(t.TempDir(), "gone"),
 		CreatedWorktree: true, CreatedBranch: true}
+	rec := &recorder{}
+	tr.Events = rec
 	if err := tr.Forget(context.Background(), ref.Key()); err != nil {
 		t.Fatal(err)
 	}
 	if tr.state.PRs[ref.Key()] != nil {
 		t.Fatal("still tracked")
+	}
+	if len(rec.got) != 1 || tr.state.History[ref.Key()].Reason == "worktree deleted outside sisyphus" {
+		t.Errorf("events %v, history %+v: want one drop, for the reason given", rec.got, tr.state.History)
 	}
 }
 
