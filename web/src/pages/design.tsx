@@ -425,7 +425,9 @@ function ComposerBox({ c, file, api, fail, onDone, onCancel }: {
   return <div class="dr-composer" ref={ref} style={{ top: `${c.below}px` }}>
     <div class="muted small">Lines {c.range.start}{c.range.end !== c.range.start && `–${c.range.end}`}</div>
     {c.quote.trim() && <blockquote>{c.quote.trim().slice(0, 300)}</blockquote>}
-    {fileLevel && <div class="note">Outside the PR's changes: this is posted as a comment on the file.</div>}
+    {fileLevel && <div class="note">{file.patchMissing
+      ? "GitHub doesn't show this file's diff (too large), so this is posted as a comment on the file."
+      : "Outside the PR's changes: this is posted as a comment on the file."}</div>}
     <label class="sr-only" for="dr-new">Your comment</label>
     <textarea id="dr-new" value={text} placeholder="Leave a comment (Markdown)" onInput={(e) => setText(e.currentTarget.value)}
       onKeyDown={(e) => {
