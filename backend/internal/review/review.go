@@ -846,6 +846,68 @@ func (r *Reviewer) previousHead(prID string) string {
 // shutdown it returns without touching the container, which a restart
 // re-attaches to. There's no hard timeout: past review.timeout a run is only
 // flagged overdue.
+// tailing follows a container's output into its run's log, recording the
+// agent's result and usage on the run as they come.
+type tailing struct {
+	lw     *lineWriter   // nil when the log couldn't be created
+	result *ClaudeResult // the agent's final result; read it after drain
+	done   chan struct{}
+	cancel context.CancelFunc
+}
+
+// drain waits for the output to end, at most logGrace, then stops following.
+func (t *tailing) drain() {
+	select {
+	case <-t.done:
+	case <-time.After(logGrace):
+		t.cancel()
+		<-t.done
+	}
+}
+
+// tail starts following container cid of run (recorded under key) until it
+// exits or ctx ends: a context of its own, so a container that won't exit
+// can't hold the caller past drain. hook, if set, sees each line first and
+// keeps it from being parsed by returning true. An error means there's no log;
+// the returned tailing still drains.
+func (r *Reviewer) tail(ctx context.Context, key string, run Run, cid string, hook func(string) bool) (*tailing, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	t := &tailing{done: make(chan struct{}), cancel: cancel}
+	_ = os.MkdirAll(run.Dir, 0o755)                       // a failure shows as os.Create's
+	logf, err := os.Create(filepath.Join(run.Dir, "log")) // docker replays from the start, so truncate
+	if err != nil {
+		close(t.done)
+		return t, err
+	}
+	t.lw = &lineWriter{file: logf, onLine: func(n int, line string) {
+		if hook != nil && hook(line) {
+			return
+		}
+		evs, res, w := parseLine(n, line)
+		if res != nil {
+			t.result = res
+			r.record(key, run.ID, func(x *Run) { x.Claude = res })
+		}
+		usage := w != nil && w.plausible(time.Now())
+		if usage {
+			r.record(key, run.ID, func(x *Run) { x.Usage = observe(x.Usage, *w) })
+		}
+		if res != nil || usage {
+			r.logUsage(key, run.ID, line)
+		}
+		r.publish(key, run.ID, evs)
+	}}
+	go func() {
+		defer close(t.done)
+		defer logf.Close()
+		if err := r.rt.Logs(ctx, cid, t.lw); err != nil && ctx.Err() == nil {
+			slog.Warn("following run output", "run", run.ID, "err", err)
+		}
+		t.lw.Flush()
+	}()
+	return t, nil
+}
+
 func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func(), reattached bool) {
 	id := run.Job.PR.Key()
 	overdue := time.AfterFunc(time.Until(run.Started.Add(r.cfg.Timeout.Duration)), func() {
@@ -854,50 +916,12 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	})
 	defer overdue.Stop()
 
-	// Logs follows until the container exits; it gets its own context so a
-	// container we failed to wait for or stop can't hold this run forever.
-	logsCtx, cancelLogs := context.WithCancel(appCtx)
-	defer cancelLogs()
-	logsDone := make(chan struct{})
-	drainLogs := func() {
-		select {
-		case <-logsDone:
-		case <-time.After(logGrace):
-			cancelLogs()
-			<-logsDone
-		}
-	}
-	var result *ClaudeResult
-	var lw *lineWriter
-	_ = os.MkdirAll(run.Dir, 0o755)                       // a failure shows as os.Create's
-	logf, err := os.Create(filepath.Join(run.Dir, "log")) // docker replays from the start, so truncate
+	logs, err := r.tail(appCtx, id, run, run.Container, nil)
+	defer logs.cancel()
 	if err != nil {
 		slog.Warn("creating run log", "run", run.ID, "err", err)
-		close(logsDone)
-	} else {
-		lw = &lineWriter{file: logf, onLine: func(n int, line string) {
-			evs, res, w := parseLine(n, line)
-			if res != nil {
-				result = res
-				r.record(id, run.ID, func(x *Run) { x.Claude = res })
-			}
-			if w != nil && w.plausible(time.Now()) {
-				r.record(id, run.ID, func(x *Run) { x.Usage = observe(x.Usage, *w) })
-			}
-			if res != nil || w != nil && w.plausible(time.Now()) {
-				r.logUsage(id, run.ID, line)
-			}
-			r.publish(id, run.ID, evs)
-		}}
-		go func() {
-			defer close(logsDone)
-			defer logf.Close()
-			if err := r.rt.Logs(logsCtx, run.Container, lw); err != nil && logsCtx.Err() == nil {
-				slog.Warn("following review output", "run", run.ID, "err", err)
-			}
-			lw.Flush()
-		}()
 	}
+	drainLogs := logs.drain
 
 	code, err := r.rt.Wait(runCtx, run.Container)
 	status, why := Succeeded, error(nil)
@@ -933,7 +957,8 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.finish(run, Errored, 0, err, unlock)
 		return
 	}
-	drainLogs()                                                            // the result line is in by now
+	drainLogs() // the result line is in by now
+	result := logs.result
 	if status == Succeeded && runCtx.Err() != nil && appCtx.Err() == nil { // exited just as it was cancelled: still don't post
 		status, why = Cancelled, context.Cause(runCtx)
 	}
@@ -963,7 +988,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		}
 		note := postNote(posted, err, r.cfg.Post && r.GitHub != nil)
 		r.record(id, run.ID, func(x *Run) { x.Posted, x.PostNote = posted, note })
-		r.appendLog(id, run, lw, "── sisyphus: "+note)
+		r.appendLog(id, run, logs.lw, "── sisyphus: "+note)
 		slog.Info("review "+strings.SplitN(note, ":", 2)[0], "pr", id, "run", run.ID, "note", note)
 		if err != nil {
 			status, why = Failed, fmt.Errorf("posting review: %w", err)

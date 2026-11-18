@@ -165,55 +165,26 @@ func (r *Reviewer) runTask(ctx context.Context, key string, run Run, t Task) (re
 	defer r.removeContainer(bg, run.ID, cid)
 	r.record(key, run.ID, func(x *Run) { x.Container, x.Name = cid, spec.Name })
 
-	logf, err := os.Create(filepath.Join(run.Dir, "log"))
+	gated := false
+	logs, err := r.tail(bg, key, run, cid, func(line string) bool {
+		if t.AfterSetup == nil || gated || line != setupDone {
+			return false
+		}
+		gated = true
+		err := t.AfterSetup()
+		if err == nil {
+			err = os.WriteFile(filepath.Join(run.Dir, "out", gateFile), nil, 0o644)
+		}
+		if err != nil {
+			fail(fmt.Errorf("after setup: %w", err))
+		}
+		return true
+	})
+	defer logs.cancel()
 	if err != nil {
 		return nil, 0, err
 	}
-	defer logf.Close()
-	var claude *ClaudeResult
-	gated := false
-	lw := &lineWriter{file: logf, onLine: func(n int, line string) {
-		if t.AfterSetup != nil && !gated && line == setupDone {
-			gated = true
-			err := t.AfterSetup()
-			if err == nil {
-				err = os.WriteFile(filepath.Join(run.Dir, "out", gateFile), nil, 0o644)
-			}
-			if err != nil {
-				fail(fmt.Errorf("after setup: %w", err))
-			}
-			return
-		}
-		_, res, w := parseLine(n, line)
-		if res != nil {
-			claude = res
-			r.record(key, run.ID, func(x *Run) { x.Claude = res })
-		}
-		if w != nil && w.plausible(time.Now()) {
-			r.record(key, run.ID, func(x *Run) { x.Usage = observe(x.Usage, *w) })
-		}
-		if res != nil || w != nil && w.plausible(time.Now()) {
-			r.logUsage(key, run.ID, line)
-		}
-	}}
-	logsCtx, cancelLogs := context.WithCancel(bg)
-	defer cancelLogs()
-	logsDone := make(chan struct{})
-	go func() {
-		defer close(logsDone)
-		if err := r.rt.Logs(logsCtx, cid, lw); err != nil && logsCtx.Err() == nil {
-			slog.Warn("following task output", "run", run.ID, "err", err)
-		}
-		lw.Flush()
-	}()
-	drain := func() {
-		select {
-		case <-logsDone:
-		case <-time.After(logGrace):
-			cancelLogs()
-			<-logsDone
-		}
-	}
+	drain := logs.drain
 
 	code, err = r.rt.Wait(ctx, cid)
 	if err != nil {
@@ -226,7 +197,7 @@ func (r *Reviewer) runTask(ctx context.Context, key string, run Run, t Task) (re
 		return nil, 0, cmp.Or(context.Cause(ctx), err)
 	}
 	drain()
-	switch {
+	switch claude := logs.result; {
 	case claude != nil && claude.IsError:
 		return nil, code, fmt.Errorf("%s: %s", t.Agent.Vendor, cmp.Or(claude.Error, claude.Subtype))
 	case code != 0:
