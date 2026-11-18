@@ -48,7 +48,7 @@ export type Approval = { user: string; commit: string; stale: boolean; bot?: boo
 export type Failure = { name: string; url?: string; fingerprint: string; flake?: boolean };
 export type Snapshot = {
   head: string; author: string; draft: boolean; mergeable: string; merge_state: string; review_decision: string;
-  approvals?: Approval[]; requested?: string[]; checks?: Check[]; ci: string; base: string; behind: number;
+  approvals?: Approval[]; auto_merge_allowed?: boolean; in_queue?: boolean; merge_queue?: boolean; auto_merge?: boolean; node_id?: string; unanswered?: number; requested?: string[]; checks?: Check[]; ci: string; base: string; behind: number;
   additions: number; deletions: number; files?: string[]; failures?: Failure[];
   unresolved: number; new_feedback?: { id: string; kind: string; author: string; bot: boolean }[];
 };
@@ -67,6 +67,7 @@ export type Handoff = {
   reviewers?: string[]; reviewers_set?: boolean; reviewers_pending?: boolean; requested?: string[]; removed?: string[];
   autonomy: { fix_ci: boolean; address_reviews: boolean; merge: string };
   max_fix_rounds: number; fix_rounds?: Record<string, number>;
+  merge_requested?: boolean; auto_merge_set?: boolean; queue_kicks?: number; enqueued_at?: string;
   state: string; prev_state?: string; reason?: string; error?: string; warning?: string;
   pr_number?: number; pr_url?: string;
   events?: HandoffEvent[]; snapshot?: Snapshot; dirty?: Dirty; shadow?: Verdict;
@@ -74,7 +75,7 @@ export type Handoff = {
 };
 
 export type HandoffView = Handoff & {
-  over: boolean; reviewing: string[] | null; depth: number; waiting_on?: string; dirty_hash?: string;
+  over: boolean; can_merge?: boolean; reviewing: string[] | null; depth: number; waiting_on?: string; dirty_hash?: string;
   agent_running?: string; agent_started?: string;
 };
 

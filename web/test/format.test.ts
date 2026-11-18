@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HandoffView, Run } from "../src/api";
-import { dur, fuzzy, gh, outcome, reviewerChips, rel, runPath, secs, splitState } from "../src/format";
+import { dur, fuzzy, gh, handoffTone, outcome, reviewerChips, rel, runPath, secs, splitState } from "../src/format";
 
 const run = (p: Partial<Run>): Run => ({ id: "r", job: { pr: {} as Run["job"]["pr"], agent: { vendor: "", model: "", effort: "" }, reason: "new" },
   image: "", started: "2026-11-12T10:00:00Z", finished: "2026-11-12T10:01:05Z", status: "succeeded", exit_code: 0, ...p });
@@ -29,6 +29,12 @@ describe("format", () => {
     expect(secs(45)).toBe("45 s");
     expect(secs(5 * 3600)).toBe("5.0 h");
     expect(secs(3 * 86400)).toBe("3.0 d");
+  });
+
+  it("colours handoff states", () => {
+    expect(handoffTone("merged")).toBe("merged");
+    expect(handoffTone("queued")).toBe("live");
+    expect(handoffTone("approved")).toBe("ok");
   });
 
   it("only links GitHub", () => {

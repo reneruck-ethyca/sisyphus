@@ -23,6 +23,7 @@ export function Handoff({ status: s, id }: { status?: Status; id: string }) {
           <span>{v.repo}{v.pr_url && <> <Ext href={v.pr_url}>#{v.pr_number} ↗</Ext></>}</span>
           <span>branch <code>{v.branch}</code> onto <code>{v.base}</code></span>
           {v.waiting_on && <span>waiting on <a href={`/lastmile/${v.waiting_on}`}>{v.waiting_on}</a></span>}
+          {!!v.queue_kicks && <span>{plural(v.queue_kicks, "queue kick")}</span>}
           <span>updated <Ago t={v.updated} /></span></div>
         {v.agent_running && <p class="notice quiet"><Chip tone="live">{v.agent_running === "dirty" ? "agent" : `${v.agent_running} agent`}</Chip> running since <Ago t={v.agent_started} />
           {v.agent_running === "dirty" && ", finishing the uncommitted work. If it fails, the changes come back uncommitted."}</p>}

@@ -72,7 +72,7 @@ export function Home({ status: s, error }: { status?: Status; error: string }) {
               <a class="grow" href={`/lastmile/${v.id}`}>{v.title}</a><span class="t"><Ago t={v.agent_started} /></span></li>)}</ul>
               : <p class="empty muted">No agent running.</p>}
             <div class="sub">Recently merged</div>
-            {s.merged?.length ? <ul class="mini">{s.merged.map((v) => <li key={v.id}><Chip tone="ok">merged</Chip>
+            {s.merged?.length ? <ul class="mini">{s.merged.map((v) => <li key={v.id}><Chip tone="merged">merged</Chip>
               <a class="grow" href={`/lastmile/${v.id}`}>{v.title}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}</a><span class="t"><Ago t={v.updated} /></span></li>)}</ul>
               : <p class="empty muted">Nothing merged yet.</p>}
           </div>

@@ -78,7 +78,9 @@ export function dur(r: Run, now = Date.now()): string {
 // handoffTone is the chip colour of a handoff state, handoffIcon a one-glyph cue matching it.
 export function handoffTone(state: string): string {
   if (["ci-red", "conflict", "needs-human"].includes(state)) return "bad";
-  if (["ci-green", "approved", "merged"].includes(state)) return "ok";
+  if (["ci-green", "approved"].includes(state)) return "ok";
+  if (state === "merged") return "merged";
+  if (state === "queued") return "live";
   return state === "pr-open" ? "open" : "neutral";
 }
 export function handoffIcon(state: string): string {

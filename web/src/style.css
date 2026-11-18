@@ -9,6 +9,7 @@
   --changes-bg: light-dark(#f6e3d6, #45301f); --changes: light-dark(#8f4317, #f0b089);
   --neutral-bg: light-dark(#ebe8df, #3a3935); --neutral: light-dark(#5b5a54, #c9c5ba);
   --live-bg: light-dark(#e1e8f1, #273448); --live: light-dark(#3f5878, #a9c1e0);
+  --merged-bg: light-dark(#ece5f4, #35294a); --merged: light-dark(#6b4a9a, #c9b3e8);
   --bad-bg: light-dark(#f4dedb, #4a2522); --bad: light-dark(#9e3530, #f0a199); }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -49,6 +50,7 @@ button:disabled { opacity: .5; cursor: default; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
   background: var(--neutral-bg); color: var(--neutral); }
 .chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.merged { background: var(--merged-bg); color: var(--merged); }
 .chip.changes { background: var(--changes-bg); color: var(--changes); }
 .chip.live { background: var(--live-bg); color: var(--live); }
 .chip.open { background: var(--live-bg); color: var(--live); }

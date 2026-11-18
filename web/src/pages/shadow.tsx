@@ -41,7 +41,7 @@ export function Shadow({ status: s, query }: { status?: Status; query: URLSearch
         <div class="card scrollx"><table>
           <thead><tr><th>When</th><th>Head</th><th>Entry</th><th>Blockers</th><th>Signals</th></tr></thead>
           <tbody>{focus.data.history?.length ? focus.data.history.map((l, i) => <tr key={i}><td>{stamp(l.time)}</td><td><code>{short(l.head)}</code></td>
-            <td>{l.outcome ? <><Chip tone={l.outcome === "merged" ? "ok" : undefined}>{l.outcome}</Chip>{l.merged_by && ` by ${l.merged_by}`}</>
+            <td>{l.outcome ? <><Chip tone={l.outcome === "merged" ? "merged" : undefined}>{l.outcome}</Chip>{l.merged_by && ` by ${l.merged_by}`}</>
               : <Chip tone={l.would_merge ? "ok" : "bad"}>would merge: {l.would_merge ? "yes" : "no"}</Chip>}</td>
             <td>{(l.blockers ?? []).join("; ")}</td><td>{l.signals && <SignalLine s={l.signals} />}</td></tr>)
             : <tr><td colSpan={5} class="muted">Nothing logged for this PR yet.</td></tr>}</tbody>
