@@ -10,6 +10,7 @@ import (
 	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/jsonfile"
 	"github.com/reneruck/sisyphus/internal/tracker"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 // Manager owns the handoffs: accepts them, keeps them in lastmile.json, and
@@ -18,13 +19,14 @@ type Manager struct {
 	GH    GitHub
 	Tasks TaskRunner // runs the agents; nil when reviews are disabled
 
-	cfg     config.Config
-	locks   *tracker.Locks // shared with the tracker and reviews; "lastmile:<id>" guards a handoff's worktree
-	path    string
-	runHook func(ctx context.Context, command string, timeout time.Duration, dir string, env map[string]string) error
-	kick    chan struct{}
-	now     func() time.Time
-	token   string // required to create handoffs (Authorized)
+	cfg      config.Config
+	locks    *tracker.Locks // shared with the tracker and reviews; "lastmile:<id>" guards a handoff's worktree
+	path     string
+	runHook  func(ctx context.Context, command string, timeout time.Duration, dir string, env map[string]string) error
+	kick     chan struct{}
+	now      func() time.Time
+	removeWT func(ctx context.Context, repoDir, branch string) error // drops a merged handoff's worktree and branch
+	token    string                                                  // required to create handoffs (Authorized)
 
 	// OnChange is called, without the lock held, after any handoff changed; the
 	// app uses it to refresh the dashboard.
@@ -51,7 +53,10 @@ type storeFile struct {
 // New loads the handoffs saved in stateDir/lastmile.json.
 func New(cfg config.Config, gh GitHub, locks *tracker.Locks, stateDir string) (*Manager, error) {
 	m := &Manager{GH: gh, cfg: cfg, locks: locks, path: filepath.Join(stateDir, "lastmile.json"),
-		runHook: tracker.RunHook, kick: make(chan struct{}, 1), now: time.Now}
+		runHook: tracker.RunHook, kick: make(chan struct{}, 1), now: time.Now,
+		removeWT: func(ctx context.Context, repoDir, branch string) error {
+			return worktree.Remove(ctx, repoDir, branch, true)
+		}}
 	var f storeFile
 	if err := jsonfile.Load(m.path, &f); err != nil {
 		return nil, err

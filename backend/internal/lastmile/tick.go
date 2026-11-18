@@ -315,6 +315,7 @@ func (m *Manager) afterCommit(ctx context.Context, before, after Handoff) {
 	case before.State == after.State:
 	case after.State == StateMerged:
 		m.Notify(ctx, after, EventMerged)
+		m.removeWorktree(ctx, after)
 	case after.State == StateClosed:
 		m.Notify(ctx, after, EventClosed)
 	case after.State == StateNeedsHuman:

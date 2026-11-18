@@ -3,6 +3,8 @@ package lastmile
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -523,5 +525,67 @@ func TestQueueLostRunLogged(t *testing.T) {
 	m.lostRun(context.Background(), &h)
 	if !slices.ContainsFunc(h.Events, func(e Event) bool { return strings.Contains(e.Text, "queue investigation lost to a restart") }) || h.State == StateNeedsHuman {
 		t.Errorf("handoff %s, events %+v", h.State, h.Events)
+	}
+}
+
+func mergedHandoff(t *testing.T) (*Manager, Handoff, *[][2]string) {
+	t.Helper()
+	m, clone, _ := fixture(t)
+	var calls [][2]string
+	m.removeWT = func(_ context.Context, dir, branch string) error {
+		calls = append(calls, [2]string{dir, branch})
+		return nil
+	}
+	h := Handoff{ID: "h1", Worktree: clone, Branch: "feature/x", State: StateMerged}
+	m.handoffs = []Handoff{h}
+	return m, h, &calls
+}
+
+func TestCleanupRemovesMergedWorktree(t *testing.T) {
+	t.Parallel()
+	m, h, calls := mergedHandoff(t)
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	dir, _ := filepath.EvalSymlinks(h.Worktree) // git reports the resolved path
+	want := [][2]string{{dir, "feature/x"}}
+	if !slices.Equal(*calls, want) {
+		t.Errorf("remover calls %v, want %v", *calls, want)
+	}
+	if got := m.must(t, "h1"); got.Warning != "" {
+		t.Errorf("warning %q", got.Warning)
+	}
+}
+
+func TestCleanupKeepsDirtyWorktree(t *testing.T) {
+	t.Parallel()
+	m, h, calls := mergedHandoff(t)
+	if err := os.WriteFile(filepath.Join(h.Worktree, "wtp.env"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.Untracked = []string{"wtp.env"}
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if len(*calls) != 1 {
+		t.Fatalf("untracked-only worktree: remover calls %v", *calls)
+	}
+
+	*calls = nil
+	if err := os.WriteFile(filepath.Join(h.Worktree, "a.txt"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if len(*calls) != 0 {
+		t.Errorf("dirty worktree removed: %v", *calls)
+	}
+	if got := m.must(t, "h1"); got.Warning != "worktree kept: it has uncommitted changes" {
+		t.Errorf("warning %q", got.Warning)
+	}
+}
+
+func TestCleanupFailureWarns(t *testing.T) {
+	t.Parallel()
+	m, h, _ := mergedHandoff(t)
+	m.removeWT = func(context.Context, string, string) error { return errors.New("boom") }
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if got := m.must(t, "h1"); !strings.Contains(got.Warning, "boom") {
+		t.Errorf("warning %q", got.Warning)
 	}
 }

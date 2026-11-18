@@ -5,11 +5,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/proc"
 )
 
 // Merge is the dashboard's merge button: the next tick squash-merges the PR, or
@@ -236,4 +239,47 @@ func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (st
 	snap := *s
 	m.launch(ctx, h, TriggerQueue, func(ctx context.Context, h Handoff) outcome { return m.queueAgent(ctx, h, snap, last.Reason) })
 	return StateQueued, "investigating removal from the merge queue", true, nil
+}
+
+// removeWorktree drops a merged handoff's worktree and local branch unless the
+// worktree holds uncommitted work. Trouble becomes a Warning; it is not retried.
+func (m *Manager) removeWorktree(ctx context.Context, h Handoff) {
+	if h.Worktree == "" {
+		return
+	}
+	if _, err := os.Stat(h.Worktree); err != nil {
+		return
+	}
+	warn := func(w string) {
+		_, _ = m.update(h.ID, func(c *Handoff) error { c.Warning = w; return nil })
+		m.changed()
+	}
+	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
+	if err != nil {
+		warn("worktree kept: " + err.Error())
+		return
+	}
+	defer unlock()
+	st, err := status(ctx, h)
+	if err != nil {
+		warn("worktree kept: " + err.Error())
+		return
+	}
+	if st != "" {
+		warn("worktree kept: it has uncommitted changes")
+		return
+	}
+	common, err := proc.Run(ctx, h.Worktree, "git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err == nil {
+		err = m.removeWT(ctx, filepath.Dir(common), h.Branch)
+	}
+	if err != nil {
+		warn("removing the worktree failed: " + err.Error())
+		return
+	}
+	_, _ = m.update(h.ID, func(c *Handoff) error {
+		logEvent(c, m.now(), "cleanup", "removed worktree and branch "+h.Branch)
+		return nil
+	})
+	m.changed()
 }
