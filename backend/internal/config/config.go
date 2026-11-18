@@ -72,6 +72,7 @@ type LastMile struct {
 	BotLogins       []string             `json:"bot_logins"`        // user accounts that act as bots (their feedback counts as bot feedback)
 	RiskyPaths      []string             `json:"risky_paths"`       // globs: a PR touching one would not be merged by TLM
 	MigrationPaths  []string             `json:"migration_paths"`   // globs: a PR touching one must be up to date with its base to merge
+	DownrevLabels   map[string]string    `json:"downrev_labels"`    // per "owner/name": the label for a PR whose only change since green is a down_revision bump
 	MergeFreeze     []FreezeWindow       `json:"merge_freeze"`      // windows in which TLM would not merge
 }
 
@@ -436,6 +437,7 @@ func defaults() Config {
 			FlakeReruns:     2,
 			MaxDiffLines:    400,
 			MigrationPaths:  []string{"**/migrations/**", "**/alembic/versions/**"},
+			DownrevLabels:   map[string]string{"ethyca/fidesplus": "downrev-only"},
 			RiskyPaths:      []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"},
 			BotLogins:       []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},

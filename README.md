@@ -500,6 +500,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.bot_logins` | `["ethycabot"]` | user accounts whose review feedback counts as bot feedback |
 | `lastmile.risky_paths` | migrations, auth, `.github/**`, Dockerfiles, `infra/**`, `*.tf` | globs: touching one blocks a would-merge verdict |
 | `lastmile.migration_paths` | migrations, alembic versions | globs: a PR touching one must be up to date with its base for a would-merge verdict |
+| `lastmile.downrev_labels` | `{"ethyca/fidesplus":"downrev-only"}` | per `owner/name`: the label for a PR whose only change since green CI is TLM's `down_revision` bump |
 | `lastmile.merge_freeze` | `[]` | windows `{weekday?, start, end, tz}` in which a PR would not be merged |
 
 ## `on_conflict` hook

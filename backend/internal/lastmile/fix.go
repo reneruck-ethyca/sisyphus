@@ -37,6 +37,8 @@ type effects struct {
 	rounds    int      // conflict agent runs, counted in FixRounds
 	failures  []string // fingerprints a fix round was spent on
 	unstack   bool     // the child now sits on the parent's old base: it is a plain handoff
+
+	downrevFrom, downrevHead string // a downrev-only restack (design §7.4): the head before it, and the one it pushed
 }
 
 func (e *effects) log(kind, format string, a ...any) {
@@ -68,6 +70,9 @@ func (e effects) apply(h *Handoff) {
 	}
 	if e.unstack {
 		h.StackParent, h.ParentHead = "", ""
+	}
+	if e.downrevHead != "" {
+		h.DownrevFrom, h.DownrevHead = e.downrevFrom, e.downrevHead
 	}
 }
 
@@ -184,6 +189,9 @@ func (m *Manager) markRun(id string, r *RunMark) {
 func (m *Manager) agentFinished(ctx context.Context, h *Handoff, a agentRun) {
 	h.Run = nil
 	a.fx.apply(h)
+	if a.fx.downrevHead != "" {
+		m.labelDownrev(ctx, h)
+	}
 	if a.trigger == TriggerDirty {
 		m.dirtyAgentFinished(ctx, h, a.reason)
 		return

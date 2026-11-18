@@ -43,7 +43,7 @@ func mergeRefusal(h Handoff) string {
 	switch {
 	case Terminal(h.State) || h.State == StateNeedsHuman:
 		return "it is " + h.State
-	case s == nil || !humanApproved(*s):
+	case s == nil || !humanApproved(h, *s):
 		return "the PR is not approved by a human on its current head"
 	case s.CI != CIGreen:
 		return "checks are not green (" + s.CI + ")"
@@ -77,9 +77,13 @@ func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 }
 
 // humanApproved says the PR is approved and a human approved its current head:
-// what any TLM merge needs, whatever the mode.
-func humanApproved(s Snapshot) bool {
-	return s.Approved() && slices.ContainsFunc(s.Approvals, func(a Approval) bool { return !a.Stale && !a.Bot })
+// what any TLM merge needs, whatever the mode. An approval of the head before a
+// labelled downrev bump counts for the bumped head (design §7.4).
+func humanApproved(h Handoff, s Snapshot) bool {
+	carried := func(a Approval) bool {
+		return h.DownrevFrom != "" && h.DownrevHead == s.Head && a.CommitSHA == h.DownrevFrom
+	}
+	return s.Approved() && slices.ContainsFunc(s.Approvals, func(a Approval) bool { return !a.Bot && (!a.Stale || carried(a)) })
 }
 
 // queueable are the states a PR in the merge queue shows as queued; the others
@@ -129,7 +133,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		}
 		return state, reason, nil
 	}
-	if native || state != StateApproved || s.CI != CIGreen || !humanApproved(s) {
+	if native || state != StateApproved || s.CI != CIGreen || !humanApproved(*h, s) {
 		return state, reason, nil
 	}
 	if !h.MergeRequested && (frozen(m.cfg.LastMile, m.now()) || mode == MergeOff || mode == MergeShadow ||

@@ -25,6 +25,7 @@ type restackSpec struct {
 	onto     string // the base branch to land on, as origin/<onto>
 	upstream string // the old base point for `rebase --onto`; "" = a plain rebase onto origin/<onto>
 	head     string // the head the PR shows; the worktree must be at it
+	green    bool   // CI was green on head: a clean rebase plus a bump is then downrev-only
 }
 
 // rebaseInProgress says dir has a rebase stopped in it.
@@ -117,7 +118,7 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 		m.escalate(ctx, h, "rebase conflict: "+files)
 		return true, nil
 	}
-	spec := restackSpec{onto: base, head: s.Head}
+	spec := restackSpec{onto: base, head: s.Head, green: s.CI == CIGreen}
 	if !m.launch(ctx, h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
 		return true, nil
 	}
@@ -253,12 +254,24 @@ func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *
 	} else {
 		fx.log("rebase", "rebased onto %s, %d conflict stop(s) resolved by the conflict agent", onto, stops)
 	}
+	bumped, err := bumpDownrev(ctx, dir, r.onto, m.cfg.LastMile.MigrationPaths)
+	if err != nil {
+		rollBack()
+		return "down_revision bump: " + err.Error()
+	}
+	if len(bumped) > 0 {
+		fx.log("rebase", "pointed %s at the base's migration head", strings.Join(bumped, ", "))
+	}
 	ref := "refs/heads/" + h.Branch
 	if _, err := proc.Run(ctx, dir, "git", "-c", "core.hooksPath=/dev/null", "push", "--force-with-lease="+ref+":"+pre, "origin", ref+":"+ref); err != nil {
 		rollBack() // the remote isn't what we saw: put the worktree back with it
 		return "push failed (force-with-lease): " + err.Error()
 	}
 	fx.log("push", "force-pushed %s with lease (was %.7s)", h.Branch, pre)
+	if stops == 0 && r.green && len(bumped) > 0 && m.cfg.LastMile.DownrevLabels[h.Repo] != "" {
+		fx.downrevFrom = pre
+		fx.downrevHead, _ = worktree.HeadSHA(ctx, dir)
+	}
 	return ""
 }
 

@@ -173,6 +173,10 @@ type Handoff struct {
 	EnqueuedHead   string    `json:"enqueued_head,omitempty"`    // the head TLM added to the merge queue
 	DequeuedAt     time.Time `json:"dequeued_at,omitzero"`       // TLM last took the PR out of the merge queue
 
+	// Downrev bookkeeping (design §7.4).
+	DownrevHead string `json:"downrev_head,omitempty"` // the head TLM labelled downrev-only
+	DownrevFrom string `json:"downrev_from,omitempty"` // the head before that bump: its approvals carry over
+
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State
 	PROpened time.Time `json:"pr_opened,omitempty"`
