@@ -211,10 +211,11 @@ type Service struct {
 	rev     *review.Reviewer // nil when reviews are disabled
 	runNow  chan struct{}
 
-	mu      sync.Mutex
-	tracked []tracker.Tracked // last tracker snapshot
-	status  Status
-	wakers  map[chan struct{}]struct{} // SubscribeStatus: poked on every change
+	publishMu sync.Mutex // see publish
+	mu        sync.Mutex
+	tracked   []tracker.Tracked // last tracker snapshot
+	status    Status
+	wakers    map[chan struct{}]struct{} // SubscribeStatus: poked on every change
 }
 
 // NewService wires the tracker and the reviewer (nil = reviews disabled).
@@ -443,6 +444,8 @@ func (s *Service) refreshPRs(snap []tracker.Tracked, ignored []tracker.Ignored) 
 
 // publish merges the last tracker snapshot with live review state. Safe from any goroutine.
 func (s *Service) publish() {
+	s.publishMu.Lock() // one at a time: a publish that read older review state mustn't write last
+	defer s.publishMu.Unlock()
 	var reviews map[string]review.PRStatus
 	var budget review.Budget
 	runtimeErr := ""
