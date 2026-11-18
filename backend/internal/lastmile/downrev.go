@@ -112,12 +112,12 @@ func staleMigration(ctx context.Context, dir, base, d string, added []string) (f
 		}
 		return ms, nil
 	}
-	theirs, err := read(base, func(string) bool { return true })
-	if err != nil {
+	ours, err := read("HEAD", func(f string) bool { return slices.Contains(added, f) })
+	if err != nil || len(ours) == 0 {
 		return "", "", nil, err
 	}
-	ours, err := read("HEAD", func(f string) bool { return slices.Contains(added, f) })
-	if err != nil || len(ours) == 0 || len(theirs) == 0 {
+	theirs, err := read(base, func(string) bool { return true })
+	if err != nil || len(theirs) == 0 {
 		return "", "", nil, err
 	}
 	var named, heads, mine []string
@@ -285,18 +285,19 @@ func (m *Manager) setDownrevLabel(ctx context.Context, h Handoff, label string, 
 }
 
 // unlabelBeforePush takes the downrev label off before TLM pushes a head that doesn't
-// qualify for it: CI reads labels off the push's event. It returns "" when the push
-// may go ahead, else why not.
+// qualify for it: CI reads labels off the push's event. Always, not only when h
+// records the label: a crash or a failed push can leave it on unrecorded. It returns
+// "" when the push may go ahead, else why not.
 func (m *Manager) unlabelBeforePush(ctx context.Context, h Handoff, fx *effects) string {
 	label := m.cfg.LastMile.DownrevLabels[h.Repo]
-	if h.DownrevHead == "" || label == "" {
+	if label == "" {
 		return ""
 	}
 	if err := m.setDownrevLabel(ctx, h, label, false); err != nil {
 		slog.Warn("lastmile removing the downrev label before a push failed", "id", h.ID, "err", err)
 		return "couldn't remove the " + label + " label before pushing"
 	}
-	if fx != nil {
+	if fx != nil && h.DownrevHead != "" {
 		fx.downrevDropped = true
 		fx.log("label", "%s removed before pushing", label)
 	}

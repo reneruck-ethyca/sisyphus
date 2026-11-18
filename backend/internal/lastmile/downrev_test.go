@@ -483,3 +483,38 @@ func TestDownrevLabelRemovalFailureBlocksPush(t *testing.T) {
 		t.Error("pushed, or the worktree wasn't put back")
 	}
 }
+
+// A label left on with no record of it (a crash, a failed push) still comes off before TLM pushes.
+func TestDownrevLabelOffBeforePushWithoutRecord(t *testing.T) {
+	t.Parallel()
+	tasks := &fakeTasks{result: okFix, edit: func(dir string) { os.WriteFile(filepath.Join(dir, "a.txt"), []byte("fixed"), 0o644) }}
+	m, gh, id, head := redFixture(t, tasks)
+	w := &pushWatch{FakeGitHub: gh, dir: m.must(t, id).Worktree}
+	m.GH = w
+	m.tickWait(t)
+	m.tick(context.Background())
+	h := m.must(t, id)
+	if local := gittest.Git(t, h.Worktree, "rev-parse", "HEAD"); local == head || gittest.Git(t, h.Worktree, "rev-parse", "origin/feature/x") != local {
+		t.Fatalf("fix not pushed: %+v", h)
+	}
+	if !slices.Equal(w.removedAt, []string{head}) {
+		t.Errorf("origin had %v when the label came off, want the head before the push %s", w.removedAt, head)
+	}
+}
+
+// Only the directories the PR adds migrations to are read: a base file there that can't be
+// parsed doesn't matter when the PR adds no migration beside it.
+func TestBumpDownrevIgnoresDirWithoutPRMigrations(t *testing.T) {
+	t.Parallel()
+	dir := rebased(t, [][2]string{{"b1", "down_revision = None"}, {"b2", "down_revision = pick()"}}, nil)
+	os.WriteFile(filepath.Join(dir, versions, "helpers.py"), []byte("def helper():\n    pass\n"), 0o644)
+	gittest.Git(t, dir, "add", "-A")
+	gittest.Git(t, dir, "commit", "-qm", "helper")
+	before := gittest.Git(t, dir, "rev-parse", "HEAD")
+	if changed, err := bumpDownrev(context.Background(), dir, "main", migrationGlobs); err != nil || len(changed) != 0 {
+		t.Fatalf("changed %v, err %v", changed, err)
+	}
+	if gittest.Git(t, dir, "rev-parse", "HEAD") != before {
+		t.Error("committed")
+	}
+}
