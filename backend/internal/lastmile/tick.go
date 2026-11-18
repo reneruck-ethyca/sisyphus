@@ -379,7 +379,7 @@ func (m *Manager) keepArmed(i int, before, after Handoff) *Handoff {
 		release = &rel
 	} else {
 		if armed {
-			cur.AutoMergeSet, cur.AutoMergeHead, cur.AutoMergeKicks = true, after.AutoMergeHead, after.AutoMergeKicks
+			cur.AutoMergeSet, cur.AutoMergeHead, cur.AutoMergeKicks, cur.AutoMergeAt = true, after.AutoMergeHead, after.AutoMergeKicks, after.AutoMergeAt
 		}
 		if queued {
 			cur.EnqueuedAt, cur.EnqueuedHead = after.EnqueuedAt, after.EnqueuedHead

@@ -165,6 +165,7 @@ type Handoff struct {
 	MergeRequested bool      `json:"merge_requested,omitempty"`  // a person pressed merge
 	AutoMergeSet   bool      `json:"auto_merge_set,omitempty"`   // TLM turned GitHub auto-merge on; one a human turned on is theirs
 	AutoMergeHead  string    `json:"auto_merge_head,omitempty"`  // the head when TLM turned auto-merge on
+	AutoMergeAt    time.Time `json:"auto_merge_at,omitzero"`     // when TLM turned auto-merge on
 	AutoMergeKicks int       `json:"auto_merge_kicks,omitempty"` // QueueKicks when TLM turned auto-merge on
 	QueueKicks     int       `json:"queue_kicks,omitempty"`      // removals from the merge queue
 	QueueSeen      time.Time `json:"queue_seen,omitzero"`        // the newest queue removal handled

@@ -91,6 +91,9 @@ var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, State
 // decision to GitHub auto-merge, which TLM turns off again when the mode goes off.
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
 	mode := h.Autonomy.Merge
+	if h.AutoMergeSet && !s.AutoMerge && m.now().Sub(h.AutoMergeAt) < enqueueGrace {
+		s.AutoMerge = true // GitHub may not show the auto-merge TLM just enabled for a tick or two
+	}
 	if h.AutoMergeSet && (mode == MergeAuto || mode == MergeApproved) && !s.AutoMerge &&
 		s.Head == h.AutoMergeHead && h.QueueKicks == h.AutoMergeKicks {
 		// GitHub drops auto-merge on a push or a removal from the queue; with neither, a person turned it off.
@@ -106,7 +109,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	case native && !s.Draft && !s.AutoMerge:
 		switch err := m.GH.EnableAutoMerge(ctx, s.NodeID); {
 		case err == nil:
-			h.AutoMergeSet, h.AutoMergeHead, h.AutoMergeKicks = true, s.Head, h.QueueKicks
+			h.AutoMergeSet, h.AutoMergeHead, h.AutoMergeKicks, h.AutoMergeAt = true, s.Head, h.QueueKicks, m.now()
 			if h.Snapshot != nil {
 				h.Snapshot.AutoMerge = true
 			}

@@ -650,6 +650,7 @@ func TestAutoMergeTurnedOffOnGitHub(t *testing.T) {
 		gh.Snapshots[prRef.Key()] = p
 		m.tick(context.Background())
 		p.AutoMerge = false
+		m.now = func() time.Time { return time.Now().Add(3 * time.Minute) } // past the grace after enabling
 		return m, gh, id, p
 	}
 
@@ -861,5 +862,24 @@ func TestMergeNativeOnlyWhereGitHubEnforcesReviews(t *testing.T) {
 		if len(gh.AutoMerged) != 0 || !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
 			t.Errorf("%s approved: auto-merged %v merged %v", mode, gh.AutoMerged, gh.Merged)
 		}
+	}
+}
+
+func TestAutoMergeGraceAfterEnabling(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.AutoMergeAllowed = true
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	m.tick(context.Background()) // GitHub doesn't show it on yet
+	m.tick(context.Background())
+	if h := m.must(t, id); h.Autonomy.Merge != MergeApproved || !h.AutoMergeSet || len(gh.AutoMerged) != 1 {
+		t.Fatalf("in the grace: merge %s set %v auto-merged %v", h.Autonomy.Merge, h.AutoMergeSet, gh.AutoMerged)
+	}
+	m.now = func() time.Time { return time.Now().Add(3 * time.Minute) }
+	m.tick(context.Background())
+	if h := m.must(t, id); h.Autonomy.Merge != MergeOff || h.AutoMergeSet || len(gh.AutoMerged) != 1 {
+		t.Errorf("after the grace: merge %s set %v auto-merged %v", h.Autonomy.Merge, h.AutoMergeSet, gh.AutoMerged)
 	}
 }
