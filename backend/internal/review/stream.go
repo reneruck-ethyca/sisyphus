@@ -132,6 +132,13 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult, *Window) {
 	return []Event{ev("system", "", m.Type, false)}, nil, nil
 }
 
+// ParseResult returns the agent's final result if line is one, Claude's or
+// Codex's, else nil.
+func ParseResult(line string) *ClaudeResult {
+	_, r, _ := parseLine(0, line)
+	return r
+}
+
 type normalizedCodex struct {
 	events []Event
 	result *ClaudeResult

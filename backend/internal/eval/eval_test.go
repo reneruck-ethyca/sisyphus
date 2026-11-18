@@ -67,4 +67,8 @@ func TestReadLog(t *testing.T) {
 	if len(leaked) != 1 || leaked[0] != "abcdef0123" {
 		t.Errorf("leaked = %v", leaked)
 	}
+	os.WriteFile(f, []byte(`{"type":"turn.completed","usage":{"input_tokens":1}}`+"\n"), 0o644)
+	if ended, _, _, _, _ := readLog(f, nil); ended != "success" {
+		t.Errorf("codex run ended = %q, want success", ended)
+	}
 }

@@ -256,15 +256,8 @@ func readLog(file string, leaks []string) (ended string, cost float64, turns int
 				found[l[:10]] = true
 			}
 		}
-		var r struct {
-			Type     string  `json:"type"`
-			Subtype  string  `json:"subtype"`
-			Cost     float64 `json:"total_cost_usd"`
-			Turns    int     `json:"num_turns"`
-			Duration int64   `json:"duration_ms"`
-		}
-		if strings.Contains(line, `"type":"result"`) && json.Unmarshal([]byte(line), &r) == nil && r.Type == "result" {
-			ended, cost, turns, d = r.Subtype, r.Cost, r.Turns, time.Duration(r.Duration)*time.Millisecond
+		if r := review.ParseResult(line); r != nil {
+			ended, cost, turns, d = r.Subtype, r.CostUSD, r.NumTurns, time.Duration(r.Duration)*time.Millisecond
 		}
 	}
 	for l := range found {
