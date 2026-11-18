@@ -31,7 +31,7 @@ type FakeGitHub struct {
 	Edits     []github.PREdit
 	Ready     []github.PRRef
 	Comments  []string
-	Replies   []FakeReply // ReplyToComment calls
+	Replies   []FakeReply // Reply calls
 	InboxData github.Inbox
 	nextID    int64
 	Labels    []string

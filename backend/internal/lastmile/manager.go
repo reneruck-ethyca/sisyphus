@@ -58,7 +58,7 @@ func New(cfg config.Config, gh GitHub, locks *tracker.Locks, stateDir string) (*
 	}
 	m.handoffs, m.cursors = f.Handoffs, f.Cursors
 	var err error
-	if m.token, err = loadToken(stateDir); err != nil {
+	if m.token, err = LoadToken(stateDir); err != nil {
 		return nil, err
 	}
 	return m, nil

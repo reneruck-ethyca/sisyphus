@@ -56,8 +56,8 @@ func (d Dirty) assessed() bool { return d.Summary != "" || d.Message != "" || d.
 // ErrStale is an action against a worktree that changed since the page was rendered.
 var ErrStale = errors.New("worktree changed — reload")
 
-// AssessModel reads a dirty worktree's diff; it only reads text, so it needs no tools.
-var AssessModel = "haiku"
+// assessModel reads a dirty worktree's diff; it only reads text, so it needs no tools.
+const assessModel = "haiku"
 
 const (
 	maxAssessDiff   = 40_000
@@ -378,8 +378,8 @@ func (m *Manager) DirtyCommit(ctx context.Context, id, hash string, paths []stri
 	return m.Resume(ctx, id)
 }
 
-// DefaultDirtyTask is what the agent is asked when the human doesn't say.
-const DefaultDirtyTask = "Finish this work in progress so it is ready to push: complete what is half done, " +
+// defaultDirtyTask is what the agent is asked when the human doesn't say.
+const defaultDirtyTask = "Finish this work in progress so it is ready to push: complete what is half done, " +
 	"run the relevant tests and make them pass, and drop anything that clearly doesn't belong in this pull request."
 
 // DirtyAgent hands the dirty worktree to an agent: every dirty file goes into a
@@ -399,7 +399,7 @@ func (m *Manager) DirtyAgent(ctx context.Context, id, hash, msg, task string) (H
 		return Handoff{}, invalid("commit message or task too long")
 	}
 	if task == "" {
-		task = DefaultDirtyTask
+		task = defaultDirtyTask
 	}
 	h, ok := m.Get(id)
 	if !ok {
@@ -694,10 +694,10 @@ func untrackedText(ctx context.Context, dir string, skip []string) string {
 	return sb.String()
 }
 
-// ClaudeAssess asks AssessModel through the claude CLI, with no tools and no
+// ClaudeAssess asks assessModel through the claude CLI, with no tools and no
 // project or user settings, for JSON in dirtySchema.
 func ClaudeAssess(ctx context.Context, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", AssessModel, "--output-format", "json", "--json-schema", dirtySchema,
+	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", assessModel, "--output-format", "json", "--json-schema", dirtySchema,
 		"--tools", "", "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands")
 	cmd.Dir, cmd.Stdin = os.TempDir(), strings.NewReader(prompt) // no project CLAUDE.md
 	var stderr bytes.Buffer

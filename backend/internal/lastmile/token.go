@@ -13,10 +13,11 @@ import (
 // TokenFile is where the handoff API's token lives, next to lastmile.json.
 func TokenFile(stateDir string) string { return filepath.Join(stateDir, "lastmile.token") }
 
-// loadToken reads the token, creating it (0600) on first use. A handoff can
+// LoadToken reads the token the whole API takes (the dashboard via a session
+// cookie, tlm as a Bearer token), creating it (0600) on first use. A handoff can
 // carry a --notify shell command, so creating one needs more than reaching the
 // loopback port: review containers may reach it too, but don't mount the state dir.
-func loadToken(stateDir string) (string, error) {
+func LoadToken(stateDir string) (string, error) {
 	path := TokenFile(stateDir)
 	if b, err := os.ReadFile(path); err == nil {
 		if tok := strings.TrimSpace(string(b)); tok != "" {
@@ -33,10 +34,6 @@ func loadToken(stateDir string) (string, error) {
 	}
 	return tok, os.WriteFile(path, []byte(tok+"\n"), 0o600)
 }
-
-// LoadToken is the token the whole API takes (the dashboard via a session
-// cookie, tlm as a Bearer token), created on first use.
-func LoadToken(stateDir string) (string, error) { return loadToken(stateDir) }
 
 // Authorized says whether tok is the handoff API's token.
 func (m *Manager) Authorized(tok string) bool {

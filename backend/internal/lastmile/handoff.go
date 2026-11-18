@@ -93,7 +93,7 @@ func (m *Manager) parse(req Request) (Handoff, error) {
 		return h, invalid("jira %q isn't a ticket key like ENG-1234", req.Jira)
 	}
 	var err error
-	if h.Autonomy, err = ParseAutonomy(req.Autonomy); err != nil {
+	if h.Autonomy, err = parseAutonomy(req.Autonomy); err != nil {
 		return h, err
 	}
 	if h.Agent, err = m.parseAgent(req.Agent); err != nil {
@@ -135,8 +135,8 @@ func (m *Manager) parse(req Request) (Handoff, error) {
 	return h, nil
 }
 
-// ParseAutonomy reads "fix-ci,address-reviews,merge=off|shadow"; "" allows nothing.
-func ParseAutonomy(s string) (Autonomy, error) {
+// parseAutonomy reads "fix-ci,address-reviews,merge=off|shadow"; "" allows nothing.
+func parseAutonomy(s string) (Autonomy, error) {
 	a := Autonomy{Merge: MergeOff}
 	for _, tok := range strings.Split(s, ",") {
 		switch tok = strings.TrimSpace(tok); tok {
@@ -188,7 +188,7 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff, stackParent string) e
 	if err != nil {
 		return invalid("%s has no origin remote", h.Worktree)
 	}
-	if h.Repo, err = ParseRepo(remote); err != nil {
+	if h.Repo, err = parseRepo(remote); err != nil {
 		return err
 	}
 	if _, ok := m.cfg.Review.Repos[h.Repo]; !ok {
@@ -236,8 +236,8 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff, stackParent string) e
 	return nil
 }
 
-// ParseRepo reads "owner/name" from a GitHub remote URL (https, ssh or scp-style).
-func ParseRepo(remote string) (string, error) {
+// parseRepo reads "owner/name" from a GitHub remote URL (https, ssh or scp-style).
+func parseRepo(remote string) (string, error) {
 	// Only github.com: the repo name picks the image, setup and secrets, so a local path
 	// or another host must not pass for a configured repo.
 	var path string

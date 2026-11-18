@@ -147,14 +147,14 @@ func TestParseRepo(t *testing.T) {
 		"git@github.com:ethyca/fides-qa.git":      "ethyca/fides-qa",
 		"ssh://git@github.com/ethyca/fides.git":   "ethyca/fides",
 	} {
-		if got, err := ParseRepo(in); err != nil || got != want {
-			t.Errorf("ParseRepo(%q) = %q, %v; want %q", in, got, err, want)
+		if got, err := parseRepo(in); err != nil || got != want {
+			t.Errorf("parseRepo(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
 	for _, bad := range []string{"", "github.com", "https://github.com/onlyowner", "https://github.com/a/b/c",
 		"/Users/x/ethyca/fidesplus", "https://evil.example/ethyca/fidesplus.git", "git@evil.example:ethyca/fidesplus.git", "file:///tmp/ethyca/fidesplus"} {
-		if _, err := ParseRepo(bad); err == nil {
-			t.Errorf("ParseRepo(%q) should fail", bad)
+		if _, err := parseRepo(bad); err == nil {
+			t.Errorf("parseRepo(%q) should fail", bad)
 		}
 	}
 }

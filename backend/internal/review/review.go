@@ -85,8 +85,8 @@ type Run struct {
 	Overdue   bool          `json:"overdue,omitempty"`   // still running past review.timeout (set by Status)
 }
 
-// RunEvent is an Event of one run, as streamed to subscribers.
-type RunEvent struct {
+// runEvent is an Event of one run, as streamed to subscribers.
+type runEvent struct {
 	PR  string `json:"pr"`
 	Run string `json:"run"`
 	Event
@@ -155,7 +155,7 @@ type Reviewer struct {
 	unavailable string // why the runtime can't start containers right now
 	overBudget  bool   // the 5-hour budget held reviews back at the last dispatch
 	retrying    bool   // a runtime re-check is scheduled
-	subs        map[chan RunEvent]struct{}
+	subs        map[chan runEvent]struct{}
 	skipped     map[string]bool // repos without review config and missing env files, logged once
 	sh          func(ctx context.Context, dir string, env []string, script string, out io.Writer) error
 }
@@ -163,7 +163,7 @@ type Reviewer struct {
 func New(cfg config.Review, rt container.Runtime, locks *tracker.Locks, dir string) (*Reviewer, error) {
 	r := &Reviewer{cfg: cfg, rt: rt, locks: locks, dir: dir, st: store{Runs: map[string][]Run{}},
 		active: map[string]context.CancelCauseFunc{}, wake: make(chan struct{}, 1),
-		subs: map[chan RunEvent]struct{}{}, skipped: map[string]bool{}, sh: shell}
+		subs: map[chan runEvent]struct{}{}, skipped: map[string]bool{}, sh: shell}
 	if err := jsonfile.Load(r.storePath(), &r.st); err != nil {
 		return nil, err
 	}
@@ -1379,8 +1379,8 @@ func (r *Reviewer) appendLog(prID string, run Run, lw *lineWriter, line string) 
 
 // subscribe streams every run's events as they're produced, until cancel.
 // A subscriber more than 1024 events behind misses events rather than stalling runs.
-func (r *Reviewer) subscribe() (<-chan RunEvent, func()) {
-	ch := make(chan RunEvent, 1024)
+func (r *Reviewer) subscribe() (<-chan runEvent, func()) {
+	ch := make(chan runEvent, 1024)
 	r.mu.Lock()
 	r.subs[ch] = struct{}{}
 	r.mu.Unlock()
@@ -1400,7 +1400,7 @@ func (r *Reviewer) publish(prID, runID string, evs []Event) {
 	for _, e := range evs {
 		for ch := range r.subs {
 			select {
-			case ch <- RunEvent{PR: prID, Run: runID, Event: e}:
+			case ch <- runEvent{PR: prID, Run: runID, Event: e}:
 			default:
 			}
 		}
@@ -1461,7 +1461,7 @@ func (r *Reviewer) Follow(ctx context.Context, prID, runID string, from int) (<-
 			}
 		}
 		from = max(next, from)
-		mine := func(e RunEvent) bool { return e.PR == prID && e.Run == runID && e.Line >= from }
+		mine := func(e runEvent) bool { return e.PR == prID && e.Run == runID && e.Line >= from }
 		// ponytail: polls the run's status; a finish signal on the subscription if a second's lag matters
 		check := time.NewTicker(followPoll)
 		defer check.Stop()
