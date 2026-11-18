@@ -246,7 +246,14 @@ func (e Runner) runOnce(ctx context.Context, rev *review.Reviewer, job review.Jo
 	}
 	defer log.Close()
 	cid, err := e.RT.Start(ctx, spec)
-	if err != nil {
+	if err != nil { // `docker run` failing doesn't mean nothing started, and the name is fixed
+		bg := context.WithoutCancel(ctx)
+		cs, _ := e.RT.List(bg, spec.Labels)
+		for _, c := range cs {
+			if err := e.RT.Remove(bg, c.ID); err != nil {
+				slog.Warn("eval: removing container", "run", id, "err", err)
+			}
+		}
 		return err
 	}
 	defer func() {
