@@ -175,7 +175,7 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	s.BodyEdited = !sameBody(p.Body, h.LastBodyWritten)
 	h.Snapshot = &s
 	if h.DownrevHead != "" && s.Head != h.DownrevHead && s.Head != h.DownrevFrom { // still DownrevFrom: GitHub hasn't shown the push yet
-		m.unlabelDownrev(ctx, h)
+		m.unlabelDownrev(ctx, h, "the head moved on")
 	}
 	if !s.Draft && h.ReadyAt.IsZero() {
 		h.ReadyAt = m.now()

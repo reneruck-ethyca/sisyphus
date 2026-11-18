@@ -72,6 +72,9 @@ func (e effects) apply(h *Handoff) {
 		h.StackParent, h.ParentHead = "", ""
 	}
 	if e.downrevHead != "" {
+		if h.DownrevHead != e.downrevFrom || h.DownrevRoot == "" { // not a bump on top of a labelled bump
+			h.DownrevRoot = e.downrevFrom
+		}
 		h.DownrevFrom, h.DownrevHead = e.downrevFrom, e.downrevHead
 	}
 }
@@ -189,9 +192,6 @@ func (m *Manager) markRun(id string, r *RunMark) {
 func (m *Manager) agentFinished(ctx context.Context, h *Handoff, a agentRun) {
 	h.Run = nil
 	a.fx.apply(h)
-	if a.fx.downrevHead != "" {
-		m.labelDownrev(ctx, h)
-	}
 	if a.trigger == TriggerDirty {
 		m.dirtyAgentFinished(ctx, h, a.reason)
 		return

@@ -1,16 +1,21 @@
 package lastmile
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/reneruck/sisyphus/internal/github"
@@ -34,24 +39,14 @@ func bumpDownrev(ctx context.Context, dir, onto string, migrationGlobs []string)
 	}
 	var changed []string
 	for _, d := range slices.Sorted(maps.Keys(added)) {
-		f, head, err := staleMigration(ctx, dir, d, added[d])
+		f, head, src, err := staleMigration(ctx, dir, "origin/"+onto, d, added[d])
 		if err != nil {
 			return changed, fmt.Errorf("%s: %w", d, err)
 		}
 		if f == "" {
 			continue
 		}
-		p := filepath.Join(dir, f)
-		src, err := os.ReadFile(p)
-		if err != nil {
-			return changed, err
-		}
-		start, end, _ := assignment(src, "down_revision")
-		q := `"`
-		if src[start] == '\'' {
-			q = "'"
-		}
-		if err := os.WriteFile(p, slices.Concat(src[:start], []byte(q+head+q), src[end:]), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, f), repoint(src, head), 0o644); err != nil {
 			return changed, err
 		}
 		msg := fmt.Sprintf("chore(migrations): point %s at %s", path.Base(f), head)
@@ -63,60 +58,79 @@ func bumpDownrev(ctx context.Context, dir, onto string, migrationGlobs []string)
 	return changed, nil
 }
 
+// repoint sets src's down_revision, and its docstring's Revises: line, to head. A
+// string value keeps its quotes and anything after it on the line.
+func repoint(src []byte, head string) []byte {
+	start, end, _ := assignment(src, downRevisionRe)
+	if m := pyString.FindIndex(src[start:end]); m != nil {
+		end = start + m[1]
+	}
+	q := `"`
+	if src[start] == '\'' {
+		q = "'"
+	}
+	out := slices.Concat(src[:start], []byte(q+head+q), src[end:])
+	if loc := revisesRe.FindSubmatchIndex(out); loc != nil {
+		out = slices.Concat(out[:loc[2]], []byte(head), out[loc[3]:])
+	}
+	return out
+}
+
 // migration is one revision file's place in the alembic graph.
 type migration struct {
 	file  string
 	rev   string
 	downs []string
+	src   []byte
 }
 
 var errNotMigration = errors.New("no revision")
 
-// staleMigration reads the migrations in versions directory d (at HEAD, which the
-// clean worktree is) and returns the PR's first one, of added, with the base head it
-// should hang off; "" when it already does.
-func staleMigration(ctx context.Context, dir, d string, added []string) (file, head string, err error) {
-	ls, err := proc.Run(ctx, dir, "git", "--literal-pathspecs", "ls-files", "-s", "-z", "--", d)
+// staleMigration returns the PR's first migration in versions directory d, of added
+// (as at HEAD), with the head of base's migrations there it should hang off, and its
+// content; "" when it already hangs off it. The base's head comes from base alone,
+// never from files the PR changed.
+func staleMigration(ctx context.Context, dir, base, d string, added []string) (file, head string, src []byte, err error) {
+	read := func(rev string, keep func(string) bool) ([]migration, error) {
+		files, err := treeFiles(ctx, dir, rev, d)
+		if err != nil {
+			return nil, err
+		}
+		var ms []migration
+		for _, f := range slices.Sorted(maps.Keys(files)) {
+			if !keep(f) {
+				continue
+			}
+			rev, downs, err := parseMigration(files[f])
+			if errors.Is(err, errNotMigration) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", path.Base(f), err)
+			}
+			ms = append(ms, migration{f, rev, downs, files[f]})
+		}
+		return ms, nil
+	}
+	theirs, err := read(base, func(string) bool { return true })
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	var base, ours []migration
-	for _, e := range strings.Split(ls, "\x00") {
-		meta, f, ok := strings.Cut(e, "\t")
-		if !ok || path.Dir(f) != d || !strings.HasSuffix(f, ".py") || !strings.HasPrefix(meta, "1006") { // regular files only
-			continue
-		}
-		src, err := os.ReadFile(filepath.Join(dir, f))
-		if err != nil {
-			return "", "", err
-		}
-		rev, downs, err := parseMigration(src)
-		if errors.Is(err, errNotMigration) {
-			continue
-		}
-		if err != nil {
-			return "", "", fmt.Errorf("%s: %w", path.Base(f), err)
-		}
-		if slices.Contains(added, f) {
-			ours = append(ours, migration{f, rev, downs})
-		} else {
-			base = append(base, migration{f, rev, downs})
-		}
-	}
-	if len(ours) == 0 || len(base) == 0 {
-		return "", "", nil
+	ours, err := read("HEAD", func(f string) bool { return slices.Contains(added, f) })
+	if err != nil || len(ours) == 0 || len(theirs) == 0 {
+		return "", "", nil, err
 	}
 	var named, heads, mine []string
-	for _, m := range base {
+	for _, m := range theirs {
 		named = append(named, m.downs...)
 	}
-	for _, m := range base {
+	for _, m := range theirs {
 		if !slices.Contains(named, m.rev) {
 			heads = append(heads, m.rev)
 		}
 	}
 	if len(heads) != 1 {
-		return "", "", fmt.Errorf("the base has %d migration heads (%s), not one", len(heads), strings.Join(heads, ", "))
+		return "", "", nil, fmt.Errorf("the base has %d migration heads (%s), not one", len(heads), strings.Join(heads, ", "))
 	}
 	for _, m := range ours {
 		mine = append(mine, m.rev)
@@ -125,42 +139,94 @@ func staleMigration(ctx context.Context, dir, d string, added []string) (file, h
 		return slices.ContainsFunc(m.downs, func(r string) bool { return slices.Contains(mine, r) })
 	})
 	if len(first) != 1 || len(first[0].downs) != 1 {
-		return "", "", fmt.Errorf("the PR's migrations (%s) don't hang off one revision", strings.Join(mine, ", "))
+		return "", "", nil, fmt.Errorf("the PR's migrations (%s) don't hang off one revision", strings.Join(mine, ", "))
 	}
 	if first[0].downs[0] == heads[0] {
-		return "", "", nil
+		return "", "", nil, nil
 	}
-	return first[0].file, heads[0], nil
+	return first[0].file, heads[0], first[0].src, nil
 }
 
-// assignment finds the top-level `name = …` (or `name: T = …`) of a revision file and
-// returns the span of its value: the rest of the line, or a parenthesised tuple.
-func assignment(src []byte, name string) (start, end int, ok bool) {
-	loc := regexp.MustCompile(`(?m)^` + name + `[ \t]*(?::[^=\n]*)?=[ \t]*`).FindIndex(src)
+// treeFiles reads the regular .py files directly in d at rev, by path, from git's
+// objects: one ls-tree, one cat-file.
+func treeFiles(ctx context.Context, dir, rev, d string) (map[string][]byte, error) {
+	ls, err := proc.Run(ctx, dir, "git", "--literal-pathspecs", "ls-tree", "-z", rev, "--", d+"/")
+	if err != nil {
+		return nil, err
+	}
+	var paths, shas []string
+	for _, e := range strings.Split(ls, "\x00") {
+		meta, f, ok := strings.Cut(e, "\t")
+		if fields := strings.Fields(meta); ok && len(fields) == 3 && (fields[0] == "100644" || fields[0] == "100755") &&
+			path.Dir(f) == d && strings.HasSuffix(f, ".py") {
+			paths, shas = append(paths, f), append(shas, fields[2])
+		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, proc.Timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "--batch")
+	cmd.Dir, cmd.Stdin = dir, strings.NewReader(strings.Join(shas, "\n")+"\n")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git cat-file: %w", err)
+	}
+	r := bufio.NewReader(bytes.NewReader(out))
+	files := map[string][]byte{}
+	for _, p := range paths {
+		hdr, err := r.ReadString('\n')
+		fields := strings.Fields(hdr)
+		if err != nil || len(fields) != 3 {
+			return nil, fmt.Errorf("git cat-file: bad header %q", hdr)
+		}
+		n, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, err
+		}
+		b := make([]byte, n+1) // the content and its trailing newline
+		if _, err := io.ReadFull(r, b); err != nil {
+			return nil, fmt.Errorf("git cat-file: %w", err)
+		}
+		files[p] = b[:n]
+	}
+	return files, nil
+}
+
+var (
+	revisionRe     = regexp.MustCompile(`(?m)^revision[ \t]*(?::[^=\n]*)?=[ \t]*`)
+	downRevisionRe = regexp.MustCompile(`(?m)^down_revision[ \t]*(?::[^=\n]*)?=[ \t]*`)
+	revisesRe      = regexp.MustCompile(`(?m)^Revises:[ \t]*(.*)$`)
+	pyString       = regexp.MustCompile(`^(?:"([^"\\\n]*)"|'([^'\\\n]*)')`)
+	comment        = regexp.MustCompile(`[ \t]*#.*$`)
+	revisionID     = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+)
+
+// assignment finds the top-level assignment re matches in a revision file and returns
+// the span of its value: the rest of the line, or a parenthesised tuple.
+func assignment(src []byte, re *regexp.Regexp) (start, end int, ok bool) {
+	loc := re.FindIndex(src)
 	if loc == nil {
 		return 0, 0, false
 	}
 	start, end = loc[1], len(src)
-	if i := slices.Index(src[start:], '\n'); i >= 0 {
+	if i := bytes.IndexByte(src[start:], '\n'); i >= 0 {
 		end = start + i
 	}
 	if start < len(src) && src[start] == '(' {
-		if i := slices.Index(src[start:], ')'); i >= 0 {
+		if i := bytes.IndexByte(src[start:], ')'); i >= 0 {
 			end = start + i + 1
 		}
 	}
 	return start, end, true
 }
 
-var (
-	pyString = regexp.MustCompile(`^(?:"([^"\\\n]*)"|'([^'\\\n]*)')`)
-	comment  = regexp.MustCompile(`[ \t]*#.*$`)
-)
-
-// parseMigration reads revision and down_revision: string literals, None, or a tuple of strings.
+// parseMigration reads revision and down_revision: string literals, None, or a tuple
+// of strings. Every id must be a plain one: it ends up in a commit and a file TLM writes.
 func parseMigration(src []byte) (rev string, downs []string, err error) {
-	value := func(name string) ([]string, bool, error) {
-		s, e, ok := assignment(src, name)
+	value := func(name string, re *regexp.Regexp) ([]string, bool, error) {
+		s, e, ok := assignment(src, re)
 		if !ok {
 			return nil, false, nil
 		}
@@ -178,7 +244,7 @@ func parseMigration(src []byte) (rev string, downs []string, err error) {
 		var out []string
 		for v = strings.TrimSpace(v); v != ""; v = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), ",")) {
 			m := pyString.FindStringSubmatch(v)
-			if m == nil || (!tuple && len(out) > 0) {
+			if m == nil || (!tuple && len(out) > 0) || !revisionID.MatchString(m[1]+m[2]) {
 				return nil, true, fmt.Errorf("can't read %s", name)
 			}
 			out = append(out, m[1]+m[2])
@@ -189,7 +255,7 @@ func parseMigration(src []byte) (rev string, downs []string, err error) {
 		}
 		return out, true, nil
 	}
-	revs, ok, err := value("revision")
+	revs, ok, err := value("revision", revisionRe)
 	if !ok {
 		return "", nil, errNotMigration
 	}
@@ -199,37 +265,34 @@ func parseMigration(src []byte) (rev string, downs []string, err error) {
 	if err != nil {
 		return "", nil, err
 	}
-	downs, ok, err = value("down_revision")
+	downs, ok, err = value("down_revision", downRevisionRe)
 	if !ok {
 		err = errors.New("no down_revision")
 	}
 	return revs[0], downs, err
 }
 
-// labelDownrev puts the repo's downrev label on a PR whose bump TLM just pushed.
-// A failure is logged: the label only spares CI work.
-func (m *Manager) labelDownrev(ctx context.Context, h *Handoff) {
-	label := m.cfg.LastMile.DownrevLabels[h.Repo]
-	err := m.GH.CreateLabel(ctx, h.Repo, label, "c5def5", "Only a migration's down_revision changed")
-	if err == nil {
-		err = m.GH.EditPR(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, github.PREdit{AddLabels: []string{label}})
+// setDownrevLabel puts label on h's PR (creating it in the repo if need be), or takes it off.
+func (m *Manager) setDownrevLabel(ctx context.Context, h Handoff, label string, on bool) error {
+	ref := github.PRRef{Repo: h.Repo, Number: h.PRNumber}
+	if !on {
+		return m.GH.EditPR(ctx, ref, github.PREdit{RemoveLabels: []string{label}}) // the API takes an absent label as removed
 	}
-	if err != nil {
-		slog.Warn("lastmile downrev label failed", "id", h.ID, "err", err)
-		return
+	if err := m.GH.CreateLabel(ctx, h.Repo, label, "c5def5", "Only a migration's down_revision changed"); err != nil {
+		return err
 	}
-	logEvent(h, m.now(), "label", label+" on "+h.DownrevHead[:min(len(h.DownrevHead), 7)])
+	return m.GH.EditPR(ctx, ref, github.PREdit{AddLabels: []string{label}})
 }
 
-// unlabelDownrev takes the downrev label off once the PR's head is another than the
-// one TLM labelled. A failure is logged and tried again on the next tick.
-func (m *Manager) unlabelDownrev(ctx context.Context, h *Handoff) {
+// unlabelDownrev takes the downrev label off h's PR and forgets the bump. A failure
+// is logged, and h keeps it for the next tick to try again.
+func (m *Manager) unlabelDownrev(ctx context.Context, h *Handoff, why string) {
 	if label := m.cfg.LastMile.DownrevLabels[h.Repo]; label != "" {
-		if err := m.GH.EditPR(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, github.PREdit{RemoveLabels: []string{label}}); err != nil {
+		if err := m.setDownrevLabel(ctx, *h, label, false); err != nil {
 			slog.Warn("lastmile removing the downrev label failed", "id", h.ID, "err", err)
 			return
 		}
-		logEvent(h, m.now(), "label", label+" removed: the head moved on")
+		logEvent(h, m.now(), "label", label+" removed: "+why)
 	}
-	h.DownrevHead, h.DownrevFrom = "", ""
+	h.DownrevHead, h.DownrevFrom, h.DownrevRoot = "", "", ""
 }

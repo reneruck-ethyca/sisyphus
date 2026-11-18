@@ -104,6 +104,7 @@ func (m *Manager) Cancel(ctx context.Context, id string) (Handoff, error) {
 			return invalid("handoff %s is already %s", id, h.State)
 		}
 		armed, h.AutoMergeSet, h.EnqueuedAt = *h, false, time.Time{}
+		h.DownrevHead, h.DownrevFrom, h.DownrevRoot = "", "", ""
 		m.setState(h, StateCancelled, "")
 		return nil
 	})
@@ -112,6 +113,9 @@ func (m *Manager) Cancel(ctx context.Context, id string) (Handoff, error) {
 	}
 	m.running.cancel(id)
 	m.letGoLogged(ctx, &armed)
+	if armed.DownrevHead != "" || (armed.Run != nil && armed.Run.Trigger == TriggerConflict) { // a restack may have labelled
+		m.unlabelDownrev(ctx, &armed, "handoff cancelled")
+	}
 	slog.Info("lastmile cancelled", "id", id)
 	m.changed()
 	return h, nil

@@ -78,10 +78,10 @@ func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 
 // humanApproved says the PR is approved and a human approved its current head:
 // what any TLM merge needs, whatever the mode. An approval of the head before a
-// labelled downrev bump counts for the bumped head (design §7.4).
+// labelled downrev bump, or a chain of them, counts for the bumped head (design §7.4).
 func humanApproved(h Handoff, s Snapshot) bool {
 	carried := func(a Approval) bool {
-		return h.DownrevFrom != "" && h.DownrevHead == s.Head && a.CommitSHA == h.DownrevFrom
+		return h.DownrevHead != "" && h.DownrevHead == s.Head && (a.CommitSHA == h.DownrevRoot || a.CommitSHA == h.DownrevFrom)
 	}
 	return s.Approved() && slices.ContainsFunc(s.Approvals, func(a Approval) bool { return !a.Bot && (!a.Stale || carried(a)) })
 }

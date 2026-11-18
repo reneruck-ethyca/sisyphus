@@ -262,13 +262,31 @@ func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *
 	if len(bumped) > 0 {
 		fx.log("rebase", "pointed %s at the base's migration head", strings.Join(bumped, ", "))
 	}
+	// CI reads labels off the push's event, so the label goes on before the push.
+	label, labelled := "", false
+	if stops == 0 && r.green && len(bumped) > 0 {
+		label = m.cfg.LastMile.DownrevLabels[h.Repo]
+	}
+	if label != "" {
+		if err := m.setDownrevLabel(ctx, h, label, true); err != nil {
+			fx.log("label", "adding %s failed, pushing without it: %v", label, err)
+		} else {
+			labelled = true
+			fx.log("label", "%s added: the bump is the only change", label)
+		}
+	}
 	ref := "refs/heads/" + h.Branch
 	if _, err := proc.Run(ctx, dir, "git", "-c", "core.hooksPath=/dev/null", "push", "--force-with-lease="+ref+":"+pre, "origin", ref+":"+ref); err != nil {
-		rollBack() // the remote isn't what we saw: put the worktree back with it
+		rollBack()                            // the remote isn't what we saw: put the worktree back with it
+		if labelled && h.DownrevHead != pre { // pre itself may carry the label of an earlier bump
+			if err := m.setDownrevLabel(context.WithoutCancel(ctx), h, label, false); err != nil {
+				fx.log("label", "removing %s after the failed push failed: %v", label, err)
+			}
+		}
 		return "push failed (force-with-lease): " + err.Error()
 	}
 	fx.log("push", "force-pushed %s with lease (was %.7s)", h.Branch, pre)
-	if stops == 0 && r.green && len(bumped) > 0 && m.cfg.LastMile.DownrevLabels[h.Repo] != "" {
+	if labelled {
 		fx.downrevFrom = pre
 		fx.downrevHead, _ = worktree.HeadSHA(ctx, dir)
 	}
