@@ -2,6 +2,7 @@ package review
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -63,13 +64,17 @@ func parseLine(n int, line string) ([]Event, *ClaudeResult, *Window) {
 		} `json:"rate_limit_info"`
 	}
 	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "{") || json.Unmarshal([]byte(trimmed), &m) != nil || m.Type == "" {
+	if !strings.HasPrefix(trimmed, "{") {
 		return []Event{{Line: n, Kind: "output", Text: line}}, nil, nil
 	}
-	// Codex CLI's --json event stream. Normalize its final turn and item
+	// Codex CLI's --json event stream, first: its "error" event's string
+	// message doesn't fit Claude's shape. Normalize its final turn and item
 	// events into the same UI event vocabulary used by Claude.
 	if item, ok := codexEvent(n, trimmed); ok {
 		return item.events, item.result, nil
+	}
+	if json.Unmarshal([]byte(trimmed), &m) != nil || m.Type == "" {
+		return []Event{{Line: n, Kind: "output", Text: line}}, nil, nil
 	}
 	ev := func(kind, tool, text string, isErr bool) Event {
 		return Event{Line: n, Kind: kind, Tool: tool, Text: text, IsError: isErr}
@@ -147,8 +152,10 @@ func codexEvent(n int, line string) (normalizedCodex, bool) {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
+		Message string `json:"message"` // a top-level "error" event's text
 	}
-	if json.Unmarshal([]byte(line), &m) != nil || !strings.Contains(m.Type, ".") {
+	// Codex event types are dotted, except its top-level "error"; Claude has no "error" type.
+	if json.Unmarshal([]byte(line), &m) != nil || (m.Type != "error" && !strings.Contains(m.Type, ".")) {
 		return normalizedCodex{}, false
 	}
 	e := func(kind, tool, text string, bad bool) Event {
@@ -175,10 +182,7 @@ func codexEvent(n int, line string) (normalizedCodex, bool) {
 	case "turn.completed":
 		return normalizedCodex{events: []Event{e("result", "", "Codex turn completed", false)}, result: &ClaudeResult{Subtype: "success"}}, true
 	case "turn.failed", "error":
-		msg := m.Error.Message
-		if msg == "" {
-			msg = m.Type
-		}
+		msg := cmp.Or(m.Error.Message, m.Message, m.Type)
 		return normalizedCodex{events: []Event{e("result", "", msg, true)}, result: &ClaudeResult{Subtype: "error", IsError: true, Error: msg}}, true
 	default:
 		return normalizedCodex{events: []Event{e("system", "", m.Type, false)}}, true

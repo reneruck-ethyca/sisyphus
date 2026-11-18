@@ -61,3 +61,15 @@ func TestToolResultTruncated(t *testing.T) {
 		t.Fatalf("not truncated: %d", len(evs[0].Text))
 	}
 }
+
+func TestParseLineCodexErrors(t *testing.T) {
+	for _, c := range []struct{ line, want string }{
+		{`{"type":"error","message":"model not found"}`, "model not found"},
+		{`{"type":"turn.failed","error":{"message":"rate limited"}}`, "rate limited"},
+	} {
+		_, res, _ := parseLine(0, c.line)
+		if res == nil || !res.IsError || res.Error != c.want {
+			t.Errorf("%s: result = %+v, want error %q", c.line, res, c.want)
+		}
+	}
+}
