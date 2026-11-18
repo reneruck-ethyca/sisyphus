@@ -39,6 +39,9 @@ func (m *Manager) Resume(ctx context.Context, id string) (Handoff, error) {
 		if h.State != StateNeedsHuman {
 			return invalid("handoff %s is %s, not needs-human", id, h.State)
 		}
+		if _, busy := m.running.get(id); busy { // its outcome would land on a resumed handoff
+			return invalid("an agent is running on %s: wait for it to finish", id)
+		}
 		m.unescalate(h)
 		return nil
 	})

@@ -224,7 +224,8 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
     HEAD~1`, only while it's the unpushed head), the changes are uncommitted again, and the reason says so.
     `dirty.wip` records the commit for the run's length and survives the panel's rebuilds; a run lost to a
     restart is cleaned up like any lost run (above), which unwraps it. While the run lasts the page shows
-    "agent running" in place of the panel.
+    "agent running" in place of the panel, and Resume is refused until the run is applied: a run failing on a
+    resumed handoff would leave the human's changes uncommitted with no one told.
 
   `GET …/dirty/diff?path=` (path must be a listed file) is `git diff HEAD -- path` for a tracked file, the
   content of an untracked regular file, cut at 200 KB, or "binary file". Actions run under the worktree lock
@@ -489,3 +490,6 @@ None right now.
   gitignored file the run changed, which threw the fix away. fidesplus' repo env now points ruff, mypy and
   coverage at `/tmp`, turns off pytest's cache plugin and sets `PYTHONDONTWRITEBYTECODE`. The ignored-file
   check is unchanged; running agents on a copy of the worktree, which would retire it, is being scoped.
+- **2026-11-18:** Resume is refused while an agent run is in flight on the handoff. The dashboard offered
+  Resume during a dirty-agent run; if the agent then failed, its outcome only set the reason on a handoff
+  already back at pr-open, so the human's unwrapped changes sat in the worktree without an escalation.

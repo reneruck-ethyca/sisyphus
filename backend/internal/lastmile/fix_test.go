@@ -388,6 +388,9 @@ func TestResumeAndCancel(t *testing.T) {
 	if h.State != StateNeedsHuman || h.FixRounds["ci"] != 1 || len(h.FixedFailures) != 1 {
 		t.Fatalf("setup: %+v", h)
 	}
+	m.running.put(id, &agentRun{trigger: "dirty"}) // the dirty agent, which reports back to needs-human
+	invalidWith(t, func() error { _, err := m.Resume(context.Background(), id); return err }(), "agent is running")
+	m.running.drop(id)
 	got, err := m.Resume(context.Background(), id)
 	if err != nil || got.State != StatePROpen || got.Reason != "" || got.FixRounds["ci"] != 0 || len(got.FixedFailures) != 0 || got.PrevState != "" {
 		t.Fatalf("resume = %+v, %v", got, err)
