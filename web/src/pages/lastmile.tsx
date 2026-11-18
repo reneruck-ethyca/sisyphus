@@ -76,7 +76,7 @@ const modes = [["off", "off"], ["auto", "when checks pass"], ["approved", "when 
 function MergeMode({ v, busy, act }: { v: HandoffView; busy: string; act: (url: string, body?: unknown) => Promise<boolean> }) {
   const url = `/api/handoffs/${encodeURIComponent(v.id)}/merge-mode`, cur = v.autonomy.merge;
   const set = (mode: string) => act(url, { mode });
-  if (v.snapshot?.auto_merge_allowed) return <label class="muted"><input type="checkbox" checked={cur === "approved"} disabled={!!busy}
+  if (v.snapshot?.auto_merge_allowed) return <label class="muted"><input type="checkbox" checked={cur === "approved" || cur === "auto"} disabled={!!busy}
     onChange={(e) => set(e.currentTarget.checked ? "approved" : "off")} /> Auto-merge</label>;
   return <label class="muted">Auto-merge{" "}<select value={cur} disabled={!!busy} onChange={(e) => set(e.currentTarget.value)}>
     {cur === "shadow" && <option value="shadow">shadow</option>}
@@ -88,7 +88,9 @@ export function Actions({ v }: { v: HandoffView }) {
   const id = encodeURIComponent(v.id), resume = `/api/handoffs/${id}/resume`, cancel = `/api/handoffs/${id}/cancel`, merge = `/api/handoffs/${id}/merge`;
   return <>
     {v.state === "needs-human" && <><button class="btn small" disabled={!!busy} onClick={() => act(resume)}>Resume</button>{" "}</>}
-    {v.can_merge && v.state !== "queued" && <><button class="btn small" disabled={!!busy} onClick={() => act(merge)}>Squash and merge</button>{" "}</>}
+    {v.merge_requested && !v.over && <><span class="muted">merge pending</span>{" "}</>}
+    {v.can_merge && v.state !== "queued" && <><button class="btn small" disabled={!!busy}
+      onClick={() => confirm(`Squash and merge ${v.repo}#${v.pr_number}?`) && act(merge)}>Squash and merge</button>{" "}</>}
     {!v.over && <><MergeMode v={v} busy={busy} act={act} />{" "}<button class="btn quiet small" disabled={!!busy} onClick={() => act(cancel)}>Cancel</button></>}
   </>;
 }

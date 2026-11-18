@@ -412,11 +412,15 @@ gitignored files are removed, changed ones are named in the reason (size, mtime,
 compared), and the tree goes back to the head it started at. A nested git repository or `.git` entry is refused.
 
 Merging: `merge=off` (the default) never merges on its own; `merge=approved` merges once the PR is approved, and
-`merge=auto` once the merge policy below says yes. Where the repo allows GitHub auto-merge, those two turn it on
-(squash) as soon as the PR is ready and GitHub decides; going back to `off` or `shadow` turns it off again (only
-auto-merge TLM turned on). Otherwise TLM squash-merges on the tick, or, when the base has a merge queue, adds the
-PR to it (state `queued`), never inside a merge freeze. Every TLM merge needs green checks and a human's approval
-of the current head. The dashboard's merge button (`POST /api/handoffs/<id>/merge`) merges the same way, without
+`merge=auto` once the merge policy below says yes. Where the repo allows GitHub auto-merge and requires reviews,
+those two turn it on (squash) as soon as the PR is ready and GitHub decides; going back to `off` or `shadow` turns
+it off again (only auto-merge TLM turned on), and a person turning it off on GitHub sets the mode to `off`.
+Otherwise TLM squash-merges on the tick, or, when the base has a merge queue, adds the PR to it (state `queued`),
+never inside a merge freeze. Every merge TLM makes itself needs green checks and a human's approval of the current
+head; with GitHub auto-merge, GitHub's own rules decide. When TLM escalates, is cancelled or the mode goes `off`,
+it turns off its auto-merge and takes the PR out of the merge queue it put it in. A merge GitHub refuses (other
+than for a head that just moved) goes to needs-human. After a merge, TLM removes the worktree and its local branch,
+unless the worktree has uncommitted or unpushed work or isn't a linked worktree. The dashboard's merge button (`POST /api/handoffs/<id>/merge`) merges the same way, without
 GitHub auto-merge and regardless of a freeze; `PUT /api/handoffs/<id>/merge-mode` with
 `{"mode": "off|shadow|auto|approved"}` changes the mode (`off` and `shadow` also withdraw a pressed button).
 
@@ -424,9 +428,10 @@ Shadow merge (`merge=shadow`): TLM never merges, but on
 each tick of an open, ready PR it asks the merge policy "would you merge this?" and keeps the verdict on the
 handoff (`shadow`, shown for `merge=off` handoffs too). The policy says yes when there is a current approval from
 a human (not a bot) and GitHub's decision isn't `CHANGES_REQUESTED`/`REVIEW_REQUIRED`, no approval is stale, all
-checks are green on the head, no review thread is unresolved, the base is up to date (not behind, not
-`BEHIND`/`DIRTY`), no changed file matches `lastmile.risky_paths`, additions plus deletions are within
-`lastmile.max_merge_lines`, and now is outside every `lastmile.merge_freeze` window. Each verdict lists its
+checks are green on the head, no unresolved review thread ends with a reviewer's comment (threads whose last
+comment is the PR author's or TLM's count as answered), the PR doesn't conflict with its base (`DIRTY`), it is up
+to date with the base if it touches `lastmile.migration_paths` (behind is fine otherwise), no changed file matches
+`lastmile.risky_paths`, and now is outside every `lastmile.merge_freeze` window. Each verdict lists its
 blockers and the signals it saw (diff size, risky paths, fix rounds per trigger, who approved and whether they are
 bots, time in review since the PR was first ready, flake reruns, agent commits, unresolved threads, commits
 behind, stale approvals). For `merge=shadow` handoffs a verdict is appended to `lastmile-shadow.jsonl` next to
@@ -494,7 +499,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.allow_paths` | `[]` | globs an agent may change although the denylist names them |
 | `lastmile.bot_logins` | `["ethycabot"]` | user accounts whose review feedback counts as bot feedback |
 | `lastmile.risky_paths` | migrations, auth, `.github/**`, Dockerfiles, `infra/**`, `*.tf` | globs: touching one blocks a would-merge verdict |
-| `lastmile.max_merge_lines` | `400` | additions plus deletions above this block a would-merge verdict |
+| `lastmile.migration_paths` | migrations, alembic versions | globs: a PR touching one must be up to date with its base for a would-merge verdict |
 | `lastmile.merge_freeze` | `[]` | windows `{weekday?, start, end, tz}` in which a PR would not be merged |
 
 ## `on_conflict` hook
