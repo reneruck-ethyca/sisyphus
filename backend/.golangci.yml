@@ -27,3 +27,6 @@ linters:
         linters: [errcheck] # tests fail on what they check; setup writes fail loudly anyway
     paths:
       - reviewer/staged
+
+formatters:
+  enable: [gofmt]
