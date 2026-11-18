@@ -263,7 +263,7 @@ func newHandler(srv server) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		h, err := lm.Handoff(r.Context(), req)
+		h, err := lm.Handoff(context.WithoutCancel(r.Context()), req) // a closed connection mustn't stop it half-way
 		writeLastMile(w, r, http.StatusCreated, h, err)
 	})
 	mux.HandleFunc("GET /api/handoffs", func(w http.ResponseWriter, r *http.Request) {
@@ -326,7 +326,7 @@ func newHandler(srv server) http.Handler {
 			var h lastmile.Handoff
 			var err error
 			if verb == "resume" {
-				h, err = lm.Resume(r.Context(), r.PathValue("id"))
+				h, err = lm.Resume(context.WithoutCancel(r.Context()), r.PathValue("id"))
 			} else {
 				h, err = lm.Cancel(r.PathValue("id"))
 			}
@@ -345,18 +345,18 @@ func newHandler(srv server) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		id := r.PathValue("id")
+		id, ctx := r.PathValue("id"), context.WithoutCancel(r.Context()) // git half-done is worse than a late answer
 		var h lastmile.Handoff
 		var err error
 		switch r.PathValue("action") {
 		case "commit":
-			h, err = lm.DirtyCommit(r.Context(), id, body.Hash, body.Paths, body.Message)
+			h, err = lm.DirtyCommit(ctx, id, body.Hash, body.Paths, body.Message)
 		case "stash":
-			h, err = lm.DirtyStash(r.Context(), id, body.Hash)
+			h, err = lm.DirtyStash(ctx, id, body.Hash)
 		case "agent":
-			h, err = lm.DirtyAgent(r.Context(), id, body.Hash, body.Message, body.Task)
+			h, err = lm.DirtyAgent(ctx, id, body.Hash, body.Message, body.Task)
 		case "leave":
-			h, err = lm.DirtyLeave(r.Context(), id, body.Hash)
+			h, err = lm.DirtyLeave(ctx, id, body.Hash)
 		default:
 			http.NotFound(w, r)
 			return

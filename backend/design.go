@@ -225,7 +225,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		}
 		// So the PR leaves Needs you now, not at the next check. The review is posted either way: failing
 		// the request now would have the user submit it again.
-		if _, err := srv.tracker.Refresh(ctx, ref.Key()); err != nil {
+		if _, err := srv.tracker.Refresh(context.WithoutCancel(ctx), ref.Key()); err != nil { // the page may close meanwhile
 			slog.Warn("refreshing PR after a design review", "pr", ref.Key(), "err", err)
 		}
 		return nil
