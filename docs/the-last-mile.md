@@ -157,6 +157,9 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   finished (the container waits for it) and adds what setup left under `node_modules/` to the
   baseline. Everything else setup writes is still held against the run: setup runs the branch's
   install scripts, which an earlier agent round may have changed. A reason names at most 20 paths and counts the rest.
+  The agent is asked to run the repo's checks, so a repo's `env` sends the checks' caches out of the worktree
+  (fidesplus: `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, `COVERAGE_FILE` under `/tmp`, pytest's cache plugin off,
+  no `.pyc`); a cache a repo's env misses still fails the run.
 - **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
   flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
   to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
@@ -481,3 +484,8 @@ None right now.
   `lastmile.token` as a Bearer token on every call; the dashboard signs in with a one-time code the menu-bar
   item opens it with, traded for an HttpOnly cookie derived from the token. This supersedes "none take a
   token yet" for resume, cancel, reviewers and the dirty actions.
+- **2026-11-18:** Lint and test caches leave the worktree. fidesplus#7136 went to needs-human three more
+  times (Nov 8, 9, 13) because the agent, as its prompt asks, ran ruff, and `.ruff_cache/` counted as a
+  gitignored file the run changed, which threw the fix away. fidesplus' repo env now points ruff, mypy and
+  coverage at `/tmp`, turns off pytest's cache plugin and sets `PYTHONDONTWRITEBYTECODE`. The ignored-file
+  check is unchanged; running agents on a copy of the worktree, which would retire it, is being scoped.

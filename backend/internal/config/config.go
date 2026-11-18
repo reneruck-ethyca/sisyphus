@@ -280,7 +280,11 @@ var fidesplus = RepoReview{
 		"FIDES__DATABASE__SERVER": "fidesplus-db", "FIDES__DATABASE__PORT": "5432",
 		"FIDES__REDIS__HOST": "fidesplus-redis", "FIDES__REDIS__PORT": "6379",
 		"UV_CACHE_DIR": "/sisyphus/cache/uv", "npm_config_cache": "/sisyphus/cache/npm",
-		"UV_LINK_MODE": "copy"}, // the uv cache is another volume: hardlinks can't cross it
+		"UV_LINK_MODE": "copy", // the uv cache is another volume: hardlinks can't cross it
+		// Lint and test caches out of the worktree: TLM holds any gitignored file an agent run
+		// writes there against it, and the agent runs these checks as it fixes.
+		"RUFF_CACHE_DIR": "/tmp/ruff", "MYPY_CACHE_DIR": "/tmp/mypy", "COVERAGE_FILE": "/tmp/.coverage",
+		"PYTEST_ADDOPTS": "-p no:cacheprovider", "PYTHONDONTWRITEBYTECODE": "1"},
 	Setup: `uv sync --all-groups
 uv pip install --no-deps -e .
 cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
