@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cli/go-gh/v2/pkg/api"
+
 	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/gittest"
@@ -147,7 +149,7 @@ func TestMergeNativeIgnoresEvaluator(t *testing.T) {
 	t.Parallel()
 	m, gh, _, id := opened(t, Request{Autonomy: "merge=auto"})
 	p := mergeable()
-	p.AutoMergeAllowed, p.ReviewDecision, p.Reviews = true, "", nil
+	p.AutoMergeAllowed, p.ReviewDecision, p.Reviews = true, "REVIEW_REQUIRED", nil
 	p.Checks = []github.Check{chk("a", "IN_PROGRESS", "")}
 	gh.Snapshots[prRef.Key()] = p
 	m.tick(context.Background())
@@ -785,5 +787,79 @@ func TestQueueRemovalAfterPushIgnored(t *testing.T) {
 	m.tickWait(t)
 	if h := m.must(t, id); h.QueueKicks != 0 || !h.QueueSeen.Equal(at) || tasks.n() != 0 || h.State == StateNeedsHuman {
 		t.Errorf("kicks %d seen %v agent runs %d, handoff %s", h.QueueKicks, h.QueueSeen, tasks.n(), h.State)
+	}
+}
+
+func TestMergeRefusedByGitHubEscalates(t *testing.T) {
+	t.Parallel()
+	refuse := func(t *testing.T, p github.PRSnapshot, err error) (*Manager, *FakeGitHub, string) {
+		m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+		gh.MergeErr, gh.AutoMergeErr = err, err
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		return m, gh, id
+	}
+	policy := &api.HTTPError{StatusCode: 405, Message: "Base branch policy prohibits the merge"}
+
+	m, gh, id := refuse(t, mergeable(), policy)
+	m.tick(context.Background())
+	if h := m.must(t, id); h.State != StateNeedsHuman || !strings.HasPrefix(h.Reason, "GitHub refused the merge: ") ||
+		!strings.Contains(h.Reason, "prohibits") || h.Error != "" || len(gh.Merged) != 1 || !hasEvent(h, "GitHub refused the merge") {
+		t.Errorf("squash: %s %q error %q merged %v", h.State, h.Reason, h.Error, gh.Merged)
+	}
+
+	p := mergeable()
+	p.MergeQueue, p.BaseRef = true, "main"
+	m, _, id = refuse(t, p, policy)
+	if h := m.must(t, id); h.State != StateNeedsHuman {
+		t.Errorf("enqueue: %s %q", h.State, h.Reason)
+	}
+
+	p = mergeable()
+	p.AutoMergeAllowed = true
+	m, _, id = refuse(t, p, errors.New("enablePullRequestAutoMerge: Pull request is not mergeable"))
+	if h := m.must(t, id); h.State != StateNeedsHuman || h.AutoMergeSet {
+		t.Errorf("auto-merge: %s %q set %v", h.State, h.Reason, h.AutoMergeSet)
+	}
+
+	// A head that moved under the merge is tried again on the next tick.
+	m, _, id = refuse(t, mergeable(), &api.HTTPError{StatusCode: 409, Message: "Head branch was modified"})
+	if h := m.must(t, id); h.State != StateApproved || h.Error != "" {
+		t.Errorf("409: %s %q error %q", h.State, h.Reason, h.Error)
+	}
+}
+
+func TestMergeNativeCleanStatesMergeItself(t *testing.T) {
+	t.Parallel()
+	for _, st := range []string{"UNSTABLE", "HAS_HOOKS"} {
+		m, gh, _, _ := opened(t, Request{Autonomy: "merge=approved"})
+		p := mergeable()
+		p.AutoMergeAllowed, p.MergeState = true, st
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		if !slices.Equal(gh.Merged, []github.PRRef{prRef}) || len(gh.AutoMerged) != 0 {
+			t.Errorf("%s: merged %v auto-merged %v", st, gh.Merged, gh.AutoMerged)
+		}
+	}
+}
+
+func TestMergeNativeOnlyWhereGitHubEnforcesReviews(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{MergeApproved, MergeAuto} {
+		m, gh, _, _ := opened(t, Request{Autonomy: "merge=" + mode})
+		p := mergeable()
+		p.AutoMergeAllowed, p.ReviewDecision = true, "" // no review required: GitHub would merge unapproved
+		p.Reviews = nil
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		if len(gh.AutoMerged)+len(gh.Merged) != 0 {
+			t.Errorf("%s unapproved: auto-merged %v merged %v", mode, gh.AutoMerged, gh.Merged)
+		}
+		p.Reviews = mergeable().Reviews
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		if len(gh.AutoMerged) != 0 || !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
+			t.Errorf("%s approved: auto-merged %v merged %v", mode, gh.AutoMerged, gh.Merged)
+		}
 	}
 }

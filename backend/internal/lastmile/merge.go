@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -97,9 +98,10 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		h.AutoMergeSet, h.MergeRequested = false, false
 		logEvent(h, m.now(), "merge", "auto-merge turned off on GitHub; merge mode set to off")
 	}
-	// GitHub won't enable auto-merge on a PR that is already mergeable ("clean"): TLM merges that one itself.
+	// GitHub won't enable auto-merge on a PR that is already mergeable: TLM merges that one itself.
+	// Nor does TLM hand it a PR on a repo that requires no review: GitHub would merge it unapproved.
 	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved) &&
-		(s.AutoMerge || s.MergeState != "CLEAN")
+		s.ReviewDecision != "" && (s.AutoMerge || !slices.Contains(mergeableNow, s.MergeState))
 	switch {
 	case native && !s.Draft && !s.AutoMerge:
 		switch err := m.GH.EnableAutoMerge(ctx, s.NodeID); {
@@ -112,7 +114,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		case strings.Contains(err.Error(), "clean status"):
 			native = false
 		default:
-			return state, reason, err
+			return m.refused(ctx, h, err, state, reason)
 		}
 	case !h.MergeRequested && (mode == MergeOff || mode == MergeShadow):
 		if err := m.letGo(ctx, h); err != nil {
@@ -138,17 +140,36 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 			return StateQueued, "", nil
 		}
 		if err := m.GH.Enqueue(ctx, s.NodeID); err != nil {
-			return state, reason, err
+			return m.refused(ctx, h, err, state, reason)
 		}
 		h.EnqueuedAt, h.EnqueuedHead = m.now(), s.Head
 		logEvent(h, m.now(), "merge", "added to the merge queue")
 		return StateQueued, "", nil
 	}
 	if err := m.GH.MergeSquash(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, s.Head); err != nil {
-		return state, reason, err
+		return m.refused(ctx, h, err, state, reason)
 	}
 	logEvent(h, m.now(), "merge", "squash-merged "+s.Head[:min(len(s.Head), 12)])
 	return state, reason, nil
+}
+
+// mergeableNow are the merge states GitHub won't enable auto-merge in: the PR can merge as it is.
+var mergeableNow = []string{"CLEAN", "UNSTABLE", "HAS_HOOKS"}
+
+// refused answers GitHub refusing a merge: a refusal won't go away by itself, so
+// it is a person's to look at. A head that moved under the merge is tried again
+// on the next tick.
+func (m *Manager) refused(ctx context.Context, h *Handoff, err error, state, reason string) (string, string, error) {
+	if ctx.Err() != nil {
+		return state, reason, err
+	}
+	if github.IsStatus(err, http.StatusConflict) {
+		slog.Info("lastmile merge: the head moved", "id", h.ID, "err", err)
+		return state, reason, nil
+	}
+	why := "GitHub refused the merge: " + err.Error()
+	logEvent(h, m.now(), "merge", why)
+	return StateNeedsHuman, why, nil
 }
 
 // enqueuing says TLM added the PR to the merge queue a moment ago, and GitHub

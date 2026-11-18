@@ -51,6 +51,7 @@ type FakeGitHub struct {
 	AutoMerged   []string         // node ids EnableAutoMerge was asked for
 	AutoMergeOff []string         // node ids DisableAutoMerge was asked for
 	AutoMergeErr error            // returned by EnableAutoMerge
+	MergeErr     error            // returned by MergeSquash and Enqueue
 	QueueChecks  []github.Check   // what QueueFailures returns
 	Err          error            // returned by every call
 }
@@ -121,12 +122,12 @@ func (f *FakeGitHub) RerunFailed(_ context.Context, _ string, runID int64) error
 
 func (f *FakeGitHub) MergeSquash(_ context.Context, ref github.PRRef, _ string) error {
 	f.Merged = append(f.Merged, ref)
-	return f.Err
+	return cmp.Or(f.MergeErr, f.Err)
 }
 
 func (f *FakeGitHub) Enqueue(_ context.Context, nodeID string) error {
 	f.Enqueued = append(f.Enqueued, nodeID)
-	return f.Err
+	return cmp.Or(f.MergeErr, f.Err)
 }
 
 func (f *FakeGitHub) Dequeue(_ context.Context, nodeID string) error {
