@@ -29,7 +29,6 @@ func opened(t *testing.T, req Request) (*Manager, *FakeGitHub, *[]string, string
 	gh.NextPR = prRef
 	gh.Snapshots = map[string]github.PRSnapshot{}
 	var events []string
-	m.removeWT = func(context.Context, string, string) error { return nil }
 	m.runHook = func(_ context.Context, _ string, _ time.Duration, _ string, env map[string]string) error {
 		events = append(events, env["TLM_EVENT"])
 		return nil

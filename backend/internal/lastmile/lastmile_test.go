@@ -45,6 +45,7 @@ func fixture(t *testing.T) (*Manager, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.removeWT = func(context.Context, string, string) error { return nil }
 	return m, clone, dir
 }
 

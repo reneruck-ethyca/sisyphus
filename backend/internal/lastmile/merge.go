@@ -13,6 +13,7 @@ import (
 
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/proc"
+	"github.com/reneruck/sisyphus/internal/worktree"
 )
 
 // Merge is the dashboard's merge button: the next tick squash-merges the PR, or
@@ -242,7 +243,7 @@ func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (st
 }
 
 // removeWorktree drops a merged handoff's worktree and local branch unless the
-// worktree holds uncommitted work. Trouble becomes a Warning; it is not retried.
+// worktree holds uncommitted or unpushed work, or is a repo's main checkout. Trouble becomes a Warning; it is not retried.
 func (m *Manager) removeWorktree(ctx context.Context, h Handoff) {
 	if h.Worktree == "" {
 		return
@@ -269,11 +270,23 @@ func (m *Manager) removeWorktree(ctx context.Context, h Handoff) {
 		warn("worktree kept: it has uncommitted changes")
 		return
 	}
-	common, err := proc.Run(ctx, h.Worktree, "git", "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err == nil {
-		err = m.removeWT(ctx, filepath.Dir(common), h.Branch)
-	}
+	dirs, err := proc.Run(ctx, h.Worktree, "git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
 	if err != nil {
+		warn("worktree kept: " + err.Error())
+		return
+	}
+	gitDir, common, _ := strings.Cut(dirs, "\n")
+	if gitDir == common {
+		warn("worktree kept: not a linked worktree")
+		return
+	}
+	if head, err := worktree.HeadSHA(ctx, h.Worktree); err != nil || h.Snapshot == nil || head != h.Snapshot.Head {
+		if ahead, err := proc.Run(ctx, h.Worktree, "git", "rev-list", "@{u}..HEAD"); err != nil || ahead != "" {
+			warn("worktree kept: it has unpushed commits")
+			return
+		}
+	}
+	if err := m.removeWT(ctx, filepath.Dir(common), h.Branch); err != nil {
 		warn("removing the worktree failed: " + err.Error())
 		return
 	}

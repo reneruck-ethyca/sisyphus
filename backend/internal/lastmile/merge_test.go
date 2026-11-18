@@ -528,15 +528,20 @@ func TestQueueLostRunLogged(t *testing.T) {
 	}
 }
 
+// mergedHandoff is a merged handoff whose worktree is a linked worktree of the
+// fixture's clone, on feature/y tracking origin/feature/x, at the PR's head.
 func mergedHandoff(t *testing.T) (*Manager, Handoff, *[][2]string) {
 	t.Helper()
 	m, clone, _ := fixture(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+	gittest.Git(t, clone, "worktree", "add", "-q", "--track", "-b", "feature/y", wt, "origin/feature/x")
 	var calls [][2]string
 	m.removeWT = func(_ context.Context, dir, branch string) error {
 		calls = append(calls, [2]string{dir, branch})
 		return nil
 	}
-	h := Handoff{ID: "h1", Worktree: clone, Branch: "feature/x", State: StateMerged}
+	h := Handoff{ID: "h1", Worktree: wt, Branch: "feature/y", State: StateMerged,
+		Snapshot: &Snapshot{Head: gittest.Git(t, wt, "rev-parse", "HEAD")}}
 	m.handoffs = []Handoff{h}
 	return m, h, &calls
 }
@@ -545,12 +550,49 @@ func TestCleanupRemovesMergedWorktree(t *testing.T) {
 	t.Parallel()
 	m, h, calls := mergedHandoff(t)
 	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
-	dir, _ := filepath.EvalSymlinks(h.Worktree) // git reports the resolved path
-	want := [][2]string{{dir, "feature/x"}}
+	common := gittest.Git(t, h.Worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	want := [][2]string{{filepath.Dir(common), "feature/y"}}
 	if !slices.Equal(*calls, want) {
 		t.Errorf("remover calls %v, want %v", *calls, want)
 	}
 	if got := m.must(t, "h1"); got.Warning != "" {
+		t.Errorf("warning %q", got.Warning)
+	}
+
+	// The head moved since the last snapshot, but upstream has it: nothing is lost.
+	m, h, calls = mergedHandoff(t)
+	h.Snapshot = &Snapshot{Head: "older"}
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if len(*calls) != 1 {
+		t.Errorf("pushed head: remover calls %v", *calls)
+	}
+}
+
+func TestCleanupKeepsUnpushedCommits(t *testing.T) {
+	t.Parallel()
+	m, h, calls := mergedHandoff(t)
+	gittest.Commit(t, h.Worktree, "late.txt", "after the merge")
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if len(*calls) != 0 {
+		t.Errorf("unpushed commit removed: %v", *calls)
+	}
+	if got := m.must(t, "h1"); got.Warning != "worktree kept: it has unpushed commits" {
+		t.Errorf("warning %q", got.Warning)
+	}
+}
+
+func TestCleanupKeepsMainCheckout(t *testing.T) {
+	t.Parallel()
+	m, h, calls := mergedHandoff(t)
+	h.Worktree = filepath.Dir(gittest.Git(t, h.Worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+	h.Branch = "feature/x"
+	h.Snapshot = &Snapshot{Head: gittest.Git(t, h.Worktree, "rev-parse", "HEAD")}
+	m.handoffs = []Handoff{h}
+	m.afterCommit(context.Background(), Handoff{ID: "h1", State: StatePROpen}, h)
+	if len(*calls) != 0 {
+		t.Errorf("main checkout removed: %v", *calls)
+	}
+	if got := m.must(t, "h1"); got.Warning != "worktree kept: not a linked worktree" {
 		t.Errorf("warning %q", got.Warning)
 	}
 }
