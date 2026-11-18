@@ -110,7 +110,10 @@ function SkillCard() {
   const [err, setErr] = useState("");
   useEffect(() => {
     if (!st?.busy) return;
-    const t = setTimeout(async () => setSt(await get<SkillStatus>("/api/skill")), 500);
+    const t = setTimeout(async () => {
+      try { setSt(await get<SkillStatus>("/api/skill")); setErr(""); }
+      catch (e) { setErr((e as Error).message); setSt({ ...st }); } // keeps polling: sisyphus may be restarting
+    }, 500);
     return () => clearTimeout(t);
   }, [st]);
   const act = async (id: string, action: string) => {

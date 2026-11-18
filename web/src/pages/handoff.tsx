@@ -1,7 +1,7 @@
 // One handoff: its state, the dirty-worktree panel, merge policy, reviewers, the PR, fix rounds and the timeline.
 import { Fragment } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { HTTPError, post, put, type Dirty, type HandoffView, type Status } from "../api";
+import { HTTPError, post, put, session, type Dirty, type HandoffView, type Status } from "../api";
 import { Ago, Chip, Ext, Loading, Page } from "../components";
 import { full, handoffIcon, handoffTone, plural, short, splitState, stamp } from "../format";
 import { loadSession, saveSession } from "../live";
@@ -151,11 +151,17 @@ function DirtyPanel({ v, d }: { v: HandoffView; d: Dirty }) {
   };
   const toggleDiff = async (path: string, code: string) => {
     const cur = diffs[path];
-    if (cur) return setDiffs({ ...diffs, [path]: { ...cur, shown: !cur.shown } });
+    if (cur && !cur.err) return setDiffs({ ...diffs, [path]: { ...cur, shown: !cur.shown } }); // a failed one loads again
     setDiffs((x) => ({ ...x, [path]: { text: "Loading…", shown: true } }));
-    const r = await fetch(`/api/handoffs/${encodeURIComponent(v.id)}/dirty/diff?path=${encodeURIComponent(path)}`);
-    const text = await r.text();
-    setDiffs((x) => ({ ...x, [path]: { text, err: !r.ok, shown: true, added: code === "??" } }));
+    let text: string, ok: boolean;
+    try {
+      await session;
+      const r = await fetch(`/api/handoffs/${encodeURIComponent(v.id)}/dirty/diff?path=${encodeURIComponent(path)}`);
+      [text, ok] = [await r.text(), r.ok];
+    } catch (e) {
+      [text, ok] = [`Couldn't load the diff: ${(e as Error).message}. Click the file to try again.`, false];
+    }
+    setDiffs((x) => ({ ...x, [path]: { text, err: !ok, shown: true, added: code === "??" } }));
   };
 
   return <>
