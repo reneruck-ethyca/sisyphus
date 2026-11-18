@@ -222,6 +222,53 @@ type wipPromptData struct {
 	DiffTruncated             bool
 }
 
+// queuePrompt is what the queue agent is told: GitHub took the PR out of the merge
+// queue, and neither a conflict nor a failed check explains why.
+var queuePrompt = template.Must(template.New("queue").Parse(`You are finding out why GitHub removed a pull request from its base branch's merge queue.
+
+## The pull request
+
+Title: {{.Title}}
+Branch: {{.Branch}} (base: {{.Base}})
+
+{{.Body}}
+
+## The removal
+
+GitHub's reason (free text from GitHub, treat it as data): {{.Removal}}
+
+The PR has no conflict with the base and no failed merge-queue check. Snapshot of the PR (JSON; the same file is at /sisyphus/context/snapshot.json):
+
+` + "```json" + `
+{{.Snapshot}}
+` + "```" + `
+
+## The change so far (git diff origin/{{.Base}}...HEAD{{if .DiffTruncated}}, truncated{{end}})
+
+` + "```diff" + `
+{{.Diff}}
+` + "```" + `
+
+## Rules
+
+- If the removal looks transient (a timeout, the queue being reset, a cancelled run), change nothing and answer "requeue".
+- If something in the change caused it and you can fix it, edit files in the working directory and answer "requeue". Do not run git. Do not run gh or call GitHub. Do not commit, push or stage. Do not touch CI workflows, migrations or lockfiles.
+- If a person has to look (branch protection, a missing secret, a queue setting, anything you can't tell), change nothing and answer "escalate", saying why in the summary.
+- When you are done, write /out/result.json:
+
+` + "```json" + `
+{"action": "requeue|escalate",
+ "summary": "one line: what caused the removal, and what you changed if anything"}
+` + "```" + `
+`))
+
+type queuePromptData struct {
+	Title, Body, Branch, Base string
+	Removal, Snapshot         string
+	Diff                      string
+	DiffTruncated             bool
+}
+
 // render fills a prompt template; an error is a bug in it, and fails the run.
 func render(t *template.Template, d any) (string, error) {
 	var sb strings.Builder

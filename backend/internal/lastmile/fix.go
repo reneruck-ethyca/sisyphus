@@ -511,3 +511,39 @@ func (m *Manager) headShort(ctx context.Context, h Handoff) string {
 	sha, _ := worktree.HeadSHA(ctx, h.Worktree)
 	return sha[:min(7, len(sha))]
 }
+
+// queueAgent runs the queue agent on a PR GitHub took out of the merge queue for
+// no cause TLM could tell. "requeue" with no edits is a fine answer: mergeStep
+// re-queues; edits go out through the host write path first.
+func (m *Manager) queueAgent(ctx context.Context, h Handoff, s Snapshot, removal string) outcome {
+	var fx effects
+	snapJSON, _ := json.MarshalIndent(s, "", "  ")
+	reason := m.runAgent(ctx, h, agentJob{kind: "queue agent", head: s.Head, base: s.Base,
+		build: func(diff string, truncated bool) (string, map[string]string, error) {
+			prompt, err := render(queuePrompt, queuePromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base,
+				Removal: removal, Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
+			return prompt, map[string]string{"snapshot.json": string(snapJSON)}, err
+		}},
+		func(raw []byte, before map[string]stamp) string {
+			var out struct{ Action, Summary string }
+			if r := decode("queue agent", raw, &out); r != "" {
+				return r
+			}
+			res := AgentResult{Summary: out.Summary, Escalate: out.Action != "requeue", EscalateReason: out.Summary}
+			reason, err := m.commitAgentWork(ctx, h, res, before)
+			if err != nil {
+				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
+				return "writing the queue agent's change failed: " + err.Error()
+			}
+			switch reason {
+			case reasonNoChanges:
+				fx.log("agent", "queue agent: %s; re-queueing", out.Summary)
+				return ""
+			case "":
+				fx.log("agent", "queue agent: %s", out.Summary)
+				fx.log("commit", "pushed %s", m.headShort(ctx, h))
+			}
+			return reason
+		})
+	return outcome{reason: reason, fx: fx}
+}

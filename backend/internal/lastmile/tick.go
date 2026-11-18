@@ -195,6 +195,16 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	if done, err := m.stack(ctx, h, p, s); done || err != nil {
 		return err
 	}
+	if state, reason, handled, err := m.queueRemoved(ctx, h, &s); err != nil {
+		return err
+	} else if handled {
+		if state == StateNeedsHuman {
+			m.escalate(ctx, h, reason)
+		} else {
+			m.setState(h, state, reason)
+		}
+		return nil
+	}
 	if done, err := m.drift(ctx, h, s, base); done || err != nil {
 		return err
 	}

@@ -60,6 +60,8 @@ type Snapshot struct {
 	MergeQueue       bool   `json:"merge_queue"`        // the base has a merge queue
 	InQueue          bool   `json:"in_queue"`
 	AutoMerge        bool   `json:"auto_merge"` // GitHub auto-merge is on for the PR
+
+	QueueRemovals []github.QueueRemoval `json:"queue_removals,omitempty"`
 }
 
 // Ready says the PR is out of draft.
@@ -77,7 +79,8 @@ func buildSnapshot(p github.PRSnapshot, opened, now time.Time, botLogins []strin
 	s := Snapshot{Head: p.HeadSHA, Author: p.Author, Draft: p.Draft, Mergeable: p.Mergeable, MergeState: p.MergeState,
 		ReviewDecision: p.ReviewDecision, Requested: p.RequestedUsers, Checks: p.Checks, Base: p.BaseRef,
 		Additions: p.Additions, Deletions: p.Deletions, Files: p.Files,
-		NodeID: p.NodeID, AutoMergeAllowed: p.AutoMergeAllowed, MergeQueue: p.MergeQueue, InQueue: p.InQueue, AutoMerge: p.AutoMerge}
+		NodeID: p.NodeID, AutoMergeAllowed: p.AutoMergeAllowed, MergeQueue: p.MergeQueue, InQueue: p.InQueue, AutoMerge: p.AutoMerge,
+		QueueRemovals: p.QueueRemovals}
 	s.CI = rollup(p.Checks, opened, now)
 
 	// A user's latest approval or change request stands; a plain comment doesn't replace it.

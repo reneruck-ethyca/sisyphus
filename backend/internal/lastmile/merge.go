@@ -1,10 +1,13 @@
 package lastmile
 
 import (
+	"cmp"
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/reneruck/sisyphus/internal/github"
 )
@@ -119,9 +122,14 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		return state, reason, nil
 	}
 	if s.MergeQueue {
+		// GitHub may not show the PR in the queue for a tick or two after it was added.
+		if m.now().Sub(h.EnqueuedAt) < enqueueGrace && !h.QueueSeen.After(h.EnqueuedAt) {
+			return StateQueued, "", nil
+		}
 		if err := m.GH.Enqueue(ctx, s.NodeID); err != nil {
 			return state, reason, err
 		}
+		h.EnqueuedAt = m.now()
 		logEvent(h, m.now(), "merge", "added to the merge queue")
 		return StateQueued, "", nil
 	}
@@ -141,4 +149,84 @@ func (m *Manager) disarm(ctx context.Context, h Handoff) {
 	if err := m.GH.DisableAutoMerge(ctx, h.Snapshot.NodeID); err != nil {
 		slog.Warn("lastmile disabling auto-merge failed", "id", h.ID, "err", err)
 	}
+}
+
+const (
+	enqueueGrace  = 2 * time.Minute
+	maxQueueKicks = 10
+)
+
+// queueRemoved answers GitHub taking the PR out of the merge queue (design §7.2),
+// once per removal; several at once get one answer, for the newest. handled says
+// the caller is done for this tick with state and reason. A conflict, flaky checks
+// and a person's dequeue leave the rest of the tick to it: drift rebases, and
+// mergeStep re-queues while TLM still wants the merge.
+func (m *Manager) queueRemoved(ctx context.Context, h *Handoff, s *Snapshot) (state, reason string, handled bool, err error) {
+	fresh := slices.DeleteFunc(slices.Clone(s.QueueRemovals), func(r github.QueueRemoval) bool { return !r.At.After(h.QueueSeen) })
+	if len(fresh) == 0 {
+		return "", "", false, nil
+	}
+	human := func(r github.QueueRemoval) bool {
+		return r.Actor != "" && !isBot(r.ActorBot, r.Actor, m.cfg.LastMile.BotLogins)
+	}
+	last := slices.MaxFunc(fresh, func(a, b github.QueueRemoval) int { return a.At.Compare(b.At) })
+	if human(last) {
+		h.QueueSeen = last.At
+		h.MergeRequested, h.Autonomy.Merge = false, MergeOff
+		logEvent(h, m.now(), "merge", last.Actor+" removed the PR from the merge queue: merge mode off")
+		return "", "", false, nil
+	}
+	conflict := s.Mergeable == "CONFLICTING" || strings.Contains(strings.ToLower(last.Reason), "conflict")
+	var failed []Failure
+	if !conflict {
+		checks, err := m.GH.QueueFailures(ctx, h.Repo, cmp.Or(s.Base, h.Base), h.PRNumber)
+		if err != nil {
+			return "", "", false, err
+		}
+		failed = m.failures(ctx, *h, checks)
+	}
+	h.QueueSeen = last.At
+	for _, r := range fresh {
+		if !human(r) {
+			h.QueueKicks++
+		}
+	}
+	what := strings.TrimSuffix("removed from the merge queue ("+last.Reason+")", " ()")
+	if h.QueueKicks >= maxQueueKicks {
+		h.EscalatedBy = TriggerQueue
+		return StateNeedsHuman, fmt.Sprintf("removed from the merge queue %d times", maxQueueKicks), true, nil
+	}
+	real := slices.DeleteFunc(slices.Clone(failed), func(f Failure) bool { return f.Flake })
+	names := make([]string, len(real))
+	for i, f := range real {
+		names[i] = f.Name
+	}
+	switch {
+	case conflict:
+		logEvent(h, m.now(), "merge", what+": conflict with the base")
+		return "", "", false, nil
+	case len(failed) > 0 && len(real) == 0:
+		logEvent(h, m.now(), "merge", what+": flaky checks, re-queueing")
+		return "", "", false, nil
+	case len(real) > 0:
+		why := "merge queue CI failed: " + strings.Join(names, ", ")
+		logEvent(h, m.now(), "merge", what+": "+why)
+		if !h.Autonomy.FixCI {
+			h.EscalatedBy = TriggerCI
+			return StateNeedsHuman, why, true, nil
+		}
+		s.Failures = real // the fix agent works from the merge group's logs
+		state, reason, err := m.redState(ctx, h, *s)
+		if state == StateNeedsHuman {
+			h.EscalatedBy = TriggerCI
+		}
+		return state, reason, true, err
+	}
+	logEvent(h, m.now(), "merge", what+": cause unknown")
+	if m.Tasks == nil {
+		return StateNeedsHuman, "agents need reviews enabled", true, nil
+	}
+	snap := *s
+	m.launch(ctx, h, TriggerQueue, func(ctx context.Context, h Handoff) outcome { return m.queueAgent(ctx, h, snap, last.Reason) })
+	return StateQueued, "investigating removal from the merge queue", true, nil
 }

@@ -39,6 +39,7 @@ const (
 	TriggerReview   = "review"
 	TriggerDirty    = "dirty"    // a human handed a dirty worktree to an agent from the dashboard
 	TriggerConflict = "conflict" // rebases, clean or not; the rounds counted are the conflict agent's runs
+	TriggerQueue    = "queue"    // removed from the merge queue for no cause TLM can tell
 )
 
 // Notify events.
@@ -165,6 +166,7 @@ type Handoff struct {
 	AutoMergeSet   bool      `json:"auto_merge_set,omitempty"`  // TLM turned GitHub auto-merge on; one a human turned on is theirs
 	QueueKicks     int       `json:"queue_kicks,omitempty"`     // removals from the merge queue
 	QueueSeen      time.Time `json:"queue_seen,omitzero"`       // the newest queue removal handled
+	EnqueuedAt     time.Time `json:"enqueued_at,omitzero"`      // TLM last added the PR to the merge queue
 
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State
