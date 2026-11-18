@@ -113,8 +113,15 @@ func (m *Manager) Cancel(ctx context.Context, id string) (Handoff, error) {
 	}
 	m.running.cancel(id)
 	m.letGoLogged(ctx, &armed)
-	if armed.DownrevHead != "" || (armed.Run != nil && armed.Run.Trigger == TriggerConflict) { // a restack may have labelled
-		m.unlabelDownrev(ctx, &armed, "handoff cancelled")
+	label := m.cfg.LastMile.DownrevLabels[armed.Repo]
+	if label != "" && (armed.DownrevHead != "" || (armed.Run != nil && armed.Run.Trigger == TriggerConflict)) { // a restack may have labelled
+		if err := m.setDownrevLabel(ctx, armed, label, false); err != nil {
+			slog.Warn("lastmile removing the downrev label failed", "id", id, "err", err)
+		} else {
+			if u, err := m.update(id, func(h *Handoff) error { logEvent(h, m.now(), "label", label+" removed: handoff cancelled"); return nil }); err == nil {
+				h = u
+			}
+		}
 	}
 	slog.Info("lastmile cancelled", "id", id)
 	m.changed()

@@ -88,7 +88,7 @@ func (m *Manager) reviewAgent(ctx context.Context, h Handoff, s Snapshot, items 
 				slog.Warn("lastmile review agent named unknown items", "id", h.ID, "dropped", dropped)
 				fx.log("agent", "dropped actions for unknown items or verbs: %s", strings.Join(dropped, ", "))
 			}
-			reason, err := m.commitAgentWork(ctx, h, out.AgentResult, before)
+			reason, err := m.commitAgentWork(ctx, h, out.AgentResult, before, &fx)
 			if err != nil {
 				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
 				return "writing the fix failed: " + err.Error()

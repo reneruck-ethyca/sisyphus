@@ -285,7 +285,7 @@ const reasonNoChanges = "agent made no changes"
 // else commits it as "TLM: <summary>" and pushes. A non-empty reason means the
 // handoff needs a human, and the worktree is back at its head. The caller holds
 // the worktree lock.
-func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResult, ignoredBefore map[string]stamp) (reason string, err error) {
+func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResult, ignoredBefore map[string]stamp, fx *effects) (reason string, err error) {
 	head, err := worktree.HeadSHA(ctx, h.Worktree)
 	if err != nil {
 		return "", err
@@ -334,6 +334,9 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 	summary := cmp.Or(oneLine(res.Summary, 100), "fix")
 	if _, err := proc.Run(ctx, h.Worktree, "git", append(args, "commit", "-q", "-m", "TLM: "+summary)...); err != nil {
 		return reject("commit failed: %v", err)
+	}
+	if why := m.unlabelBeforePush(ctx, h, fx); why != "" {
+		return reject("%s", why)
 	}
 	if _, err := proc.Run(ctx, h.Worktree, "git", "-c", "core.hooksPath=/dev/null", "push"); err != nil { // pre-push hooks too
 		// Unpushed work would pile onto the next round: back to the head.

@@ -263,6 +263,9 @@ func (m *Manager) DirtyCommit(ctx context.Context, id, hash string, paths []stri
 	}
 	subject, _, _ := strings.Cut(msg, "\n")
 	_, err := m.dirtyAct(ctx, id, hash, fmt.Sprintf("commit %d files: %s", len(paths), subject), func(h Handoff) error {
+		if why := m.unlabelBeforePush(ctx, h, nil); why != "" {
+			return errors.New(why)
+		}
 		return m.commitHuman(ctx, h.Worktree, msg, paths, true)
 	}, nil)
 	if err != nil {
@@ -352,11 +355,14 @@ func (m *Manager) dirtyAgent(ctx context.Context, h Handoff, wip, task string) o
 			if r := decode("agent", raw, &out); r != "" {
 				return r
 			}
-			reason, err := m.commitAgentWork(ctx, h, out, before)
+			reason, err := m.commitAgentWork(ctx, h, out, before, &fx)
 			if err != nil {
 				return "writing the agent's work failed: " + err.Error()
 			}
 			if reason == reasonNoChanges { // the work in progress was done already: push it alone
+				if why := m.unlabelBeforePush(ctx, h, &fx); why != "" {
+					return why
+				}
 				if _, err := proc.Run(ctx, h.Worktree, "git", "-c", "core.hooksPath=/dev/null", "push", "-q"); err != nil {
 					return "push failed: " + err.Error()
 				}

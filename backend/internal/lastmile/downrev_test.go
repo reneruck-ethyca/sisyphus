@@ -202,19 +202,28 @@ func downrevFixture(t *testing.T, conflict, red bool) (m *Manager, gh *FakeGitHu
 	return m, gh, h.ID, pre
 }
 
-// pushWatch notes what origin's feature/x is each time a label goes on, and can refuse that.
+// pushWatch notes what origin's feature/x is each time a label goes on or comes off, and can refuse either.
 type pushWatch struct {
 	*FakeGitHub
-	dir     string
-	remote  []string
-	failAdd bool
+	dir                 string
+	remote, removedAt   []string
+	failAdd, failRemove bool
 }
 
 func (p *pushWatch) EditPR(ctx context.Context, ref github.PRRef, e github.PREdit) error {
-	if len(e.AddLabels) > 0 {
+	origin := func() string {
 		out, _ := proc.Run(ctx, p.dir, "git", "ls-remote", "origin", "refs/heads/feature/x")
-		p.remote = append(p.remote, strings.Fields(out + " ")[0])
+		return strings.Fields(out + " ")[0]
+	}
+	if len(e.AddLabels) > 0 {
+		p.remote = append(p.remote, origin())
 		if p.failAdd {
+			return errors.New("boom")
+		}
+	}
+	if len(e.RemoveLabels) > 0 {
+		p.removedAt = append(p.removedAt, origin())
+		if p.failRemove {
 			return errors.New("boom")
 		}
 	}
@@ -429,5 +438,48 @@ func TestDownrevApprovalCarriesThroughConsecutiveBumps(t *testing.T) {
 	m.tick(ctx)
 	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
 		t.Errorf("approval of %s didn't carry over two bumps: merged %v, handoff %+v", pre, gh.Merged, m.must(t, id))
+	}
+}
+
+// fixOnLabelledHead has the fix agent commit on top of a labelled bump.
+func fixOnLabelledHead(t *testing.T, failRemove bool) (m *Manager, w *pushWatch, id, head string) {
+	t.Helper()
+	m, gh, w, id, _ := labelled(t)
+	w.failRemove = failRemove
+	head = m.must(t, id).DownrevHead
+	m.handoffs[0].Autonomy.FixCI = true
+	m.Tasks = &fakeTasks{result: okFix, edit: func(dir string) { os.WriteFile(filepath.Join(dir, "a.txt"), []byte("fixed"), 0o644) }}
+	gh.Logs = map[int64]string{22: "FAILED test_a\n"}
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: head, Author: "me", BaseRef: "main", Checks: []github.Check{failCheck("unit", "22")}}
+	m.tickWait(t)
+	m.tick(context.Background())
+	return m, w, id, head
+}
+
+func TestDownrevLabelOffBeforeAgentPush(t *testing.T) {
+	t.Parallel()
+	m, w, id, head := fixOnLabelledHead(t, false)
+	h := m.must(t, id)
+	local := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
+	if local == head || gittest.Git(t, h.Worktree, "rev-parse", "origin/feature/x") != local {
+		t.Fatalf("fix not pushed: %+v", h)
+	}
+	if !slices.Equal(w.removedAt, []string{head}) {
+		t.Errorf("origin had %v when the label came off, want the labelled head %s", w.removedAt, head)
+	}
+	if h.DownrevHead != "" || h.DownrevFrom != "" || h.DownrevRoot != "" {
+		t.Errorf("downrev kept: %+v", h)
+	}
+}
+
+func TestDownrevLabelRemovalFailureBlocksPush(t *testing.T) {
+	t.Parallel()
+	m, _, id, head := fixOnLabelledHead(t, true)
+	h := m.must(t, id)
+	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "couldn't remove the downrev-only label before pushing") {
+		t.Fatalf("handoff %s: %s", h.State, h.Reason)
+	}
+	if gittest.Git(t, h.Worktree, "rev-parse", "origin/feature/x") != head || gittest.Git(t, h.Worktree, "rev-parse", "HEAD") != head {
+		t.Error("pushed, or the worktree wasn't put back")
 	}
 }

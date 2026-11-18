@@ -39,6 +39,7 @@ type effects struct {
 	unstack   bool     // the child now sits on the parent's old base: it is a plain handoff
 
 	downrevFrom, downrevHead string // a downrev-only restack (design §7.4): the head before it, and the one it pushed
+	downrevDropped           bool   // the downrev label came off before a push that didn't qualify for it
 }
 
 func (e *effects) log(kind, format string, a ...any) {
@@ -70,6 +71,9 @@ func (e effects) apply(h *Handoff) {
 	}
 	if e.unstack {
 		h.StackParent, h.ParentHead = "", ""
+	}
+	if e.downrevDropped {
+		h.DownrevHead, h.DownrevFrom, h.DownrevRoot = "", "", ""
 	}
 	if e.downrevHead != "" {
 		if h.DownrevHead != e.downrevFrom || h.DownrevRoot == "" { // not a bump on top of a labelled bump
@@ -497,7 +501,7 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
 			if r := decode("fix agent", raw, &out); r != "" {
 				return r
 			}
-			reason, err := m.commitAgentWork(ctx, h, out, before)
+			reason, err := m.commitAgentWork(ctx, h, out, before, &fx)
 			if err != nil {
 				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
 				return "writing the fix failed: " + err.Error()
@@ -540,7 +544,7 @@ func (m *Manager) queueAgent(ctx context.Context, h Handoff, s Snapshot, removal
 				return r
 			}
 			res := AgentResult{Summary: out.Summary, Escalate: out.Action != "requeue", EscalateReason: out.Summary}
-			reason, err := m.commitAgentWork(ctx, h, res, before)
+			reason, err := m.commitAgentWork(ctx, h, res, before, &fx)
 			if err != nil {
 				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
 				return "writing the queue agent's change failed: " + err.Error()

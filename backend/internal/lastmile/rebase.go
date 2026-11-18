@@ -275,6 +275,12 @@ func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *
 			fx.log("label", "%s added: the bump is the only change", label)
 		}
 	}
+	if !labelled {
+		if why := m.unlabelBeforePush(ctx, h, fx); why != "" {
+			rollBack()
+			return why
+		}
+	}
 	ref := "refs/heads/" + h.Branch
 	if _, err := proc.Run(ctx, dir, "git", "-c", "core.hooksPath=/dev/null", "push", "--force-with-lease="+ref+":"+pre, "origin", ref+":"+ref); err != nil {
 		rollBack()                            // the remote isn't what we saw: put the worktree back with it

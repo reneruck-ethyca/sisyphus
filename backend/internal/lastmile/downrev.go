@@ -284,6 +284,25 @@ func (m *Manager) setDownrevLabel(ctx context.Context, h Handoff, label string, 
 	return m.GH.EditPR(ctx, ref, github.PREdit{AddLabels: []string{label}})
 }
 
+// unlabelBeforePush takes the downrev label off before TLM pushes a head that doesn't
+// qualify for it: CI reads labels off the push's event. It returns "" when the push
+// may go ahead, else why not.
+func (m *Manager) unlabelBeforePush(ctx context.Context, h Handoff, fx *effects) string {
+	label := m.cfg.LastMile.DownrevLabels[h.Repo]
+	if h.DownrevHead == "" || label == "" {
+		return ""
+	}
+	if err := m.setDownrevLabel(ctx, h, label, false); err != nil {
+		slog.Warn("lastmile removing the downrev label before a push failed", "id", h.ID, "err", err)
+		return "couldn't remove the " + label + " label before pushing"
+	}
+	if fx != nil {
+		fx.downrevDropped = true
+		fx.log("label", "%s removed before pushing", label)
+	}
+	return ""
+}
+
 // unlabelDownrev takes the downrev label off h's PR and forgets the bump. A failure
 // is logged, and h keeps it for the next tick to try again.
 func (m *Manager) unlabelDownrev(ctx context.Context, h *Handoff, why string) {
