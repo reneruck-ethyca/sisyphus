@@ -142,11 +142,11 @@ export class HTTPError extends Error {
   }
 }
 
-async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+export async function call<T>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   await session;
   const res = await fetch(url, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: body === undefined ? headers : { ...headers, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) throw new HTTPError(res.status, (await res.text()).trim() || res.statusText);

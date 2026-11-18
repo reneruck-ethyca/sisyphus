@@ -3,7 +3,7 @@ import type { Hunk, Thread } from "./api";
 export type Range = { start: number; end: number };
 type Lines = { s: number; e: number };
 
-export function rangeOf(el: Element | null): Range | null {
+function rangeOf(el: Element | null): Range | null {
   const b = el?.closest<HTMLElement>("[data-line-start]");
   return b ? { start: Number(b.dataset.lineStart), end: Number(b.dataset.lineEnd) } : null;
 }
@@ -30,7 +30,7 @@ export function clamp(r: Range, hunks: Hunk[]): Range | null {
   return best;
 }
 
-export function quoteMd(text: string): string {
+function quoteMd(text: string): string {
   const t = text.trim();
   const short = t.length > 300 ? t.slice(0, 300) + "…" : t;
   return short.split("\n").map((l) => "> " + l).join("\n");

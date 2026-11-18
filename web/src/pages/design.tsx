@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import type { PRView, Status } from "../api";
 import { Ago, Chip, Ext, Page } from "../components";
 import { isZero, plural, rel } from "../format";
-import { designAPI, isStale, type DesignPR, type DocFile, type Mode, type ReviewEvent, type Thread } from "../design/api";
+import { designAPI, isStale, type DesignPR, type DocFile, type Mode, type DesignAPI, type Thread, type Verdict } from "../design/api";
 import { blockForLine, blocksInRange, buildComment, placeThread, selectionRange, type Placement, type Range } from "../design/anchor";
 import { blocks, decode, markChanged, renderMarkdown, renderMermaid, rewriteLinks, sanitize } from "../design/render";
 
@@ -379,9 +379,8 @@ function TreeLevel({ node, ...p }: TreeProps & { node: TreeNode }) {
 const Tree = ({ docs, ...p }: TreeProps & { docs: DesignPR["docs"] }) =>
   <TreeLevel node={useMemo(() => buildTree(docs), [docs])} {...p} />;
 
-type Api = ReturnType<typeof designAPI>;
 type PanelProps = {
-  placed: Placed[]; api: Api;
+  placed: Placed[]; api: DesignAPI;
   reload: () => void; fail: (e: unknown) => void; highlight: (r: Range | null) => void; jump: (line: number) => void;
 };
 
@@ -404,7 +403,7 @@ function Panel({ placed, ...rest }: PanelProps) {
 }
 
 function ComposerBox({ c, file, api, fail, onDone, onCancel }: {
-  c: Composer; file: DocFile; api: Api; fail: (e: unknown) => void; onDone: () => void; onCancel: () => void;
+  c: Composer; file: DocFile; api: DesignAPI; fail: (e: unknown) => void; onDone: () => void; onCancel: () => void;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -498,18 +497,18 @@ function ThreadView({ t, p, unread, api, reload, fail, highlight, jump }: Placed
   </details>;
 }
 
-const verdicts: [ReviewEvent, string, string][] = [
+const verdicts: [Verdict, string, string][] = [
   ["COMMENT", "Comment", "Feedback without a verdict"],
   ["APPROVE", "Approve", "Ready to merge as it is"],
   ["REQUEST_CHANGES", "Request changes", "Must be addressed before merging"],
 ];
 
 function SubmitDialog({ ref_, pr, threads, api, fail, author, onDone }: {
-  ref_: RefObject<HTMLDialogElement | null>; pr: DesignPR | null; threads: Thread[]; api: Api;
-  fail: (e: unknown) => void; author?: string; onDone: (event: ReviewEvent | null) => void;
+  ref_: RefObject<HTMLDialogElement | null>; pr: DesignPR | null; threads: Thread[]; api: DesignAPI;
+  fail: (e: unknown) => void; author?: string; onDone: (event: Verdict | null) => void;
 }) {
   const [body, setBody] = useState("");
-  const [event, setEvent] = useState<ReviewEvent>("COMMENT");
+  const [event, setEvent] = useState<Verdict>("COMMENT");
   const [busy, setBusy] = useState(false);
   const pending = threads.flatMap((t) => t.comments.filter((c) => c.state === "PENDING").map((c) => ({ t, c })));
   const close = () => ref_.current!.close();

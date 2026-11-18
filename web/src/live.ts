@@ -127,7 +127,7 @@ export function useFetch<T>(url: string, key: unknown = ""): Loaded<T> {
   return state.url === url ? state : { loading: !!url };
 }
 
-// sessionState is per-tab memory that survives a reload: a search, a draft.
+// loadSession and saveSession keep per-tab memory that survives a reload: a search, a draft.
 export function loadSession<T>(key: string, fallback: T): T {
   try {
     const v = sessionStorage.getItem(key);

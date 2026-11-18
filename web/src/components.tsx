@@ -52,7 +52,7 @@ export function useSkills(): [SkillStatus | undefined, (s: SkillStatus) => void]
   return [s, (v) => set((skills = v))];
 }
 
-export function Top({ status, page }: { status?: Status; page?: string }) {
+function Top({ status, page }: { status?: Status; page?: string }) {
   const [sk] = useSkills();
   const [checking, setChecking] = useState(false);
   const needs = status?.needs_human?.length ?? 0;

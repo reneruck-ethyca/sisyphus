@@ -1,5 +1,5 @@
 // The design page's calls: /api/prs/{owner}/{repo}/{n}/design. Mirrors backend/design.go.
-import { HTTPError, session } from "../api";
+import { HTTPError, call as request } from "../api";
 
 export type DocStatus = "added" | "modified" | "renamed";
 export type Hunk = { start: number; end: number };
@@ -36,7 +36,7 @@ export type CreateThread = {
   path: string; body: string; subjectType: "LINE" | "FILE";
   startLine?: number; line?: number; mode: Mode;
 };
-export type ReviewEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+export type Verdict = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 
 // isStale: the 409 a write gets once commits landed after the page rendered.
 export const isStale = (e: unknown) => e instanceof HTTPError && e.status === 409;
@@ -45,17 +45,7 @@ export const isStale = (e: unknown) => e instanceof HTTPError && e.status === 40
 // send it, and the server refuses them once the PR moved on.
 export function designAPI(repo: string, number: number, head: () => string) {
   const base = `/api/prs/${repo}/${number}/design`;
-  const call = async <T>(method: string, url: string, body?: unknown): Promise<T> => {
-    await session;
-    const res = await fetch(base + url, {
-      method,
-      headers: { "Content-Type": "application/json", "X-Head": head() },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!res.ok) throw new HTTPError(res.status, (await res.text()).trim() || res.statusText);
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
-  };
+  const call = <T>(method: string, url: string, body?: unknown) => request<T>(method, base + url, body, { "X-Head": head() });
   const q = (path: string) => "?path=" + encodeURIComponent(path);
   return {
     // blob is a file a doc links to, at the commit the doc was rendered from.
@@ -68,7 +58,7 @@ export function designAPI(repo: string, number: number, head: () => string) {
       call("POST", `/threads/${encodeURIComponent(t.id)}/replies`, { body, mode, commentId: t.comments[0]?.databaseId }),
     setResolved: (id: string, resolved: boolean) =>
       call("POST", `/threads/${encodeURIComponent(id)}/${resolved ? "resolve" : "unresolve"}`),
-    submit: (event: ReviewEvent, body: string) => call("POST", "/review", { event, body }),
+    submit: (event: Verdict, body: string) => call("POST", "/review", { event, body }),
     discard: () => call("DELETE", "/review"),
   };
 }

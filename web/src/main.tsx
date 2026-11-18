@@ -12,7 +12,7 @@ import { Settings } from "./pages/settings";
 import { Shadow } from "./pages/shadow";
 
 // route matches a path against a pattern like "/prs/:owner/:repo/:n"; null = no match.
-export function route(pattern: string, path: string): Record<string, string> | null {
+function route(pattern: string, path: string): Record<string, string> | null {
   const ps = pattern.split("/"), xs = path.replace(/\/+$/, "").split("/");
   if (ps.length !== xs.length && !(pattern === "/" && path === "/")) return null;
   const out: Record<string, string> = {};

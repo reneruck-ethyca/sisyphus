@@ -135,7 +135,7 @@ function Overview({ status: s }: { status: Status }) {
   </>;
 }
 
-// reviewFile loads what a run's agent wrote; again when the run's status changes.
+// useReviewFile loads what a run's agent wrote; again when the run's status changes.
 const useReviewFile = (prID: string, run?: Run) => {
   const [repo, n] = prID.split("#");
   return useFetch<ReviewFile | null>(run ? `/api/prs/${repo}/${n}/runs/${run.id}/review` : "", run?.status);
