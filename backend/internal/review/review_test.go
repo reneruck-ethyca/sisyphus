@@ -883,7 +883,7 @@ func setupOutput(t *testing.T, setup string, limit time.Duration) (string, error
 		t.Skip("needs GNU timeout")
 	}
 	r := &Reviewer{cfg: config.Review{Agent: config.Agent{Vendor: "claude", Model: "opus"}, MaxTurns: 1, StepTimeout: config.Duration{Duration: limit}}}
-	script, _, _ := strings.Cut(r.script(config.RepoReview{Setup: setup}, nil, r.cfg.Agent, false), "echo '── sisyphus: claude ──'")
+	script, _, _ := strings.Cut(script(r.cfg, config.RepoReview{Setup: setup}, nil, r.cfg.Agent, false, ""), "echo '── sisyphus: claude ──'")
 	out, err := exec.Command("bash", "-c", script).CombinedOutput()
 	return string(out), err
 }
@@ -1251,5 +1251,20 @@ func TestReattachDoesNotRepostInterruptedPost(t *testing.T) {
 	waitFor(t, "run to finish", func() bool { return f.runs()[0].Status != Running })
 	if reviews, _ := gh.posted(); len(reviews) != 0 || !strings.Contains(f.runs()[0].PostNote, "interrupted") {
 		t.Fatalf("posted %q, run %+v", reviews, f.runs()[0])
+	}
+}
+
+func TestEvalDropsTheGitHubTokenBeforeTheAgent(t *testing.T) {
+	f := newFixture(t, func(c *config.Review) {
+		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Setup: "uv sync"}
+	})
+	_, spec, stop, err := f.r.Eval(context.Background(), f.r.newJob(f.tr, ReasonNew), "eval-1")
+	defer stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup, agent, ok := strings.Cut(spec.Command[2], "unset GH_TOKEN GITHUB_TOKEN\n")
+	if !ok || !strings.Contains(setup, "uv sync") || !strings.Contains(agent, "exec 'claude'") || spec.Labels["sisyphus.eval"] == "" {
+		t.Fatalf("command = %q, labels %v", spec.Command[2], spec.Labels)
 	}
 }

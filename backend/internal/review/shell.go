@@ -20,13 +20,13 @@ import (
 // scratch dir: it records the stack, which must not touch the app's reviews.json.
 // stop stops the stack again (keeping its volumes, as after a review).
 func (r *Reviewer) Shell(ctx context.Context, tr tracker.Tracked) (spec container.Spec, stop func(), err error) {
-	run, spec, stop, err := r.prepare(ctx, r.newJob(tr, ReasonNew), "shell-"+time.Now().UTC().Format("20060102-150405"))
+	run, spec, stop, err := r.prepare(ctx, r.newJob(tr, ReasonNew), "shell-"+time.Now().UTC().Format("20060102-150405"), "")
 	if err != nil {
 		return spec, stop, err
 	}
 	review := spec.Command[2]
-	agent := r.agentFor(run.Job)
-	for name, script := range map[string]string{"setup.sh": strings.TrimSuffix(review, r.agentScript(agent)), "review.sh": review} {
+	agent := agentScript(r.cfg, agentFor(r.cfg, run.Job))
+	for name, script := range map[string]string{"setup.sh": strings.TrimSuffix(review, agent), "review.sh": review} {
 		path := filepath.Join(run.Dir, name)
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			return spec, stop, err
@@ -43,8 +43,9 @@ exec bash`, shellQuote(fmt.Sprintf("sisyphus shell: %s at %.12s, in %s", tr.Key(
 }
 
 // prepare starts job's stack and builds the spec of a run with id runID, as a
-// review would, without recording anything in the app's state.
-func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run, spec container.Spec, stop func(), err error) {
+// review would, without recording anything in the app's state. beforeAgent is
+// shell run right before the agent.
+func (r *Reviewer) prepare(ctx context.Context, job Job, runID, beforeAgent string) (run Run, spec container.Spec, stop func(), err error) {
 	stop = func() {}
 	tr := job.PR
 	repo, ok := r.cfg.Repos[tr.Repo]
@@ -75,7 +76,7 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run,
 	}
 	stopStack := stop
 	stop = func() { stopStack(); dropRelated(run) }
-	spec, err = r.spec(ctx, run)
+	spec, err = r.spec(ctx, run, beforeAgent)
 	return run, spec, stop, err
 }
 
@@ -84,12 +85,10 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID string) (run Run,
 // it can't read what happened on the PR after the review being replayed.
 // Nothing is posted; the output stays in the returned run's Dir.
 func (r *Reviewer) Eval(ctx context.Context, job Job, runID string) (run Run, spec container.Spec, stop func(), err error) {
-	run, spec, stop, err = r.prepare(ctx, job, runID)
+	run, spec, stop, err = r.prepare(ctx, job, runID, "unset GH_TOKEN GITHUB_TOKEN\n")
 	if err != nil {
 		return run, spec, stop, err
 	}
-	agent := r.agentScript(r.agentFor(run.Job))
-	spec.Command[2] = strings.TrimSuffix(spec.Command[2], agent) + "unset GH_TOKEN GITHUB_TOKEN\n" + agent
 	spec.Labels = map[string]string{"sisyphus.eval": job.PR.Key()} // not "sisyphus", as with Shell
 	return run, spec, stop, nil
 }

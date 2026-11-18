@@ -137,7 +137,7 @@ func (r *Reviewer) runTask(ctx context.Context, key string, run Run, t Task) (re
 			return nil, 0, err
 		}
 	}
-	spec, err := r.buildSpec(ctx, specReq{
+	spec, err := buildSpec(ctx, r.cfg, specReq{
 		Repo: t.Repo, Worktree: t.Worktree, Dir: run.Dir, RunID: run.ID, Agent: t.Agent,
 		Name:        "sisyphus-task-" + strings.NewReplacer("/", "-", "#", "-").Replace(t.ID) + "-" + run.ID,
 		Env:         map[string]string{"SISYPHUS_REASON": "task", "SISYPHUS_TASK": t.ID},
