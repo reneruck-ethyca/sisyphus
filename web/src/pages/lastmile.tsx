@@ -18,11 +18,11 @@ export function LastMile({ status: s }: { status?: Status }) {
         {v.pr_url && <><Ext href={v.pr_url}>Open PR ↗</Ext>{" "}</>}<a href={`/lastmile/${v.id}`}>Open handoff →</a></p>)}
       <div class="card">
         <div class="card-h"><span class="muted">Newest first, stacks together</span><a class="end" href="/lastmile/shadow"><b>Shadow-merge report →</b></a></div>
-        {hs.length ? <>
+        {open.length ? <>
           <ol class="lm"><Head />{open.map(Row)}</ol>
           <div class="card-f legend"><span><span class="rv">alice</span> requested by TLM</span><span><span class="rv human">+carol</span> added by a human</span>
             <span><span class="rv gone">bob</span> removed by a human, never re-added</span></div>
-        </> : <p class="card-b muted">No handoffs. An agent hands a branch over with <code>tlm handoff</code>.</p>}
+        </> : <p class="card-b muted">{hs.length ? "No open handoffs." : <>No handoffs. An agent hands a branch over with <code>tlm handoff</code>.</>}</p>}
       </div>
       {!!done.length && <><h2>History</h2><div class="card"><ol class="lm"><Head />{done.map(Row)}</ol></div></>}
     </main>
@@ -89,7 +89,7 @@ export function Actions({ v }: { v: HandoffView }) {
   return <>
     {v.state === "needs-human" && <><button class="btn small" disabled={!!busy} onClick={() => act(resume)}>Resume</button>{" "}</>}
     {v.merge_requested && !v.over && <><span class="muted">merge pending</span>{" "}</>}
-    {v.can_merge && v.state !== "queued" && <><button class="btn small" disabled={!!busy}
+    {v.can_merge && !v.merge_requested && v.state !== "queued" && <><button class="btn small" disabled={!!busy}
       onClick={() => confirm(`Squash and merge ${v.repo}#${v.pr_number}?`) && act(merge)}>Squash and merge</button>{" "}</>}
     {!v.over && <><MergeMode v={v} busy={busy} act={act} />{" "}<button class="btn quiet small" disabled={!!busy} onClick={() => act(cancel)}>Cancel</button></>}
   </>;

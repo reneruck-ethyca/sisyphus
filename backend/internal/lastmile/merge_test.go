@@ -948,3 +948,25 @@ func TestCleanupKeepsWorktreeOnAnotherBranch(t *testing.T) {
 		t.Errorf("warning %q", got.Warning)
 	}
 }
+
+func TestMergeAndModeAreLogged(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{})
+	gh.Snapshots[prRef.Key()] = mergeable()
+	m.tick(context.Background())
+	if _, err := m.Merge(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetMerge(id, MergeAuto); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range m.must(t, id).Events {
+		if e.Kind == "merge" {
+			got = append(got, e.Text)
+		}
+	}
+	if want := []string{"merge requested from the dashboard", "merge mode set to auto"}; !slices.Equal(got, want) {
+		t.Errorf("merge events %q, want %q", got, want)
+	}
+}

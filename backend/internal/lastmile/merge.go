@@ -26,6 +26,7 @@ func (m *Manager) Merge(_ context.Context, id string) (Handoff, error) {
 			return invalid("handoff %s can't merge: %s", id, why)
 		}
 		h.MergeRequested = true
+		logEvent(h, m.now(), "merge", "merge requested from the dashboard")
 		return nil
 	})
 	if err != nil {
@@ -63,6 +64,7 @@ func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 			return invalid("handoff %s is already %s", id, h.State)
 		}
 		h.Autonomy.Merge = mode
+		logEvent(h, m.now(), "merge", "merge mode set to "+mode)
 		if mode == MergeOff || mode == MergeShadow {
 			h.MergeRequested = false
 		}

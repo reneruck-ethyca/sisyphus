@@ -30,4 +30,8 @@ it("asks before merging, and says a pressed merge is pending", () => {
 
   render(<Actions v={view({ merge_requested: true, can_merge: false })} />, el);
   expect(el.textContent).toContain("merge pending");
+
+  render(<Actions v={view({ merge_requested: true })} />, el);
+  expect(el.textContent).toContain("merge pending");
+  expect(el.textContent).not.toContain("Squash and merge");
 });
