@@ -1587,7 +1587,9 @@ func (r *Reviewer) record(prID, runID string, fn func(*Run)) {
 		r.saveLocked()
 	}
 	r.mu.Unlock()
-	r.changed()
+	if r.OnChange != nil { // not changed(): a record alone frees no slot, and dispatch may ask docker
+		r.OnChange()
+	}
 }
 
 func (r *Reviewer) writeRunJSON(run Run) {
