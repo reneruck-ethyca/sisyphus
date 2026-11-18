@@ -1,6 +1,7 @@
 package lastmile
 
 import (
+	"bytes"
 	"strings"
 	"text/template"
 )
@@ -50,13 +51,6 @@ Branch: {{.Branch}} (base: {{.Base}})
  "body_reason": "optional: why"}
 ` + "```" + `
 `))
-
-// renderFixPrompt fills the prompt; a template error is a bug, and fails the run.
-func renderFixPrompt(d fixPromptData) (string, error) {
-	var sb strings.Builder
-	err := fixPrompt.Execute(&sb, d)
-	return sb.String(), err
-}
 
 type fixPromptData struct {
 	Title, Body, Branch, Base string
@@ -119,12 +113,6 @@ The same JSON is at /sisyphus/context/feedback.json. Snapshot of the PR (JSON; /
 ` + "```" + `
 `))
 
-func renderReviewPrompt(d reviewPromptData) (string, error) {
-	var sb strings.Builder
-	err := reviewPrompt.Execute(&sb, d)
-	return sb.String(), err
-}
-
 type reviewPromptData struct {
 	Title, Body, Branch, Base string
 	Items, Snapshot           string
@@ -174,12 +162,6 @@ The rebase stopped while replaying this commit of the branch:
  "escalate_reason": ""}
 ` + "```" + `
 `))
-
-func renderConflictPrompt(d conflictPromptData) (string, error) {
-	var sb strings.Builder
-	err := conflictPrompt.Execute(&sb, d)
-	return sb.String(), err
-}
 
 type conflictPromptData struct {
 	Title, Branch, Onto string
@@ -233,15 +215,46 @@ Someone left these changes uncommitted. They are now the last commit on the bran
 ` + "```" + `
 `))
 
-func renderWIPPrompt(d wipPromptData) (string, error) {
-	var sb strings.Builder
-	err := wipPrompt.Execute(&sb, d)
-	return sb.String(), err
-}
-
 type wipPromptData struct {
 	Title, Body, Branch, Base string
 	WIP, Task                 string
 	Diff                      string
 	DiffTruncated             bool
+}
+
+// render fills a prompt template; an error is a bug in it, and fails the run.
+func render(t *template.Template, d any) (string, error) {
+	var sb strings.Builder
+	err := t.Execute(&sb, d)
+	return sb.String(), err
+}
+
+// clip keeps s to n bytes, ending on a whole character, and adds mark if it cut.
+func clip(s string, n int, mark string) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "") + mark
+}
+
+// oneLine collapses s's whitespace to single spaces and keeps n characters.
+func oneLine(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n])
+	}
+	return s
+}
+
+// countLines counts b's lines, the last one without a newline too; a NUL in
+// the first 8 KB makes it binary, as git judges.
+func countLines(b []byte) (n int, binary bool) {
+	if bytes.IndexByte(b[:min(len(b), 8<<10)], 0) >= 0 {
+		return 0, true
+	}
+	n = bytes.Count(b, []byte("\n"))
+	if len(b) > 0 && b[len(b)-1] != '\n' {
+		n++
+	}
+	return n, false
 }

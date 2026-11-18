@@ -158,11 +158,18 @@ func CommonDir(ctx context.Context, dir string) (string, error) {
 
 // Reset puts dir back at sha: drops tracked changes and commits made on top,
 // and deletes untracked files, including untracked config a .wtp.yml hook copied
-// in unless it's gitignored. Ignored files (installed deps, …) stay.
-func Reset(ctx context.Context, dir, sha string) error {
+// in unless it's gitignored, but not those in keep (paths relative to dir).
+// Ignored files (installed deps, …) stay.
+func Reset(ctx context.Context, dir, sha string, keep ...string) error {
 	if _, err := proc.Run(ctx, dir, "git", "reset", "--hard", "--quiet", sha); err != nil {
 		return err
 	}
-	_, err := proc.Run(ctx, dir, "git", "clean", "-ffd", "--quiet")
+	args := []string{"clean", "-ffd", "--quiet"}
+	for _, f := range keep {
+		args = append(args, "-e", "/"+globEscape.Replace(f))
+	}
+	_, err := proc.Run(ctx, dir, "git", args...)
 	return err
 }
+
+var globEscape = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`)

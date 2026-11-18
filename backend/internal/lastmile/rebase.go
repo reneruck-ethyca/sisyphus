@@ -298,21 +298,21 @@ func (m *Manager) resolveStop(ctx context.Context, h Handoff, r restackSpec, rb,
 	dir := h.Worktree
 	run := func(args ...string) string { out, _ := proc.Run(ctx, dir, "git", args...); return out }
 	pathspec := append([]string{"--literal-pathspecs", "diff", "--"}, files...)
-	diff := clip(run(pathspec...), maxDiffPrompt)
+	diff := clip(run(pathspec...), maxDiffPrompt, "\n[truncated]")
 	replayed := run("show", "-s", "--format=%h %s%n%n%b", "REBASE_HEAD")
 	ctxFiles := map[string]string{"conflict.diff": diff}
 	var list strings.Builder
 	for i, f := range files {
 		ours, theirs := fmt.Sprintf("ours-%d", i), fmt.Sprintf("theirs-%d", i)
-		ctxFiles[ours] = clip(run("show", ":2:"+f), 256<<10)
-		ctxFiles[theirs] = clip(run("show", ":3:"+f), 256<<10)
+		ctxFiles[ours] = clip(run("show", ":2:"+f), 256<<10, "\n[truncated]")
+		ctxFiles[theirs] = clip(run("show", ":3:"+f), 256<<10, "\n[truncated]")
 		fmt.Fprintf(&list, "- %s: /sisyphus/context/%s (the base's side), /sisyphus/context/%s (the replayed commit's side)\n", f, ours, theirs)
 	}
 	snapJSON, _ := json.MarshalIndent(map[string]any{"branch": h.Branch, "onto": "origin/" + r.onto, "files": files}, "", "  ")
 	ctxFiles["conflict.json"] = string(snapJSON)
 	return m.runAgent(ctx, h, agentJob{kind: "conflict agent", held: true, base: r.onto,
 		build: func(patch string, truncated bool) (string, map[string]string, error) {
-			prompt, err := renderConflictPrompt(conflictPromptData{Title: h.Title, Branch: h.Branch, Onto: "origin/" + r.onto, Replayed: replayed,
+			prompt, err := render(conflictPrompt, conflictPromptData{Title: h.Title, Branch: h.Branch, Onto: "origin/" + r.onto, Replayed: replayed,
 				Files: list.String(), ConflictDiff: diff, Diff: patch, DiffTruncated: truncated})
 			return prompt, ctxFiles, err
 		}},
@@ -390,9 +390,3 @@ func (m *Manager) checkResolution(ctx context.Context, dir string, files, untrac
 }
 
 // clip cuts s to n bytes, on a character boundary.
-func clip(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return strings.ToValidUTF8(s[:n], "") + "\n[truncated]"
-}

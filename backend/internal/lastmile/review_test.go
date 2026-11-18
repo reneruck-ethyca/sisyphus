@@ -548,3 +548,21 @@ func TestNoteRemovedIgnoresLoginCase(t *testing.T) {
 		t.Errorf("removed = %v; GitHub only spelled them differently", h.Removed)
 	}
 }
+
+func TestClipAndCountLines(t *testing.T) {
+	if got := clip("aé", 2, "…"); got != "a…" { // é is two bytes: cut on the character before it
+		t.Errorf("clip = %q", got)
+	}
+	if got := clip("abc", 3, "…"); got != "abc" {
+		t.Errorf("clip = %q", got)
+	}
+	for _, c := range []struct {
+		in     string
+		n      int
+		binary bool
+	}{{"", 0, false}, {"a\nb", 2, false}, {"a\nb\n", 2, false}, {"a\x00b", 0, true}} {
+		if n, bin := countLines([]byte(c.in)); n != c.n || bin != c.binary {
+			t.Errorf("countLines(%q) = %d, %v", c.in, n, bin)
+		}
+	}
+}

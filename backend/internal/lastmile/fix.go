@@ -325,9 +325,7 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 	}
 	diff, _ := proc.Run(ctx, h.Worktree, "git", "diff", "origin/"+j.base+"...HEAD")
 	truncated := len(diff) > maxDiffPrompt
-	if truncated {
-		diff = strings.ToValidUTF8(diff[:maxDiffPrompt], "")
-	}
+	diff = clip(diff, maxDiffPrompt, "")
 	prompt, files, err := j.build(diff, truncated)
 	if err != nil {
 		return j.kind + " prompt: " + err.Error()
@@ -480,7 +478,7 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
 	failJSON, _ := json.MarshalIndent(s.Failures, "", "  ")
 	reason := m.runAgent(ctx, h, agentJob{kind: "fix agent", head: s.Head, base: s.Base,
 		build: func(diff string, truncated bool) (string, map[string]string, error) {
-			prompt, err := renderFixPrompt(fixPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base, Failures: s.Failures,
+			prompt, err := render(fixPrompt, fixPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base, Failures: s.Failures,
 				Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
 			return prompt, map[string]string{"snapshot.json": string(snapJSON), "failures.json": string(failJSON)}, err
 		}},

@@ -1,7 +1,7 @@
 package lastmile
 
 import (
-	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -132,18 +132,8 @@ func status(ctx context.Context, h Handoff) (string, error) {
 // reset is worktree.Reset sparing the untracked files the handoff came with.
 // ponytail: a name ending in a space isn't escaped, so git clean would remove it.
 func reset(ctx context.Context, h Handoff, sha string) error {
-	if _, err := proc.Run(ctx, h.Worktree, "git", "reset", "--hard", "--quiet", sha); err != nil {
-		return err
-	}
-	args := []string{"clean", "-ffd", "--quiet"}
-	for _, f := range h.Untracked {
-		args = append(args, "-e", "/"+globEscape.Replace(f))
-	}
-	_, err := proc.Run(ctx, h.Worktree, "git", args...)
-	return err
+	return worktree.Reset(ctx, h.Worktree, sha, h.Untracked...)
 }
-
-var globEscape = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`)
 
 // changedLines counts added plus removed lines of the change, untracked files
 // included, limited to files when given. A binary file has no line count to cap,
@@ -181,13 +171,11 @@ func changedLines(ctx context.Context, dir string, files []string) (n int, binar
 		if err != nil {
 			continue
 		}
-		if bytes.IndexByte(b, 0) >= 0 { // git's own binary test
+		lines, binary := countLines(b)
+		if binary {
 			return 0, f, nil
 		}
-		n += bytes.Count(b, []byte("\n"))
-		if len(b) > 0 && b[len(b)-1] != '\n' {
-			n++
-		}
+		n += lines
 	}
 	return n, "", nil
 }
@@ -343,13 +331,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return reject("git add failed: %v", err)
 	}
 	args := hostGit(ctx, h.Worktree)
-	summary := strings.Join(strings.Fields(res.Summary), " ")
-	if summary == "" {
-		summary = "fix"
-	}
-	if r := []rune(summary); len(r) > 100 {
-		summary = string(r[:100])
-	}
+	summary := cmp.Or(oneLine(res.Summary, 100), "fix")
 	if _, err := proc.Run(ctx, h.Worktree, "git", append(args, "commit", "-q", "-m", "TLM: "+summary)...); err != nil {
 		return reject("commit failed: %v", err)
 	}

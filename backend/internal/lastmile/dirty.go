@@ -196,13 +196,6 @@ func parseAdvice(d *Dirty, raw string) error {
 }
 
 // oneLine collapses whitespace and cuts s to n runes.
-func oneLine(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > n {
-		s = string(r[:n])
-	}
-	return s
-}
 
 // dirtyFiles lists every uncommitted file (untracked directories expanded) with
 // its line counts, less the untracked files in skip. It runs off the worktree
@@ -285,14 +278,7 @@ func untrackedLines(p string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if bytes.IndexByte(b[:min(len(b), 8<<10)], 0) >= 0 {
-		return 0, true
-	}
-	n := bytes.Count(b, []byte("\n"))
-	if len(b) > 0 && b[len(b)-1] != '\n' {
-		n++
-	}
-	return n, false
+	return countLines(b)
 }
 
 // dirtyFile is the stored file path names, if the handoff is needs-human with
@@ -344,10 +330,7 @@ func (m *Manager) DirtyDiff(ctx context.Context, id, path string) (string, error
 	} else if out, err = proc.Run(ctx, h.Worktree, "git", "--literal-pathspecs", "diff", "HEAD", "--", f.Path); err != nil {
 		return "", err
 	}
-	if len(out) > maxShownDiff {
-		out = out[:maxShownDiff] + "\n… cut short"
-	}
-	return out, nil
+	return clip(out, maxShownDiff, "\n… cut short"), nil
 }
 
 // DirtyCommit commits paths of a needs-human handoff's dirty worktree with msg,
@@ -449,10 +432,8 @@ func (m *Manager) dirtyAgent(ctx context.Context, h Handoff, wip, task string) o
 	reason := m.runAgent(ctx, h, agentJob{kind: "agent", head: wip, base: h.Base,
 		build: func(diff string, truncated bool) (string, map[string]string, error) {
 			show, _ := proc.Run(ctx, h.Worktree, "git", "show", "--format=", wip)
-			if len(show) > maxDiffPrompt {
-				show = strings.ToValidUTF8(show[:maxDiffPrompt], "") + "\n… cut short"
-			}
-			prompt, err := renderWIPPrompt(wipPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: h.Base,
+			show = clip(show, maxDiffPrompt, "\n… cut short")
+			prompt, err := render(wipPrompt, wipPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: h.Base,
 				WIP: show, Task: task, Diff: diff, DiffTruncated: truncated})
 			return prompt, nil, err
 		}},
@@ -661,7 +642,7 @@ func dirtyPrompt(ctx context.Context, h Handoff, status string) string {
 	diff, _ := proc.Run(ctx, h.Worktree, "git", "--no-optional-locks", "diff", "HEAD")
 	cut := ""
 	if len(diff) > maxAssessDiff {
-		diff, cut = diff[:maxAssessDiff], ", cut short"
+		diff, cut = clip(diff, maxAssessDiff, ""), ", cut short"
 	}
 	return fmt.Sprintf(assessPrompt, h.Branch, h.Title, h.Reason, log, status, cut, diff, untrackedText(ctx, h.Worktree, h.Untracked))
 }
