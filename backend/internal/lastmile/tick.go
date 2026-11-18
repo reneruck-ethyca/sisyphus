@@ -313,12 +313,15 @@ func (m *Manager) commit(before, after Handoff) bool {
 	if i < 0 || m.handoffs[i].Gen != before.Gen {
 		return false // gone, or resumed or cancelled while the tick ran: its view is stale
 	}
-	if after.Run != nil {
-		after.Run = m.handoffs[i].Run // markRun's copy: it may have the setup's end since
+	cur := m.handoffs[i]
+	if after.Run != nil || before.Run == nil {
+		after.Run = cur.Run // markRun's copy: it may have the setup's end, or be a run launched since
 	}
-	if cur := m.handoffs[i]; !slices.Equal(cur.Reviewers, before.Reviewers) || cur.ReviewersSet != before.ReviewersSet {
+	if !slices.Equal(cur.Reviewers, before.Reviewers) || cur.ReviewersSet != before.ReviewersSet {
 		after.Reviewers, after.ReviewersSet, after.ReviewersPending = cur.Reviewers, cur.ReviewersSet, cur.ReviewersPending
 		after.Removed = cur.Removed
+		// as setReviewers does: someone newly named is no earlier request the next tick would call removed
+		after.Requested = without(after.Requested, without(cur.Reviewers, before.Reviewers...)...)
 	}
 	m.handoffs[i] = after
 	if err := m.saveLocked(); err != nil {

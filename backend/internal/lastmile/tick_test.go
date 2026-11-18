@@ -396,6 +396,34 @@ func TestCommitKeepsConcurrentReviewerEdit(t *testing.T) {
 	}
 }
 
+func TestCommitKeepsConcurrentReAdd(t *testing.T) {
+	m, _, _, id := opened(t, Request{})
+	if _, err := m.update(id, func(h *Handoff) error {
+		h.Requested, h.Removed, h.HumansRequested = []string{"alice"}, []string{"alice"}, true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := m.must(t, id)
+	if _, err := m.SetReviewers(id, []string{"alice"}); err != nil { // asked for afresh mid-tick
+		t.Fatal(err)
+	}
+	m.commit(before, before)
+	if h := m.must(t, id); slices.Contains(h.Requested, "alice") || slices.Contains(h.Removed, "alice") {
+		t.Errorf("stale tick kept alice as requested before: requested %v, removed %v", h.Requested, h.Removed)
+	}
+}
+
+func TestCommitKeepsRunMarkedMidTick(t *testing.T) {
+	m, _, _, id := opened(t, Request{})
+	before := m.must(t, id)
+	m.markRun(id, &RunMark{Trigger: TriggerDirty}) // DirtyAgent launched while the tick ran
+	m.commit(before, before)
+	if m.must(t, id).Run == nil {
+		t.Error("a stale tick dropped the run mark")
+	}
+}
+
 func TestTickWaitsForGitHubToSeeAPush(t *testing.T) {
 	tasks := &fakeTasks{result: okFix}
 	m, gh, id, head := redFixture(t, tasks)

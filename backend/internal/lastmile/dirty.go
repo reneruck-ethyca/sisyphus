@@ -438,6 +438,7 @@ func (m *Manager) DirtyAgent(ctx context.Context, id, hash, msg, task string) (H
 		return h, invalid("an agent is already running on %s", id)
 	}
 	m.changed()
+	m.Kick() // only now: a tick before launch would see the WIP commit and no run
 	return h, nil
 }
 
@@ -524,19 +525,27 @@ func (m *Manager) unwrapWIP(ctx context.Context, h Handoff, wip string) bool {
 // DirtyStash stashes all of the dirty worktree, untracked files included. It
 // doesn't resume: the page then offers the usual Resume.
 func (m *Manager) DirtyStash(ctx context.Context, id, hash string) (Handoff, error) {
-	return m.dirtyAct(ctx, id, hash, "stash all", func(h Handoff) error {
+	return m.kicked(m.dirtyAct(ctx, id, hash, "stash all", func(h Handoff) error {
 		args := append(hostGit(ctx, h.Worktree), "stash", "push", "-q", "-u", "-m", "tlm: "+h.Branch+" WIP", "--", ".")
 		for _, f := range h.Untracked {
 			args = append(args, ":(exclude,literal)"+f)
 		}
 		_, err := proc.Run(ctx, h.Worktree, "git", args...)
 		return err
-	}, nil)
+	}, nil))
 }
 
 // DirtyLeave collapses the dirty-worktree panel until the status changes.
 func (m *Manager) DirtyLeave(ctx context.Context, id, hash string) (Handoff, error) {
-	return m.dirtyAct(ctx, id, hash, "left to the human", nil, func(d *Dirty) { d.Dismissed = true })
+	return m.kicked(m.dirtyAct(ctx, id, hash, "left to the human", nil, func(d *Dirty) { d.Dismissed = true }))
+}
+
+// kicked starts a tick after a dirty action that succeeded, so the panel catches up.
+func (m *Manager) kicked(h Handoff, err error) (Handoff, error) {
+	if err == nil {
+		m.Kick()
+	}
+	return h, err
 }
 
 // dirtyAct runs fn under the worktree lock if the worktree is still as the page
@@ -590,7 +599,6 @@ func (m *Manager) dirtyAct(ctx context.Context, id, hash, what string, fn func(H
 	}
 	slog.Info("lastmile dirty-worktree action", "id", id, "action", verb)
 	m.changed()
-	m.Kick()
 	return h, nil
 }
 
@@ -624,7 +632,9 @@ func (m *Manager) commitHuman(ctx context.Context, dir, msg string, paths []stri
 	} else if binary != "" {
 		return invalid("refused: %s is binary", binary)
 	}
-	unstage := func() { _, _ = proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "reset", "-q", "--"}, files...)...) }
+	unstage := func() {
+		_, _ = proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "reset", "-q", "--"}, files...)...)
+	}
 	if _, err := proc.Run(ctx, dir, "git", append([]string{"--literal-pathspecs", "add", "--"}, files...)...); err != nil {
 		unstage()
 		return fmt.Errorf("git add: %w", err)
