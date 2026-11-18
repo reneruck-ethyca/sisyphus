@@ -514,3 +514,16 @@ func TestRetrackRefusesTrackedAndBadIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryDoesNotWaitForATick(t *testing.T) {
+	tr := newTestTracker(t, &github.Fake{})
+	tr.mu.Lock() // a tick in progress
+	defer tr.mu.Unlock()
+	done := make(chan struct{})
+	go func() { tr.History(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("History waited on the tick's lock")
+	}
+}

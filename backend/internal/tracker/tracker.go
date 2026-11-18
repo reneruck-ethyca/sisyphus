@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/reneruck/sisyphus/internal/config"
@@ -35,10 +36,19 @@ type Tracker struct {
 
 	mu    sync.Mutex
 	state *State
+
+	history atomic.Pointer[[]Dropped] // state.History as of the last save: read without waiting out a tick
 }
 
 func New(cfg config.Config, gh github.Client, st *State) *Tracker {
-	return &Tracker{cfg: cfg, gh: gh, state: st, skipped: map[string]bool{}, Events: nopEvents{}, Locks: &Locks{}}
+	t := &Tracker{cfg: cfg, gh: gh, state: st, skipped: map[string]bool{}, Events: nopEvents{}, Locks: &Locks{}}
+	t.cacheHistory()
+	return t
+}
+
+func (t *Tracker) cacheHistory() {
+	h := slices.Collect(maps.Values(t.state.History))
+	t.history.Store(&h)
 }
 
 // Snapshot copies the tracked PRs, sorted by ID.
@@ -60,6 +70,7 @@ func (t *Tracker) save() {
 	if err := t.state.Save(t.cfg.StateFile); err != nil {
 		slog.Error("saving state", "err", err)
 	}
+	t.cacheHistory()
 	if t.OnSave != nil {
 		t.OnSave(t.snapshot(), t.ignored())
 	}
@@ -429,11 +440,10 @@ func (t *Tracker) archive(tr Tracked, reason string) {
 	t.state.History[tr.Key()] = tr.AsDropped(reason, time.Now())
 }
 
-// History copies the PRs no longer tracked, in no particular order.
+// History copies the PRs no longer tracked, in no particular order, as of the
+// last save. It doesn't take the lock, so the History page needn't wait for a tick.
 func (t *Tracker) History() []Dropped {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return slices.Collect(maps.Values(t.state.History))
+	return slices.Clone(*t.history.Load())
 }
 
 // ClearHistory forgets every dropped PR.
