@@ -251,6 +251,7 @@ type NewThread struct {
 // ponytail: one lock for every PR; per-PR locks if writes ever queue up behind it.
 var reviewMu sync.Mutex
 
+// An empty commentID with a nil error means the comment was created but GitHub did not return its id.
 func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewThread) (commentID string, err error) {
 	if in.Mode == "now" {
 		body := map[string]any{"commit_id": pr.HeadSHA, "path": in.Path, "body": in.Body}
@@ -265,7 +266,7 @@ func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewTh
 		var resp struct {
 			NodeID string `json:"node_id"`
 		}
-		err := a.send(ctx, http.MethodPost, pullPath(ref)+"/comments", body, &resp)
+		err = a.send(ctx, http.MethodPost, pullPath(ref)+"/comments", body, &resp)
 		return resp.NodeID, err
 	}
 	err = a.withReview(ctx, ref, pr, func(reviewID string) error {
@@ -296,6 +297,7 @@ func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewTh
 }
 
 // ReplyThread replies in a thread; mode "now" needs the database id of the thread's first comment.
+// An empty commentID with a nil error means the reply was created but GitHub did not return its id.
 func (a *API) ReplyThread(ctx context.Context, ref PRRef, pr DesignPR, threadID, firstCommentID, body, mode string) (commentID string, err error) {
 	if mode == "now" {
 		if _, err := strconv.ParseInt(firstCommentID, 10, 64); err != nil {
@@ -304,7 +306,7 @@ func (a *API) ReplyThread(ctx context.Context, ref PRRef, pr DesignPR, threadID,
 		var resp struct {
 			NodeID string `json:"node_id"`
 		}
-		err := a.send(ctx, http.MethodPost, fmt.Sprintf("%s/comments/%s/replies", pullPath(ref), firstCommentID), map[string]any{"body": body}, &resp)
+		err = a.send(ctx, http.MethodPost, fmt.Sprintf("%s/comments/%s/replies", pullPath(ref), firstCommentID), map[string]any{"body": body}, &resp)
 		return resp.NodeID, err
 	}
 	err = a.withReview(ctx, ref, pr, func(reviewID string) error {
@@ -320,8 +322,6 @@ func (a *API) ReplyThread(ctx context.Context, ref PRRef, pr DesignPR, threadID,
 	})
 	return commentID, err
 }
-
-var ErrNoThread = errors.New("no thread has that comment")
 
 // ThreadOfComment finds the review thread holding the comment with this database id.
 func (a *API) ThreadOfComment(ctx context.Context, ref PRRef, databaseID int64) (DocThread, error) {
@@ -416,6 +416,9 @@ func (a *API) withReview(ctx context.Context, ref PRRef, pr DesignPR, fn func(re
 }
 
 var ErrNoPendingReview = errors.New("no pending review")
+
+// ErrNoThread is what ThreadOfComment returns when no thread holds the comment.
+var ErrNoThread = errors.New("no thread has that comment")
 
 // SubmitReview submits the pending review as event, or posts a fresh review
 // (a bare Approve, say) when there is none.
