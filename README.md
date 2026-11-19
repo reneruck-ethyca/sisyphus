@@ -128,7 +128,9 @@ If your teams can't be fetched, the tick does nothing rather than drop team-requ
 ## Reviews
 
 Design reviews are tracked but never reviewed on their own: no first review, no follow-ups. Start
-one from the PR page when you want it. A PR counts as a design review when every file it changes is
+one from the PR page when you want it. Its findings are never posted: they stay in the run's
+`out/review.json` for you to read and post what you agree with, and the agent runs without a GitHub
+token, so it can't post them itself. A PR counts as a design review when every file it changes is
 prose (under `docs/`, or `.md`/`.mdx`/`.rst`, ignoring `changelog/` fragments) and its title says
 design, ADR or RFC, or a doc sits under a `designs/`, `adrs/`, `rfcs/` or `plans/` directory. This is
 decided again for each new head, so a design PR that gains code gets automatic reviews from then on.

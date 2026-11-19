@@ -847,6 +847,36 @@ func TestDryRunDoesNotPost(t *testing.T) {
 	}
 }
 
+// A design review's findings wait for the user: sisyphus doesn't post them,
+// and the agent has no token to post them itself.
+func TestDesignReviewIsNeverPosted(t *testing.T) {
+	gh := &fakeGH{}
+	f := newFixture(t, func(c *config.Review) {
+		c.Post = true
+		c.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", Setup: "uv sync"}
+	})
+	f.r.GitHub = gh
+	f.start(t)
+	tr := f.tr
+	tr.DesignReview, tr.AnnouncedSHA = true, tr.HeadSHA
+	if err := f.r.Trigger(tr); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "container start", f.started(1))
+	setup, agent, ok := strings.Cut(f.rt.Started()[0].Command[2], "unset GH_TOKEN GITHUB_TOKEN\n")
+	if !ok || !strings.Contains(setup, "uv sync") || !strings.Contains(agent, "exec 'claude'") {
+		t.Fatalf("command = %q", f.rt.Started()[0].Command[2])
+	}
+	os.WriteFile(filepath.Join(f.runs()[0].Dir, "out", "review.json"), []byte(`{"event":"COMMENT","body":"hi","replies":[{"comment_id":7,"body":"yes"}]}`), 0o644)
+	f.succeed(f.containers()[0].ID, "")
+	waitFor(t, "run to finish", func() bool { rs := f.runs(); return len(rs) == 1 && rs[0].Status != Running })
+	run := f.runs()[0]
+	if reviews, replies := gh.posted(); run.Status != Succeeded || run.Posted != nil || len(reviews)+len(replies) != 0 ||
+		!strings.Contains(run.PostNote, "design review") {
+		t.Fatalf("run = %+v, posted %q %q", run, reviews, replies)
+	}
+}
+
 func TestDiscussionIsHandedToTheAgent(t *testing.T) {
 	f := newFixture(t)
 	f.r.GitHub = &fakeGH{}

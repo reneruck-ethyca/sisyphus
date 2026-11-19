@@ -993,7 +993,8 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	if status == Succeeded {
 		var posted *Posted
 		var err error
-		if r.cfg.Post && r.GitHub != nil {
+		design := run.Job.PR.DesignReview // its findings wait for the user, who posts what they approve
+		if r.cfg.Post && r.GitHub != nil && !design {
 			if run.Posting { // GitHub may have it already; posting twice is worse than not at all
 				err = errors.New("posting was interrupted by a restart; check GitHub before posting again")
 			} else {
@@ -1002,6 +1003,9 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 			}
 		}
 		note := postNote(posted, err, r.cfg.Post && r.GitHub != nil)
+		if design {
+			note = "not posted: design review, the findings are in out/review.json for you to post"
+		}
 		r.record(id, run.ID, func(x *Run) { x.Posted, x.PostNote = posted, note })
 		r.appendLog(id, run, logs.lw, "── sisyphus: "+note)
 		slog.Info("review "+strings.SplitN(note, ":", 2)[0], "pr", id, "run", run.ID, "note", note)

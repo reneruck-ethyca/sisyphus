@@ -26,6 +26,9 @@ func (r *Reviewer) spec(ctx context.Context, run Run, beforeAgent string) (conta
 	if !ok {
 		return container.Spec{}, fmt.Errorf("no review.repos entry for %s", tr.Repo)
 	}
+	if tr.DesignReview { // nothing of a design review reaches GitHub without the user; setup keeps the token
+		beforeAgent = "unset GH_TOKEN GITHUB_TOKEN\n" + beforeAgent
+	}
 	workdir := cmp.Or(repo.Workdir, tr.Worktree)
 	for _, d := range []string{"out", "claude"} {
 		if err := os.MkdirAll(filepath.Join(run.Dir, d), 0o755); err != nil {
