@@ -1,7 +1,9 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -48,5 +50,56 @@ func TestParseMarker(t *testing.T) {
 	}
 	if parseMarker("no marker") != nil {
 		t.Fatal("expected nil without a marker")
+	}
+}
+
+const noPending = `{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[]}}}}}`
+const reviewStarted = `{"data":{"addPullRequestReview":{"pullRequestReview":{"id":"R1"}}}}`
+
+func TestCreateThreadReturnsID(t *testing.T) {
+	ref, pr := PRRef{Repo: "o/r", Number: 7}, DesignPR{ID: "PR1", HeadSHA: "abc", Viewer: "me"}
+	a, _ := newStub(map[string][]reply{"POST /repos/o/r/pulls/7/comments": {{status: 201, body: `{"node_id":"PRRC_rest"}`}}})
+	id, err := a.CreateThread(context.Background(), ref, pr, NewThread{Path: "a.md", Body: "x", SubjectType: "LINE", Line: 3, Mode: "now"})
+	if err != nil || id != "PRRC_rest" {
+		t.Errorf("now: id = %q, %v", id, err)
+	}
+	a, _ = newStub(map[string][]reply{"POST /graphql": {
+		{status: 200, body: noPending}, {status: 200, body: reviewStarted},
+		{status: 200, body: `{"data":{"addPullRequestReviewThread":{"thread":{"comments":{"nodes":[{"id":"PRRC_gql"}]}}}}}`},
+	}})
+	id, err = a.CreateThread(context.Background(), ref, pr, NewThread{Path: "a.md", Body: "x", SubjectType: "LINE", Line: 3, Mode: "review"})
+	if err != nil || id != "PRRC_gql" {
+		t.Errorf("review: id = %q, %v", id, err)
+	}
+}
+
+func TestReplyThreadReturnsID(t *testing.T) {
+	ref, pr := PRRef{Repo: "o/r", Number: 7}, DesignPR{ID: "PR1", HeadSHA: "abc", Viewer: "me"}
+	a, _ := newStub(map[string][]reply{"POST /repos/o/r/pulls/7/comments/42/replies": {{status: 201, body: `{"node_id":"PRRC_rest"}`}}})
+	id, err := a.ReplyThread(context.Background(), ref, pr, "T1", "42", "hi", "now")
+	if err != nil || id != "PRRC_rest" {
+		t.Errorf("now: id = %q, %v", id, err)
+	}
+	a, _ = newStub(map[string][]reply{"POST /graphql": {
+		{status: 200, body: noPending}, {status: 200, body: reviewStarted},
+		{status: 200, body: `{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRRC_gql"}}}}`},
+	}})
+	id, err = a.ReplyThread(context.Background(), ref, pr, "T1", "42", "hi", "review")
+	if err != nil || id != "PRRC_gql" {
+		t.Errorf("review: id = %q, %v", id, err)
+	}
+}
+
+func TestThreadOfComment(t *testing.T) {
+	page := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+		{"id":"T1","path":"a.md","comments":{"nodes":[{"id":"C1","fullDatabaseId":"41"}]}},
+		{"id":"T2","path":"b.md","comments":{"nodes":[{"id":"C2","fullDatabaseId":"40"},{"id":"C3","fullDatabaseId":"42"}]}}]}}}}}`
+	a, _ := newStub(map[string][]reply{"POST /graphql": ok(page)})
+	th, err := a.ThreadOfComment(context.Background(), PRRef{Repo: "o/r", Number: 7}, 42)
+	if err != nil || th.ID != "T2" {
+		t.Errorf("thread = %+v, %v", th, err)
+	}
+	if _, err := a.ThreadOfComment(context.Background(), PRRef{Repo: "o/r", Number: 7}, 99); !errors.Is(err, ErrNoThread) {
+		t.Errorf("unknown id: err = %v", err)
 	}
 }

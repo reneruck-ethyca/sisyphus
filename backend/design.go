@@ -198,14 +198,16 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		if err := decodeDesign(r, &in); err != nil {
 			return err
 		}
-		return srv.gh.CreateThread(ctx, ref, d, in)
+		_, err := srv.gh.CreateThread(ctx, ref, d, in)
+		return err
 	}))
 	mux.HandleFunc("POST "+base+"/threads/{id}/replies", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, r *http.Request) error {
 		var in struct{ Body, Mode, CommentID string }
 		if err := decodeDesign(r, &in); err != nil {
 			return err
 		}
-		return srv.gh.ReplyThread(ctx, ref, d, r.PathValue("id"), in.CommentID, in.Body, in.Mode)
+		_, err := srv.gh.ReplyThread(ctx, ref, d, r.PathValue("id"), in.CommentID, in.Body, in.Mode)
+		return err
 	}))
 	for _, op := range []string{"resolve", "unresolve"} {
 		mux.HandleFunc("POST "+base+"/threads/{id}/"+op, write(func(ctx context.Context, _ github.PRRef, _ github.DesignPR, r *http.Request) error {

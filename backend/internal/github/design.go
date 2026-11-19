@@ -251,7 +251,7 @@ type NewThread struct {
 // ponytail: one lock for every PR; per-PR locks if writes ever queue up behind it.
 var reviewMu sync.Mutex
 
-func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewThread) error {
+func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewThread) (commentID string, err error) {
 	if in.Mode == "now" {
 		body := map[string]any{"commit_id": pr.HeadSHA, "path": in.Path, "body": in.Body}
 		if in.SubjectType == "FILE" {
@@ -262,9 +262,13 @@ func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewTh
 				body["start_line"], body["start_side"] = in.StartLine, "RIGHT"
 			}
 		}
-		return a.send(ctx, http.MethodPost, pullPath(ref)+"/comments", body, nil)
+		var resp struct {
+			NodeID string `json:"node_id"`
+		}
+		err := a.send(ctx, http.MethodPost, pullPath(ref)+"/comments", body, &resp)
+		return resp.NodeID, err
 	}
-	return a.withReview(ctx, ref, pr, func(reviewID string) error {
+	err = a.withReview(ctx, ref, pr, func(reviewID string) error {
 		input := map[string]any{"pullRequestReviewId": reviewID, "path": in.Path, "body": in.Body, "subjectType": in.SubjectType}
 		if in.SubjectType == "LINE" {
 			input["line"], input["side"] = in.Line, "RIGHT"
@@ -272,22 +276,68 @@ func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewTh
 				input["startLine"], input["startSide"] = in.StartLine, "RIGHT"
 			}
 		}
-		return a.mutate(ctx, `mutation($input:AddPullRequestReviewThreadInput!){ addPullRequestReviewThread(input:$input){ clientMutationId } }`, input)
+		var resp struct {
+			AddPullRequestReviewThread struct {
+				Thread struct {
+					Comments struct{ Nodes []struct{ ID string } }
+				}
+			}
+		}
+		if err := a.graphql(ctx, `mutation($input:AddPullRequestReviewThreadInput!){ addPullRequestReviewThread(input:$input){ thread { comments(first:1) { nodes { id } } } } }`,
+			map[string]any{"input": input}, &resp); err != nil {
+			return err
+		}
+		if n := resp.AddPullRequestReviewThread.Thread.Comments.Nodes; len(n) > 0 {
+			commentID = n[0].ID
+		}
+		return nil
 	})
+	return commentID, err
 }
 
 // ReplyThread replies in a thread; mode "now" needs the database id of the thread's first comment.
-func (a *API) ReplyThread(ctx context.Context, ref PRRef, pr DesignPR, threadID, firstCommentID, body, mode string) error {
+func (a *API) ReplyThread(ctx context.Context, ref PRRef, pr DesignPR, threadID, firstCommentID, body, mode string) (commentID string, err error) {
 	if mode == "now" {
 		if _, err := strconv.ParseInt(firstCommentID, 10, 64); err != nil {
-			return fmt.Errorf("comment id %q: %w", firstCommentID, err)
+			return "", fmt.Errorf("comment id %q: %w", firstCommentID, err)
 		}
-		return a.send(ctx, http.MethodPost, fmt.Sprintf("%s/comments/%s/replies", pullPath(ref), firstCommentID), map[string]any{"body": body}, nil)
+		var resp struct {
+			NodeID string `json:"node_id"`
+		}
+		err := a.send(ctx, http.MethodPost, fmt.Sprintf("%s/comments/%s/replies", pullPath(ref), firstCommentID), map[string]any{"body": body}, &resp)
+		return resp.NodeID, err
 	}
-	return a.withReview(ctx, ref, pr, func(reviewID string) error {
-		return a.mutate(ctx, `mutation($input:AddPullRequestReviewThreadReplyInput!){ addPullRequestReviewThreadReply(input:$input){ clientMutationId } }`,
-			map[string]any{"pullRequestReviewThreadId": threadID, "pullRequestReviewId": reviewID, "body": body})
+	err = a.withReview(ctx, ref, pr, func(reviewID string) error {
+		var resp struct {
+			AddPullRequestReviewThreadReply struct{ Comment struct{ ID string } }
+		}
+		if err := a.graphql(ctx, `mutation($input:AddPullRequestReviewThreadReplyInput!){ addPullRequestReviewThreadReply(input:$input){ comment { id } } }`,
+			map[string]any{"input": map[string]any{"pullRequestReviewThreadId": threadID, "pullRequestReviewId": reviewID, "body": body}}, &resp); err != nil {
+			return err
+		}
+		commentID = resp.AddPullRequestReviewThreadReply.Comment.ID
+		return nil
 	})
+	return commentID, err
+}
+
+var ErrNoThread = errors.New("no thread has that comment")
+
+// ThreadOfComment finds the review thread holding the comment with this database id.
+func (a *API) ThreadOfComment(ctx context.Context, ref PRRef, databaseID int64) (DocThread, error) {
+	threads, err := a.Threads(ctx, ref, "")
+	if err != nil {
+		return DocThread{}, err
+	}
+	want := strconv.FormatInt(databaseID, 10)
+	for _, t := range threads {
+		for _, c := range t.Comments {
+			if c.DatabaseID == want {
+				return t, nil
+			}
+		}
+	}
+	return DocThread{}, ErrNoThread
 }
 
 func (a *API) SetResolved(ctx context.Context, threadID string, resolved bool) error {
