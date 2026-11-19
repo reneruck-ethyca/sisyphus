@@ -10,7 +10,7 @@ import { askLabel, designAPI, isStale, type Accept, type Comment, type DesignPR,
   type SuggestionStatus, type Suggestions, type Thread, type Verdict } from "../design/api";
 import { blockForLine, blocksInRange, buildComment, placeThread, selectionRange, type Placement, type Range } from "../design/anchor";
 import { blocks, decode, markChanged, renderMarkdown, renderMermaid, rewriteLinks, sanitize } from "../design/render";
-import { defaultFilter, fromAI, inDoc, isOutdated, threadOf, type Filter } from "../design/suggestions";
+import { defaultFilter, draftOf, fromAI, inDoc, isOutdated, threadOf, type Filter } from "../design/suggestions";
 
 type Composer = { range: Range; quote: string; below: number }; // below: px from the doc column's top
 type Placed = { t: Thread; p: Placement; block?: HTMLElement; unread: number };
@@ -79,10 +79,10 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
   };
   const reload = () => {
     const n = ++reloads.current;
-    api.suggestions().then((s) => n === reloads.current && showSugg(s)).catch(fail);
-    return Promise.all([api.threads(), api.pr()]).then(([t, p]) => {
-      if (n === reloads.current) { setThreads(t); showPR(p); }
-    }).catch(fail);
+    return Promise.all([
+      api.suggestions().then((s) => { if (n === reloads.current) showSugg(s); }),
+      Promise.all([api.threads(), api.pr()]).then(([t, p]) => { if (n === reloads.current) { setThreads(t); showPR(p); } }),
+    ]).catch(fail);
   };
 
   useEffect(() => { loadPR(); api.threads().then(setThreads).catch(fail); api.suggestions().then(showSugg).catch(fail); }, [id]);
@@ -315,15 +315,7 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
   const badges = new Map<HTMLElement, Placed[]>();
   if (view !== "ai") for (const x of placed) if (x.block) badges.set(x.block, [...(badges.get(x.block) ?? []), x]);
 
-  // Accepting places a doc comment as the composer would; anything else goes as the AI wrote it.
-  const draftOf = (s: Suggestion, body: string): Accept => {
-    if (s.kind === "reply") return { body };
-    if (!s.line) return { body, subjectType: "FILE" };
-    if (!file || inDoc(s, docs, threads) !== file.path) return { body, subjectType: "LINE", line: s.line, startLine: s.start_line };
-    const range = { start: s.start_line ?? s.line, end: s.line };
-    const quote = blocksInRange(blocks(docRef.current!), range.start, range.end).map((b) => b.el.textContent).join("\n");
-    return buildComment(range, quote, body, file.hunks, file.headSha);
-  };
+  const draft = (s: Suggestion, body: string) => draftOf(s, body, docs, threads, file, docRef.current);
   const showComment = (gid: string) => {
     setFilter("posted");
     const t = threads.find((x) => x.comments.some((c) => c.id === gid));
@@ -335,11 +327,11 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
     const t = s.kind === "reply" ? threadOf(s, threads) : undefined;
     return <SuggestionCard key={s.id} s={s} spot={spot(s)} outdated={isOutdated(s, file?.headSha ?? pr?.headSha ?? "")}
       replyTo={t?.comments.find((c) => String(s.comment_id) === c.databaseId)}
-      api={api} reload={reload} draftOf={draftOf} jump={jump} onShow={showComment} />;
+      api={api} reload={reload} draftOf={draft} jump={jump} onShow={showComment} />;
   };
   const undecided = (s: Suggestion) => s.status === "open" || s.status === "posting";
   const byLine = (xs: Suggestion[]) => xs.map((s) => ({ s, line: spot(s).line })).sort((a, b) => a.line - b.line);
-  const latest = sugg?.runs.reduce<Suggestions["runs"][number] | undefined>((a, r) => (!a || r.at > a.at ? r : a), undefined);
+  const latest = sugg?.runs.at(-1); // runs are appended in order
   const ofLatest = items.filter((s) => s.run === latest?.run);
   const shownOutside = view === "ai" ? outside : outside.filter(undecided);
   const ask = pv && askLabel(pv);
@@ -627,7 +619,7 @@ const decided: Partial<Record<SuggestionStatus, [string, string]>> = {
 };
 
 function SuggestionCard({ s, spot, outdated, replyTo, api, reload, draftOf, jump, onShow }: {
-  s: Suggestion; spot: Spot; outdated: boolean; replyTo?: Comment; api: DesignAPI; reload: () => void;
+  s: Suggestion; spot: Spot; outdated: boolean; replyTo?: Comment; api: DesignAPI; reload: () => Promise<unknown>;
   draftOf: (s: Suggestion, body: string) => Accept; jump: (line: number) => void; onShow: (githubID: string) => void;
 }) {
   const [text, setText] = useState(s.edited_body ?? s.body);
@@ -635,8 +627,9 @@ function SuggestionCard({ s, spot, outdated, replyTo, api, reload, draftOf, jump
   const [err, setErr] = useState("");
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
-    setErr("");
-    try { await fn(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); reload(); }
+    try { await fn(); setErr(""); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    await reload(); // still busy until the card shows the new status, so a second click can't send it again
+    setBusy(false);
   };
   const accept = (mode: Mode) => text.trim() && run(() => api.accept(s.id, { ...draftOf(s, text), mode }));
   const set = (to: SuggestionStatus) => run(() => api.setSuggestion(s.id, to));
@@ -649,7 +642,7 @@ function SuggestionCard({ s, spot, outdated, replyTo, api, reload, draftOf, jump
     <div class="who">
       <Chip tone={done[1]}>{done[0]}</Chip>{at}<span class="short">{text}</span>
       {s.status === "dismissed" ? <button class="linkbtn" type="button" disabled={busy} onClick={() => set("open")}>Undo</button>
-        : <button class="linkbtn" type="button" onClick={() => onShow(s.github_id ?? "")}>Show</button>}
+        : s.github_id && <button class="linkbtn" type="button" onClick={() => onShow(s.github_id!)}>Show</button>}
     </div>
     {error}
   </div>;
