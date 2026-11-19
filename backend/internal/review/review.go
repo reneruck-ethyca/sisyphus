@@ -1055,7 +1055,11 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 		r.appendLog(id, run, logs.lw, "── sisyphus: "+note)
 		slog.Info("review "+strings.SplitN(note, ":", 2)[0], "pr", id, "run", run.ID, "note", note)
 		if err != nil {
-			status, why = Failed, fmt.Errorf("posting review: %w", err)
+			what := "posting review"
+			if design {
+				what = "storing suggestions"
+			}
+			status, why = Failed, fmt.Errorf("%s: %w", what, err)
 		}
 	}
 	r.removeContainer(bg, run.ID, run.Container)
@@ -1353,6 +1357,15 @@ func (r *Reviewer) changed() {
 
 // Status returns every PR's review state and recent runs, by PR ID.
 func (r *Reviewer) Status() map[string]PRStatus {
+	out := r.status()
+	for id, s := range out { // suggestion files are read outside r.mu
+		s.Suggestions = r.OpenSuggestions(id)
+		out[id] = s
+	}
+	return out
+}
+
+func (r *Reviewer) status() map[string]PRStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := map[string]PRStatus{}
@@ -1380,9 +1393,7 @@ func (r *Reviewer) Status() map[string]PRStatus {
 			set(id, StateRunning)
 		}
 	}
-	for id, s := range out {
-		s.Suggestions = r.OpenSuggestions(id)
-		out[id] = s
+	for _, s := range out {
 		for i := range s.Runs {
 			s.Runs[i].Overdue = s.Runs[i].Status == Running && time.Since(s.Runs[i].Started) > r.cfg.Timeout.Duration
 		}
