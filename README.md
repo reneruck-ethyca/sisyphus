@@ -320,7 +320,10 @@ prefixed `ENG-1234: ` when `--jira` is given, body from `--body-file`, else the 
 when someone closes it. CI is green when every check completed without failure (skipped and neutral pass).
 Red CI puts the handoff in `needs-human` (the `lastmile.needs_human_label` on the PR, the `needs-human`
 event, a banner on the Last mile page) unless `fix-ci` is on, where the fix agent takes over (below).
-`needs-human` stays until a person deals with the PR; merged and closed are still noticed.
+`needs-human` stays until a person deals with the PR; merged and closed are still noticed. One exception: a
+handoff that CI sent there comes back by itself once CI is green again (someone re-ran or fixed it). Cancelled
+checks count as flakes: they are re-run within `lastmile.flake_reruns` before anything else happens. The
+dashboard shows who approved the PR next to its state, and in the needs-human notice.
 `tlm resume <id>` (or the button on the Last mile page, `POST /api/handoffs/{id}/resume`) hands it back to TLM:
 the label goes, the round counter of the trigger that escalated starts again, and the handoff is re-read from
 `pr-open`. `tlm cancel <id>` (`POST /api/handoffs/{id}/cancel`) ends the handoff as `cancelled`, freeing the

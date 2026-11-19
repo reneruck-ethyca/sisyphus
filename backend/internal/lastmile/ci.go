@@ -123,7 +123,7 @@ func (m *Manager) failures(ctx context.Context, h Handoff, checks []github.Check
 		if f.Fingerprint == "" {
 			f.Fingerprint = fingerprint(c.Name, "")
 		}
-		f.Flake = false
+		f.Flake = c.Conclusion == "CANCELLED" // a newer run or the runner stopped it: nothing for an agent to fix
 		for _, re := range flakes {
 			if f.Log != "" && re.MatchString(f.Log) {
 				f.Flake = true

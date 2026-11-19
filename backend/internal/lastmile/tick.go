@@ -183,6 +183,11 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	}
 	if h.State == StateNeedsHuman { // a person has it; only merged and closed are watched
 		m.checkDirty(ctx, h)
+		if h.EscalatedBy == TriggerCI && s.CI == CIGreen && h.Dirty == nil { // ...unless CI was all it was there for
+			m.dropNeedsHumanLabel(ctx, *h)
+			m.unescalate(h)
+			logEvent(h, m.now(), "resumed", "CI is green again, so TLM takes it back")
+		}
 		return nil
 	}
 	if m.githubLagging(ctx, *h, s.Head) {

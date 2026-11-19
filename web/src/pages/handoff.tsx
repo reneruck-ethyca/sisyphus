@@ -5,7 +5,7 @@ import { HTTPError, post, put, session, type Dirty, type HandoffView, type Statu
 import { Ago, Chip, Ext, Loading, Page } from "../components";
 import { full, handoffIcon, handoffTone, plural, short, splitState, stamp } from "../format";
 import { loadSession, saveSession } from "../live";
-import { Actions, Reviewers, Rounds, useAct } from "./lastmile";
+import { Actions, ApprovalNote, Approved, Reviewers, Rounds, useAct } from "./lastmile";
 
 export function Handoff({ status: s, id }: { status?: Status; id: string }) {
   if (!s) return <Page title={id} page="lastmile"><Loading /></Page>;
@@ -19,7 +19,7 @@ export function Handoff({ status: s, id }: { status?: Status; id: string }) {
       <div class="pagehead">
         <nav class="meta-line" aria-label="Breadcrumb"><a href="/lastmile">Last mile</a><span>›</span><span>{v.id}</span></nav>
         <h1>{v.title}</h1>
-        <div class="meta-line"><Chip tone={handoffTone(v.state)}>{v.state}</Chip>{v.prev_state && <span>was {v.prev_state}</span>}
+        <div class="meta-line"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Approved v={v} />{v.prev_state && <span>was {v.prev_state}</span>}
           <span>{v.repo}{v.pr_url && <> <Ext href={v.pr_url}>#{v.pr_number} ↗</Ext></>}</span>
           <span>branch <code>{v.branch}</code> onto <code>{v.base}</code></span>
           {v.waiting_on && <span>waiting on <a href={`/lastmile/${v.waiting_on}`}>{v.waiting_on}</a></span>}
@@ -27,7 +27,7 @@ export function Handoff({ status: s, id }: { status?: Status; id: string }) {
           <span>updated <Ago t={v.updated} /></span></div>
         {v.agent_running && <p class="notice quiet"><Chip tone="live">{v.agent_running === "dirty" ? "agent" : `${v.agent_running} agent`}</Chip> running since <Ago t={v.agent_started} />
           {v.agent_running === "dirty" && ", finishing the uncommitted work. If it fails, the changes come back uncommitted."}</p>}
-        {!dirty && v.reason && <p class={"notice" + (v.state !== "needs-human" ? " quiet" : "")}>{v.reason}</p>}
+        {!dirty && v.reason && <p class={"notice" + (v.state !== "needs-human" ? " quiet" : "")}>{v.reason}{v.state === "needs-human" && <>{" "}<ApprovalNote v={v} /></>}</p>}
         {v.error && <p class="err">{v.error}</p>}{v.warning && <p class="muted">{v.warning}</p>}
         {dirty ? <DirtyPanel key={v.id + ":" + v.dirty_hash} v={v} d={dirty} /> : <>
           {v.state === "needs-human" && <p class="muted">Resume hands it back to TLM, which re-reads the PR from the start on its next tick.

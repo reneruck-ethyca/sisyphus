@@ -3,6 +3,7 @@ import type { ShadowReport, Status } from "../api";
 import { Ago, BudgetMeter, Chip, Ext, Loading, Notices, Page } from "../components";
 import { base, clock, isZero, lmCount, pct, plural, runPath, secs } from "../format";
 import { useFetch } from "../live";
+import { Approved } from "./lastmile";
 import { DesignButton, runHref } from "./reviews";
 
 export function Home({ status: s, error }: { status?: Status; error: string }) {
@@ -23,7 +24,7 @@ export function Home({ status: s, error }: { status?: Status; error: string }) {
         <Notices status={s} />
         {s.needs_count > 0 ? <ol class="list hl card">
           {(s.needs_human ?? []).map((v) => <li key={v.id}><Chip tone="bad">needs-human</Chip><span class="src">Last mile</span>
-            <span class="grow"><a href={`/lastmile/${v.id}`}>{v.title}</a><span class="facts">{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}
+            <span class="grow"><a href={`/lastmile/${v.id}`}>{v.title}</a><Approved v={v} /><span class="facts">{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}
               {v.prev_state && ` · was ${v.prev_state}`} · {v.reason}{v.pr_url && <> · <Ext href={v.pr_url}>PR ↗</Ext></>}</span></span>
             <span class="t"><Ago t={v.updated} /></span></li>)}
           {(s.failing ?? []).map((p) => <li key={p.id}><Chip tone={p.tone}>{p.verdict}</Chip><span class="src">{p.design ? "Design" : "Review"}</span>

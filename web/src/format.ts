@@ -136,3 +136,13 @@ export function runPath(prID: string, run: string, archive = false): string {
   const [repo, n] = prID.split("#");
   return `/${archive ? "history" : "prs"}/${repo}/${n}/runs/${run}`;
 }
+
+// approval says who stands approving the PR's current head (people, not bots), and whether GitHub would
+// merge it now; null when nobody does. A stale approval (of an older head) doesn't count.
+export function approval(v: HandoffView): { text: string; mergeable: boolean } | null {
+  const s = v.snapshot;
+  if (!s) return null;
+  const who = (s.approvals ?? []).filter((a) => !a.stale && !a.bot).map((a) => a.user);
+  if (!who.length && s.review_decision !== "APPROVED") return null;
+  return { text: "approved" + (who.length ? " by " + who.join(", ") : ""), mergeable: s.merge_state === "CLEAN" };
+}

@@ -200,11 +200,11 @@ func TestLifecycle(t *testing.T) {
 	if h = tick(); h.State != StateNeedsHuman {
 		t.Errorf("red: %s", h.State)
 	}
-	// needs-human is sticky but still sees the merge.
+	// CI sent it to needs-human, so green CI brings it back.
 	snap.Checks = []github.Check{chk("a", "COMPLETED", "SUCCESS")}
 	gh.Snapshots[prRef.Key()] = snap
-	if h = tick(); h.State != StateNeedsHuman || h.PrevState != StateAwaitingReview {
-		t.Errorf("sticky: %+v", h)
+	if h = tick(); h.State != StatePROpen || h.EscalatedBy != "" || !strings.Contains(eventKinds(h), "resumed") {
+		t.Errorf("back from CI: %+v", h)
 	}
 	snap.State = "MERGED"
 	gh.Snapshots[prRef.Key()] = snap
@@ -213,6 +213,34 @@ func TestLifecycle(t *testing.T) {
 	}
 	if _, err := m.Handoff(context.Background(), Request{Worktree: h.Worktree, Base: "main"}); err != nil {
 		t.Errorf("branch not released: %v", err)
+	}
+}
+
+func TestNeedsHumanStaysUnlessCISentIt(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{})
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
+	m.set(t, id, func(h *Handoff) { h.State, h.EscalatedBy, h.Reason = StateNeedsHuman, TriggerReview, "review feedback" })
+	m.tick(context.Background())
+	if h := m.must(t, id); h.State != StateNeedsHuman || h.Snapshot == nil || h.Snapshot.CI != CIGreen {
+		t.Errorf("review escalation resumed on green: %+v", h)
+	}
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "MERGED", HeadSHA: "h", Author: "me"}
+	if m.tick(context.Background()); m.must(t, id).State != StateMerged {
+		t.Error("needs-human doesn't see the merge")
+	}
+}
+
+func TestCancelledChecksAreRerun(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
+	m.cfg.LastMile.FlakeReruns = 1
+	cancelled := chk("a", "COMPLETED", "CANCELLED")
+	cancelled.URL = "https://github.com/ethyca/fidesplus/actions/runs/5/job/6"
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{cancelled}}
+	m.tick(context.Background())
+	if h := m.must(t, id); !slices.Equal(gh.Reruns, []int64{5}) || h.State != StateCIRunning {
+		t.Errorf("reruns %v, handoff %+v", gh.Reruns, h)
 	}
 }
 

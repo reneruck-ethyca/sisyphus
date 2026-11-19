@@ -144,7 +144,7 @@ func failedChecks(checks []github.Check) string {
 
 // nextState is where a handoff with an open PR goes after reading s, and why.
 // The agent-driven moves (feedback, conflict, fixing) come in later phases.
-// needs-human is sticky: only a person (or a later phase) moves it on.
+// needs-human is sticky: only a person moves it on, or green CI when CI sent it there (follow).
 func nextState(h Handoff, s Snapshot) (state, reason string) {
 	switch {
 	case h.State == StateNeedsHuman:

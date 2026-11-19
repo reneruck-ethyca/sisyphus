@@ -108,13 +108,14 @@ awaiting-review ─┬→ feedback ──[review-response agent]──→ ci-run
 queued ──(kicked out)──→ flake: re-queue │ CI red: fix │ conflict: rebase │ else: queue agent
                  └→ conflict ──[rebase; agent only on conflict]──→ ci-running
 any state ──(budget/rounds exhausted, repeated failure, policy)──→ needs-human ⏸
+needs-human sent by CI ──(CI green again)──→ pr-open
 closed by a human ──→ closed ✖
 ```
 
 **What the harness does on every tick, with no agent involved:**
 - builds the PR snapshot: head, checks, failed job logs, threads since the last cursor,
   mergeability, base drift
-- reruns known flakes within a budget
+- reruns known flakes and cancelled checks within a budget
 - rebases when the base moved and `merge-tree` reports no conflict
 - moves a draft PR to ready once the bot has reviewed it and CI is green (§6)
 - requests reviewers (once, see §6) and re-requests after addressing their feedback
@@ -646,3 +647,11 @@ None right now.
   escalating. Why: a handoff with `--draft` stayed draft and never got a reviewer, and humans were
   pinged before the bot's findings were fixed. fidesplus runs CI on drafts (only `openhands` drafts
   are held), so the draft phase can't hold CI back; reviewing before the PR exists was the alternative.
+- **2026-11-19:** A CI escalation clears itself, cancelled checks are flakes, approvals show. fidesplus#7579
+  sat in needs-human, approved and mergeable on GitHub, because needs-human was sticky: TLM only watched for
+  merged and closed. It got there because every job of one run was cancelled, which counted as red and spent a
+  fix round. Now a handoff that CI escalated (`escalated_by: ci`) goes back to pr-open once CI is green again;
+  other escalations (review feedback, rebase, dirty worktree) still wait for a person. A `CANCELLED` check is
+  treated as a flake and re-run within the flake budget. The dashboard puts "approved by …" (and "mergeable"
+  when GitHub's merge state is clean) next to the state on the list, the handoff page and Home, and in the
+  needs-human notice.

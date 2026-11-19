@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HandoffView, Run } from "../src/api";
-import { dur, fuzzy, gh, handoffTone, outcome, reviewerChips, rel, runPath, secs, splitState } from "../src/format";
+import { approval, dur, fuzzy, gh, handoffTone, outcome, reviewerChips, rel, runPath, secs, splitState } from "../src/format";
 
 const run = (p: Partial<Run>): Run => ({ id: "r", job: { pr: {} as Run["job"]["pr"], agent: { vendor: "", model: "", effort: "" }, reason: "new" },
   image: "", started: "2026-11-12T10:00:00Z", finished: "2026-11-12T10:01:05Z", status: "succeeded", exit_code: 0, ...p });
@@ -57,5 +57,15 @@ describe("format", () => {
     expect(splitState("merged")).toEqual({ state: "merged", reason: "" });
     expect(runPath("o/r#3", "x")).toBe("/prs/o/r/3/runs/x");
     expect(runPath("o/r#3", "x", true)).toBe("/history/o/r/3/runs/x");
+  });
+
+  it("names who approves the current head", () => {
+    const v = (snapshot: Partial<HandoffView["snapshot"]>) => ({ snapshot }) as HandoffView;
+    expect(approval({} as HandoffView)).toBeNull();
+    expect(approval(v({ review_decision: "", approvals: [{ user: "a", commit: "x", stale: true }] }))).toBeNull();
+    expect(approval(v({ review_decision: "APPROVED", merge_state: "CLEAN",
+      approvals: [{ user: "a", commit: "x", stale: false }, { user: "ethycabot", commit: "x", stale: false, bot: true }] })))
+      .toEqual({ text: "approved by a", mergeable: true });
+    expect(approval(v({ review_decision: "APPROVED", merge_state: "BLOCKED" }))).toEqual({ text: "approved", mergeable: false });
   });
 });

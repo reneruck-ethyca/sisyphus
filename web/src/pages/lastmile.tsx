@@ -2,7 +2,7 @@
 import { useState } from "preact/hooks";
 import { post, put, type HandoffView, type Status } from "../api";
 import { Ago, Chip, Ext, Loading, Page } from "../components";
-import { base, handoffTone, plural, reviewerChips } from "../format";
+import { approval, base, handoffTone, plural, reviewerChips } from "../format";
 
 export function LastMile({ status: s }: { status?: Status }) {
   if (!s) return <Page title="Last mile" page="lastmile"><Loading /></Page>;
@@ -14,7 +14,7 @@ export function LastMile({ status: s }: { status?: Status }) {
       <div class="pagehead"><h1>Last mile</h1><div class="meta-line"><span>{plural(hs.length, "handoff")}</span></div></div>
       {!s.handoffs && <p class="notice quiet">The last mile is off (<code>lastmile.disabled</code>).</p>}
       {(s.needs_human ?? []).map((v) => <p class="notice" role="alert" key={v.id}><b>Needs you: <a href={`/lastmile/${v.id}`}>{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}</a></b>
-        {" "}{v.title}{v.prev_state && ` (was ${v.prev_state})`}: {v.reason}{" "}
+        {" "}{v.title}{v.prev_state && ` (was ${v.prev_state})`}: {v.reason}{" "}<ApprovalNote v={v} />
         {v.pr_url && <><Ext href={v.pr_url}>Open PR ↗</Ext>{" "}</>}<a href={`/lastmile/${v.id}`}>Open handoff →</a></p>)}
       <div class="card">
         <div class="card-h"><span class="muted">Newest first, stacks together</span><a class="end" href="/lastmile/shadow"><b>Shadow-merge report →</b></a></div>
@@ -33,7 +33,7 @@ const Head = () => <li class="hd"><span>State</span><span>Handoff</span><span>Fi
 
 const Row = (v: HandoffView) => <li key={v.id} class={v.depth ? `depth${v.depth}` : undefined}>
   <Chip tone={handoffTone(v.state)}>{v.state}</Chip>
-  <span class="grow"><a class="ttl" href={`/lastmile/${v.id}`}>{v.title}</a>
+  <span class="grow"><a class="ttl" href={`/lastmile/${v.id}`}>{v.title}</a><Approved v={v} />
     <span class="facts"><span class="id">{v.id}</span>{v.pr_url && <> · <Ext href={v.pr_url}>{base(v.repo)} #{v.pr_number}</Ext></>}
       {v.waiting_on && ` · waiting on ${v.waiting_on}`}{v.reason && ` · ${v.reason}`}{v.prev_state && ` · was ${v.prev_state}`}</span>
     {v.error && <span class="err">{v.error}</span>}{v.warning && <span class="facts">{v.warning}</span>}
@@ -42,6 +42,19 @@ const Row = (v: HandoffView) => <li key={v.id} class={v.depth ? `depth${v.depth}
   <span class="rvs"><Reviewers v={v} /></span>
   <span class="t"><Ago t={v.updated} /></span>
   <span class="acts"><Actions v={v} merge={false} /></span></li>;
+
+// Approved is the PR's approval as a chip, with "mergeable" when GitHub would merge it now.
+export function Approved({ v }: { v: HandoffView }) {
+  const a = approval(v);
+  return a && <>{" "}<Chip tone="ok">✓ {a.text}{a.mergeable && " · mergeable"}</Chip></>;
+}
+
+// ApprovalNote says, next to a needs-human reason, that the PR is approved: what the human is asked
+// about may be all that stands between it and the merge.
+export function ApprovalNote({ v }: { v: HandoffView }) {
+  const a = approval(v);
+  return a && <><b>The PR is {a.text}{a.mergeable && " and GitHub would merge it now"}.</b>{" "}</>;
+}
 
 export function Rounds({ v }: { v: HandoffView }) {
   const rounds = Object.entries(v.fix_rounds ?? {}).sort(([a], [b]) => a.localeCompare(b));
