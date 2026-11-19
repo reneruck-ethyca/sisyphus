@@ -655,3 +655,8 @@ None right now.
   treated as a flake and re-run within the flake budget. The dashboard puts "approved by …" (and "mergeable"
   when GitHub's merge state is clean) next to the state on the list, the handoff page and Home, and in the
   needs-human notice.
+- **2026-11-19:** CI follows GitHub's required checks. fidesplus#7579 was mergeable on GitHub (merge state
+  clean) while TLM waited on a re-run of jobs branch protection doesn't require: TLM's CI rollup counted every
+  check. Checks now carry GitHub's `isRequired` for the PR, and when any check is required only those decide
+  red, pending and green. A repo without required checks keeps the old rule. The fix agent still gets the logs
+  of every failed job, since a required summary job fails because of them.

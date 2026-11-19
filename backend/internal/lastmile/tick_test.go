@@ -330,6 +330,22 @@ func TestNoChecksGrace(t *testing.T) {
 	}
 }
 
+func TestRollupCountsRequiredChecks(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	req := func(c github.Check) github.Check { c.Required = true; return c }
+	optionalRunning := []github.Check{req(chk("summary", "COMPLETED", "SUCCESS")), chk("job", "IN_PROGRESS", "")}
+	if got := rollup(optionalRunning, now, now); got != CIGreen {
+		t.Errorf("optional check still running: %s, want green", got)
+	}
+	if got := rollup([]github.Check{req(chk("summary", "COMPLETED", "FAILURE")), chk("job", "COMPLETED", "SUCCESS")}, now, now); got != CIRed {
+		t.Errorf("required check failed: %s", got)
+	}
+	if got := rollup([]github.Check{chk("job", "IN_PROGRESS", "")}, now, now); got != CIPending {
+		t.Errorf("nothing required: every check counts, got %s", got)
+	}
+}
+
 func TestSnapshotApprovals(t *testing.T) {
 	t.Parallel()
 	t0 := time.Now()

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -194,11 +195,11 @@ func TestPRViewPagesChecks(t *testing.T) {
 			pi = `"pageInfo":{"hasNextPage":true,"endCursor":"` + next + `"}`
 		}
 		return `{"data":{"repository":{"pullRequest":{"number":3,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{` + pi +
-			`,"nodes":[{"__typename":"CheckRun","name":"` + name + `","status":"COMPLETED","conclusion":"FAILURE"}]}}}}]}}}}}`
+			`,"nodes":[{"__typename":"CheckRun","name":"` + name + `","status":"COMPLETED","conclusion":"FAILURE","isRequired":` + fmt.Sprint(name == "two") + `}]}}}}]}}}}}`
 	}
 	a, s := newStub(map[string][]reply{"POST /graphql": {{status: 200, body: page("one", "c1")}, {status: 200, body: page("two", "c2")}, {status: 200, body: page("three", "")}}})
 	v, err := a.PRView(context.Background(), PRRef{Repo: "o/r", Number: 3})
-	if err != nil || len(v.Checks) != 3 || v.Checks[2].Name != "three" || v.Number != 3 || len(s.got) != 3 || !strings.Contains(s.got[2], `"after":"c2"`) {
+	if err != nil || len(v.Checks) != 3 || v.Checks[2].Name != "three" || !v.Checks[1].Required || v.Checks[0].Required || v.Number != 3 || len(s.got) != 3 || !strings.Contains(s.got[2], `"after":"c2"`) {
 		t.Errorf("checks %+v, %v; calls %v", v.Checks, err, s.got)
 	}
 }

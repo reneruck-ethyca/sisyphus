@@ -15,6 +15,7 @@ type Check struct {
 	Status     string // QUEUED | IN_PROGRESS | COMPLETED
 	Conclusion string // SUCCESS | FAILURE | CANCELLED | SKIPPED | NEUTRAL | TIMED_OUT | …; "" while running
 	URL        string
+	Required   bool // branch protection requires it to pass before the PR can merge
 }
 
 // SnapReview is a review as PRView reports it, with the commit it covers.
@@ -57,8 +58,8 @@ type PRSnapshot struct {
 
 // checkNodes is one page of a head commit's checks: check runs and commit statuses.
 const checkNodes = `pageInfo{hasNextPage endCursor} nodes{__typename
-... on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{workflow{name}}}}
-... on StatusContext{context state targetUrl}}`
+... on CheckRun{name status conclusion detailsUrl isRequired(pullRequestNumber:$number) checkSuite{workflowRun{workflow{name}}}}
+... on StatusContext{context state targetUrl isRequired(pullRequestNumber:$number)}}`
 
 const prViewQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){autoMergeAllowed pullRequest(number:$number){
 id isMergeQueueEnabled isInMergeQueue autoMergeRequest{enabledAt}
@@ -176,6 +177,7 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 									Status     string `json:"status"`
 									Conclusion string `json:"conclusion"`
 									DetailsURL string `json:"detailsUrl"`
+									IsRequired bool   `json:"isRequired"`
 									CheckSuite *struct {
 										WorkflowRun *struct {
 											Workflow struct {
@@ -244,14 +246,14 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 		}
 		for _, c := range cm.Commit.Rollup.Contexts.Nodes {
 			if c.Type == "StatusContext" { // a commit status: PENDING | SUCCESS | FAILURE | ERROR | EXPECTED
-				ck := Check{Name: c.Context, Status: "COMPLETED", Conclusion: c.State, URL: c.TargetURL}
+				ck := Check{Name: c.Context, Status: "COMPLETED", Conclusion: c.State, URL: c.TargetURL, Required: c.IsRequired}
 				if c.State == "PENDING" || c.State == "EXPECTED" {
 					ck.Status, ck.Conclusion = "IN_PROGRESS", ""
 				}
 				s.Checks = append(s.Checks, ck)
 				continue
 			}
-			ck := Check{Name: c.Name, Status: c.Status, Conclusion: c.Conclusion, URL: c.DetailsURL}
+			ck := Check{Name: c.Name, Status: c.Status, Conclusion: c.Conclusion, URL: c.DetailsURL, Required: c.IsRequired}
 			if c.CheckSuite != nil && c.CheckSuite.WorkflowRun != nil {
 				ck.Workflow = c.CheckSuite.WorkflowRun.Workflow.Name
 			}

@@ -104,8 +104,14 @@ func buildSnapshot(p github.PRSnapshot, opened, now time.Time, botLogins []strin
 
 // rollup is red when any check failed, pending while any still runs, else green.
 // Skipped and neutral checks pass. A failure outranks a still-running check, so
-// a red PR is reported without waiting for the rest.
+// a red PR is reported without waiting for the rest. When branch protection marks
+// checks required, only those count, as for GitHub's merge button.
+// ponytail: a required check that hasn't reported yet is invisible here; GitHub's merge
+// state (BLOCKED) still stops the merge, so at worst TLM calls it green a moment early.
 func rollup(checks []github.Check, opened, now time.Time) string {
+	if req := slices.DeleteFunc(slices.Clone(checks), func(c github.Check) bool { return !c.Required }); len(req) > 0 {
+		checks = req
+	}
 	if len(checks) == 0 {
 		if now.Sub(opened) < noChecksGrace {
 			return CIPending

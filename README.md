@@ -317,7 +317,8 @@ worktree (the agent must not touch it again). sisyphus then pushes the branch an
 prefixed `ENG-1234: ` when `--jira` is given, body from `--body-file`, else the repo's
 `.github/pull_request_template.md`), and every `lastmile.interval` reads the PR and moves the handoff along:
 `handed-off → pr-open → ci-running → ci-red | ci-green → awaiting-review → approved → merged`, or `closed`
-when someone closes it. CI is green when every check completed without failure (skipped and neutral pass).
+when someone closes it. CI is green when every check completed without failure (skipped and neutral pass);
+when branch protection marks checks required, only those count, as for GitHub's merge button.
 Red CI puts the handoff in `needs-human` (the `lastmile.needs_human_label` on the PR, the `needs-human`
 event, a banner on the Last mile page) unless `fix-ci` is on, where the fix agent takes over (below).
 `needs-human` stays until a person deals with the PR; merged and closed are still noticed. One exception: a
