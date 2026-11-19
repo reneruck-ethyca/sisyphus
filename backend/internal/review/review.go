@@ -94,6 +94,8 @@ type PRStatus struct {
 	State  string `json:"state"`            // "" | StateQueued | StateRunning
 	Runs   []Run  `json:"runs"`             // newest first
 	Queued *Job   `json:"queued,omitempty"` // the job waiting to run, if any
+	// Suggestions counts the design review's suggestions still waiting for a decision.
+	Suggestions int `json:"suggestions,omitempty"`
 }
 
 // Latest is the most recent run, if any.
@@ -117,6 +119,7 @@ var (
 	errReclaimed  = errors.New("worktree reclaimed by the tracker")
 	errDropped    = errors.New("PR dropped")
 	errReset      = errors.New("reset")
+	errCancelled  = errors.New("cancelled by the user")
 )
 
 // retryable marks a failure before Claude started (setup, the stack, starting
@@ -352,6 +355,13 @@ func (r *Reviewer) forget(ctx context.Context, prID string, withStacks bool) err
 		err = errors.Join(err, r.removeStacks(match))
 	}
 	err = errors.Join(err, os.RemoveAll(filepath.Join(r.dir, "runs", prPath(prID))))
+	r.sugMu.Lock()
+	if prID == "" {
+		err = errors.Join(err, os.RemoveAll(filepath.Join(r.dir, "suggestions")))
+	} else if e := os.Remove(r.suggestionsPath(prID)); !errors.Is(e, os.ErrNotExist) {
+		err = errors.Join(err, e)
+	}
+	r.sugMu.Unlock()
 	slog.Info("forgot reviews", "pr", cmp.Or(prID, "all"), "containers_removed", len(cs))
 	r.changed()
 	return err
@@ -439,6 +449,28 @@ func (r *Reviewer) cancel(id string, why error) {
 		slog.Info("stopping review", "pr", id, "why", why)
 		cancel(why)
 	}
+}
+
+// Cancel stops the PR's running review, or drops its queued one.
+func (r *Reviewer) Cancel(prID string) error {
+	r.mu.Lock()
+	cancel := r.active[prID]
+	n := len(r.st.Queue)
+	r.st.Queue = slices.DeleteFunc(r.st.Queue, func(j Job) bool { return j.PR.Key() == prID })
+	dropped := len(r.st.Queue) < n
+	if dropped {
+		r.saveLocked()
+	}
+	r.mu.Unlock()
+	if cancel == nil && !dropped {
+		return errors.New("no review running or queued")
+	}
+	if cancel != nil {
+		slog.Info("stopping review", "pr", prID, "why", errCancelled)
+		cancel(errCancelled)
+	}
+	r.changed()
+	return nil
 }
 
 // --- running ---
@@ -994,8 +1026,21 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	if status == Succeeded {
 		var posted *Posted
 		var err error
+		var note string
 		design := run.Job.PR.DesignReview // its findings wait for the user, who posts what they approve
-		if r.cfg.Post && r.GitHub != nil && !design {
+		if design {
+			var f *ReviewFile
+			if f, err = ReadReviewFile(run.Dir); err == nil {
+				n := 0
+				if f != nil {
+					n, err = r.addSuggestions(id, run.ID, run.Job.PR.HeadSHA, time.Now(), f)
+				}
+				note = designNote(n)
+			}
+			if err != nil {
+				note = "suggestions failed: " + err.Error()
+			}
+		} else if r.cfg.Post && r.GitHub != nil {
 			if run.Posting { // GitHub may have it already; posting twice is worse than not at all
 				err = errors.New("posting was interrupted by a restart; check GitHub before posting again")
 			} else {
@@ -1003,9 +1048,8 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 				posted, err = r.post(bg, run)
 			}
 		}
-		note := postNote(posted, err, r.cfg.Post && r.GitHub != nil)
-		if design {
-			note = "not posted: design review, the findings are in out/review.json for you to post"
+		if !design {
+			note = postNote(posted, err, r.cfg.Post && r.GitHub != nil)
 		}
 		r.record(id, run.ID, func(x *Run) { x.Posted, x.PostNote = posted, note })
 		r.appendLog(id, run, logs.lw, "── sisyphus: "+note)
@@ -1023,6 +1067,16 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	if errors.Is(why, errReclaimed) {
 		r.host.Kick() // the tracker is waiting for this worktree
 	}
+}
+
+func designNote(n int) string {
+	switch n {
+	case 0:
+		return "no suggestions, not posted"
+	case 1:
+		return "1 suggestion, not posted: review them on the design page"
+	}
+	return fmt.Sprintf("%d suggestions, not posted: review them on the design page", n)
 }
 
 // postNote says in a line what came of posting a succeeded run's review.
@@ -1326,7 +1380,9 @@ func (r *Reviewer) Status() map[string]PRStatus {
 			set(id, StateRunning)
 		}
 	}
-	for _, s := range out {
+	for id, s := range out {
+		s.Suggestions = r.OpenSuggestions(id)
+		out[id] = s
 		for i := range s.Runs {
 			s.Runs[i].Overdue = s.Runs[i].Status == Running && time.Since(s.Runs[i].Started) > r.cfg.Timeout.Duration
 		}

@@ -872,9 +872,128 @@ func TestDesignReviewIsNeverPosted(t *testing.T) {
 	waitFor(t, "run to finish", func() bool { rs := f.runs(); return len(rs) == 1 && rs[0].Status != Running })
 	run := f.runs()[0]
 	if reviews, replies := gh.posted(); run.Status != Succeeded || run.Posted != nil || len(reviews)+len(replies) != 0 ||
-		!strings.Contains(run.PostNote, "design review") {
+		run.PostNote != "1 suggestion, not posted: review them on the design page" {
 		t.Fatalf("run = %+v, posted %q %q", run, reviews, replies)
 	}
+}
+
+func designFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t, func(c *config.Review) { c.Post = true })
+	f.r.GitHub = &fakeGH{}
+	f.start(t)
+	f.tr.DesignReview, f.tr.AnnouncedSHA = true, f.tr.HeadSHA
+	return f
+}
+
+// designRun triggers a design run, lets it write out (if any) and finish.
+func designRun(t *testing.T, f *fixture, out string) Run {
+	t.Helper()
+	if err := f.r.Trigger(f.tr); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "container start", f.started(1))
+	if out != "" {
+		os.WriteFile(filepath.Join(f.runs()[0].Dir, "out", "review.json"), []byte(out), 0o644)
+	}
+	f.succeed(f.containers()[0].ID, "")
+	waitFor(t, "run to finish", func() bool { rs := f.runs(); return len(rs) == 1 && rs[0].Status != Running })
+	return f.runs()[0]
+}
+
+func TestDesignRunAddsSuggestions(t *testing.T) {
+	f := designFixture(t)
+	run := designRun(t, f, `{"event":"COMMENT","body":"hi","comments":[{"path":"a.md","line":2,"body":"c"}],"replies":[{"comment_id":7,"body":"yes"}]}`)
+	s, _ := f.r.Suggestions(f.tr.Key())
+	if len(s.Items) != 2 || s.Items[0].Status != SugOpen || s.Items[1].Status != SugOpen ||
+		s.Items[0].Head != f.tr.HeadSHA || run.Posted != nil ||
+		run.PostNote != "2 suggestions, not posted: review them on the design page" {
+		t.Fatalf("run = %+v, suggestions = %+v", run, s)
+	}
+}
+
+func TestDesignRunSummaryOnly(t *testing.T) {
+	f := designFixture(t)
+	run := designRun(t, f, `{"event":"COMMENT","body":"fine"}`)
+	s, _ := f.r.Suggestions(f.tr.Key())
+	if len(s.Items) != 0 || len(s.Runs) != 1 || run.PostNote != "no suggestions, not posted" {
+		t.Fatalf("run = %+v, suggestions = %+v", run, s)
+	}
+}
+
+func TestDesignRunGetsSuggestionsContext(t *testing.T) {
+	for _, promptFile := range []bool{false, true} {
+		f := designFixture(t)
+		if promptFile {
+			pf := filepath.Join(t.TempDir(), "p.md")
+			os.WriteFile(pf, []byte("custom prompt"), 0o644)
+			f.r.cfg.Repos["ethyca/a"] = config.RepoReview{Image: "reviewer:a", PromptFile: pf}
+		}
+		if _, err := f.r.addSuggestions(f.tr.Key(), "R0", "h0", time.Now(), &ReviewFile{Comments: []InlineComment{{Path: "a.md", Line: 1, Body: "old"}}}); err != nil {
+			t.Fatal(err)
+		}
+		run := designRun(t, f, "")
+		want, _ := f.r.Suggestions(f.tr.Key())
+		var got Suggestions
+		b, err := os.ReadFile(filepath.Join(run.Dir, "context", "suggestions.json"))
+		if err != nil || json.Unmarshal(b, &got) != nil || len(got.Items) != 1 || got.Items[0].ID != want.Items[0].ID {
+			t.Fatalf("context = %q, %v", b, err)
+		}
+		if p, _ := os.ReadFile(filepath.Join(run.Dir, "prompt.md")); !strings.Contains(string(p), designPromptNote) {
+			t.Fatalf("prompt (PromptFile %v) lacks the design note", promptFile)
+		}
+	}
+}
+
+func TestCodeRunGetsNoSuggestionsContext(t *testing.T) {
+	f := newFixture(t)
+	f.r.GitHub = &fakeGH{}
+	f.start(t)
+	f.r.Tracked(f.tr)
+	waitFor(t, "container start", f.started(1))
+	dir := f.runs()[0].Dir
+	if _, err := os.Stat(filepath.Join(dir, "context", "suggestions.json")); err == nil {
+		t.Fatal("code run got suggestions.json")
+	}
+	if p, _ := os.ReadFile(filepath.Join(dir, "prompt.md")); strings.Contains(string(p), designPromptNote) {
+		t.Fatal("code run prompt has the design note")
+	}
+}
+
+func TestForgetDeletesSuggestions(t *testing.T) {
+	r := sugFixture(t)
+	if err := r.Forget(context.Background(), sugPR); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(r.suggestionsPath(sugPR)); !os.IsNotExist(err) {
+		t.Fatalf("suggestions survive Forget: %v", err)
+	}
+}
+
+func TestStatusCountsOpenSuggestions(t *testing.T) {
+	r := sugFixture(t)
+	if err := r.SetSuggestionStatus(sugPR, "R1-c0", SugDismissed); err != nil {
+		t.Fatal(err)
+	}
+	r.st.Runs[sugPR] = []Run{{ID: "R1"}}
+	if n := r.Status()[sugPR].Suggestions; n != 2 {
+		t.Fatalf("open = %d", n)
+	}
+}
+
+func TestCancelDesignRun(t *testing.T) {
+	f := designFixture(t)
+	if err := f.r.Cancel(f.tr.Key()); err == nil {
+		t.Fatal("cancelled an idle PR")
+	}
+	if err := f.r.Trigger(f.tr); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "container start", f.started(1))
+	if err := f.r.Cancel(f.tr.Key()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "run to be cancelled", f.lastStatus(Cancelled))
 }
 
 func TestDiscussionIsHandedToTheAgent(t *testing.T) {

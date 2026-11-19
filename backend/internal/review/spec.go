@@ -45,12 +45,20 @@ func (r *Reviewer) spec(ctx context.Context, run Run, beforeAgent string) (conta
 	if err != nil {
 		return container.Spec{}, fmt.Errorf("prompt: %w", err)
 	}
+	if tr.DesignReview && r.GitHub != nil {
+		prompt += "\n\n" + designPromptNote
+	}
 	if err := os.WriteFile(filepath.Join(run.Dir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return container.Spec{}, err
 	}
 	if r.GitHub != nil {
 		if err := r.writeDiscussion(ctx, tr.PRRef, filepath.Join(run.Dir, "context")); err != nil {
 			return container.Spec{}, err
+		}
+		if tr.DesignReview {
+			if err := r.writeSuggestionsContext(tr.Key(), filepath.Join(run.Dir, "context")); err != nil {
+				return container.Spec{}, err
+			}
 		}
 	}
 	network := ""

@@ -13,6 +13,8 @@ import (
 //go:embed prompt.md
 var defaultPrompt string
 
+const designPromptNote = "This is a design review. Nothing you write is posted: it becomes suggestions the user accepts or dismisses. /sisyphus/context/suggestions.json lists the suggestions from earlier runs with the user's decision on each (open, review/posted = accepted, dismissed = rejected). Don't suggest anything already covered there or in the PR discussion. Don't raise a dismissed point again unless the doc changed in a way that makes it newly relevant."
+
 // PromptData is what a prompt template can use.
 type PromptData struct {
 	PR           tracker.Tracked

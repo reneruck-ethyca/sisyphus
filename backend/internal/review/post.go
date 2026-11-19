@@ -84,6 +84,19 @@ func (r *Reviewer) writeDiscussion(ctx context.Context, ref github.PRRef, dir st
 	return nil
 }
 
+// writeSuggestionsContext hands a design run the PR's earlier suggestions as context/suggestions.json.
+func (r *Reviewer) writeSuggestionsContext(prID, dir string) error {
+	s, err := r.Suggestions(prID)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "suggestions.json"), b, 0o644)
+}
+
 // ReadReviewFile reads the out/review.json a run's agent wrote. nil, nil means
 // it wrote none.
 func ReadReviewFile(runDir string) (*ReviewFile, error) {
