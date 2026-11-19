@@ -144,6 +144,13 @@ author** and comes back to Needs you on new commits, or on comments from others 
 Coming back, the page marks the comments that arrived since your review and can highlight only what
 changed since then.
 
+Each design run also leaves suggestions on the design page: its comments and replies, kept as cards
+beside the doc. The **Show** filter switches between the AI suggestions, the comments already posted (pending ones included), and all of them.
+Accept a suggestion to edit it and post it (into your pending review or right away); dismiss it to
+drop it, and undo to bring it back. A suggestion made against an older head is outdated: it can't be
+posted, only dismissed. Suggestions build up across runs, and later runs are told what you accepted
+and dismissed so they don't repeat it. Resetting or wiping a PR deletes its suggestions.
+
 Otherwise, a run is started when a PR is first tracked (`new`), after new commits (`commits`, which also stops a
 run still going on the old head) and after new replies (`replies`, queued behind a running one). Each
 PR has at most one queued job (the newest; a never-reviewed PR stays `new`) and one running container,
