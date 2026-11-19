@@ -160,8 +160,23 @@ func (r *Reviewer) FinishAccept(prID, id, status, body, githubID string) error {
 }
 
 func (r *Reviewer) SetSuggestionStatus(prID, id, status string) error {
+	return r.setStatusIf(prID, id, status, func(Suggestion) bool { return true })
+}
+
+// SetSuggestionStatusFrom is SetSuggestionStatus only while the status is still from.
+func (r *Reviewer) SetSuggestionStatusFrom(prID, id, from, to string) error {
+	return r.setStatusIf(prID, id, to, func(s Suggestion) bool { return s.Status == from })
+}
+
+// ReconcileSuggestion settles a suggestion in review only while it is still the comment githubID,
+// so a reconcile working from an older list can't reopen one accepted again since.
+func (r *Reviewer) ReconcileSuggestion(prID, id, githubID, to string) error {
+	return r.setStatusIf(prID, id, to, func(s Suggestion) bool { return s.Status == SugReview && s.GitHubID == githubID })
+}
+
+func (r *Reviewer) setStatusIf(prID, id, status string, ok func(Suggestion) bool) error {
 	_, err := r.updateSuggestion(prID, id, func(s *Suggestion) error {
-		if !slices.Contains(sugMoves[s.Status], status) {
+		if !ok(*s) || !slices.Contains(sugMoves[s.Status], status) {
 			return ErrSuggestionState
 		}
 		s.Status = status

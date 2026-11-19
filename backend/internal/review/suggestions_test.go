@@ -148,3 +148,34 @@ func TestOpenSuggestions(t *testing.T) {
 		t.Errorf("open = %d", n)
 	}
 }
+
+func TestSetSuggestionStatusFrom(t *testing.T) {
+	r := sugFixture(t)
+	if err := r.SetSuggestionStatusFrom(sugPR, "R1-c0", "dismissed", "open"); !errors.Is(err, ErrSuggestionState) {
+		t.Errorf("open, from dismissed: %v", err)
+	}
+	if err := r.SetSuggestionStatusFrom(sugPR, "R1-c0", "open", "posted"); !errors.Is(err, ErrSuggestionState) {
+		t.Errorf("a move sugMoves refuses: %v", err)
+	}
+	if err := r.SetSuggestionStatusFrom(sugPR, "R1-c0", "open", "dismissed"); err != nil || sugStatus(t, r, "R1-c0").Status != "dismissed" {
+		t.Errorf("open to dismissed: %v", err)
+	}
+	if err := r.SetSuggestionStatusFrom(sugPR, "nope", "open", "dismissed"); !errors.Is(err, ErrNoSuggestion) {
+		t.Errorf("unknown id: %v", err)
+	}
+}
+
+func TestReconcileSuggestion(t *testing.T) {
+	r := sugFixture(t)
+	r.BeginAccept(sugPR, "R1-c0", "h1")
+	r.FinishAccept(sugPR, "R1-c0", "review", "x", "C2")
+	if err := r.ReconcileSuggestion(sugPR, "R1-c0", "C1", "open"); !errors.Is(err, ErrSuggestionState) {
+		t.Errorf("stale comment id: %v", err)
+	}
+	if err := r.ReconcileSuggestion(sugPR, "R1-c0", "C2", "posted"); err != nil || sugStatus(t, r, "R1-c0").Status != "posted" {
+		t.Errorf("matching comment id: %v", err)
+	}
+	if err := r.ReconcileSuggestion(sugPR, "R1-c0", "C2", "open"); !errors.Is(err, ErrSuggestionState) {
+		t.Errorf("no longer in review: %v", err)
+	}
+}

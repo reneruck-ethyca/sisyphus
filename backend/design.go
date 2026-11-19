@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/reneruck/sisyphus/internal/github"
@@ -249,7 +250,8 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		}
 		threads, err := srv.gh.Threads(ctx, ref, "")
 		if err != nil {
-			return nil, err
+			slog.Warn("reading threads to settle suggestions", "pr", ref.Key(), "err", err)
+			return s, nil
 		}
 		state := map[string]string{}
 		for _, t := range threads {
@@ -268,12 +270,15 @@ func designHandlers(mux *http.ServeMux, srv server) {
 			} else if st != "SUBMITTED" {
 				continue
 			}
-			if err := srv.rev.SetSuggestionStatus(ref.Key(), x.ID, to); err != nil && !errors.Is(err, review.ErrSuggestionState) {
+			if err := srv.rev.ReconcileSuggestion(ref.Key(), x.ID, x.GitHubID, to); err != nil && !errors.Is(err, review.ErrSuggestionState) {
 				return nil, err
 			}
 		}
 		return srv.rev.Suggestions(ref.Key())
 	}))
+	// accepting holds prID/id of the accepts in flight; a posting suggestion outside it was left
+	// by one interrupted (unknown outcome, a restart), and the user may settle it.
+	var accepting sync.Map
 	mux.HandleFunc("POST "+base+"/suggestions/{id}/accept", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, r *http.Request) error {
 		if srv.rev == nil {
 			return review.ErrNoSuggestion
@@ -282,25 +287,35 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		if err := decodeDesign(r, &in); err != nil {
 			return err
 		}
-		ctx = context.WithoutCancel(ctx) // a page closed mid-post mustn't reopen a comment GitHub has
+		ctx = context.WithoutCancel(ctx) // a page closed mid-post mustn't leave it unsettled
 		pid, id := ref.Key(), r.PathValue("id")
+		key := pid + "/" + id
+		if _, busy := accepting.LoadOrStore(key, true); busy {
+			return review.ErrSuggestionState
+		}
+		defer accepting.Delete(key)
 		sg, err := srv.rev.BeginAccept(pid, id, d.HeadSHA)
 		if err != nil {
 			return err
 		}
 		var commentID string
+		refused := true // nothing reached GitHub, or GitHub said no
 		if sg.Kind == "reply" {
 			var t github.DocThread
 			if t, err = srv.gh.ThreadOfComment(ctx, ref, sg.CommentID); err == nil {
 				commentID, err = srv.gh.ReplyThread(ctx, ref, d, t.ID, t.Comments[0].DatabaseID, in.Body, in.Mode)
+				refused = refusedByGitHub(err)
 			}
 		} else {
 			in.Path = sg.Path
 			commentID, err = srv.gh.CreateThread(ctx, ref, d, in)
+			refused = refusedByGitHub(err)
 		}
 		if err != nil {
-			if e := srv.rev.SetSuggestionStatus(pid, id, review.SugOpen); e != nil {
-				slog.Error("reopening a suggestion that failed to post", "pr", pid, "id", id, "err", e)
+			if refused {
+				if e := srv.rev.SetSuggestionStatusFrom(pid, id, review.SugPosting, review.SugOpen); e != nil {
+					slog.Error("reopening a suggestion GitHub refused", "pr", pid, "id", id, "err", e)
+				}
 			}
 			return err
 		}
@@ -310,7 +325,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		}
 		return srv.rev.FinishAccept(pid, id, status, in.Body, commentID)
 	}))
-	// status dismisses a suggestion or undoes that; accepting and reconciling make the other moves.
+	// status dismisses a suggestion, undoes that, or settles one an interrupted accept left posting.
 	mux.HandleFunc("POST "+base+"/suggestions/{id}/status", func(w http.ResponseWriter, r *http.Request) {
 		ref, ok := pr(w, r)
 		if !ok {
@@ -319,7 +334,9 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		var in struct{ Status string }
 		err := decodeDesign(r, &in)
 		if err == nil {
-			err = setSuggestionStatus(srv.rev, ref.Key(), r.PathValue("id"), in.Status)
+			pid, id := ref.Key(), r.PathValue("id")
+			_, busy := accepting.Load(pid + "/" + id)
+			err = setSuggestionStatus(srv.rev, pid, id, in.Status, busy)
 		}
 		if err != nil {
 			designError(w, err)
@@ -329,29 +346,41 @@ func designHandlers(mux *http.ServeMux, srv server) {
 	})
 }
 
-func setSuggestionStatus(rev *review.Reviewer, prID, id, status string) error {
+// refusedByGitHub says whether a failed write surely left nothing on GitHub: it answered
+// 4xx, or the GraphQL mutation errored. Anything else (no answer, 5xx) may have posted.
+func refusedByGitHub(err error) bool {
+	var he *api.HTTPError
+	var ge *api.GraphQLError
+	return errors.As(err, &he) && he.StatusCode >= 400 && he.StatusCode < 500 || errors.As(err, &ge)
+}
+
+// setSuggestionStatus makes the moves the page may ask for: open↔dismissed, and posting→open|posted
+// unless an accept is still posting it (busy). Review→open is reconciling's alone: it would post twice.
+func setSuggestionStatus(rev *review.Reviewer, prID, id, to string, busy bool) error {
 	if rev == nil {
 		return review.ErrNoSuggestion
 	}
-	switch status {
-	case review.SugDismissed: // only from open, as SetSuggestionStatus checks
+	var from []string
+	switch to {
+	case review.SugDismissed:
+		from = []string{review.SugOpen}
 	case review.SugOpen:
-		// ponytail: read then write, not atomic; undoing a dismissal twice at once while accepting is the gap.
-		s, err := rev.Suggestions(prID)
-		if err != nil {
+		from = []string{review.SugDismissed, review.SugPosting}
+	case review.SugPosted:
+		from = []string{review.SugPosting}
+	default:
+		return badRequest{errors.New("status must be open, dismissed or posted")}
+	}
+	if busy {
+		from = slices.DeleteFunc(from, func(s string) bool { return s == review.SugPosting })
+	}
+	err := review.ErrSuggestionState
+	for _, f := range from {
+		if err = rev.SetSuggestionStatusFrom(prID, id, f, to); !errors.Is(err, review.ErrSuggestionState) {
 			return err
 		}
-		i := slices.IndexFunc(s.Items, func(x review.Suggestion) bool { return x.ID == id })
-		if i < 0 {
-			return review.ErrNoSuggestion
-		}
-		if s.Items[i].Status != review.SugDismissed { // reopening one in review or posting would post it twice
-			return review.ErrSuggestionState
-		}
-	default:
-		return badRequest{errors.New("status must be open or dismissed")}
 	}
-	return rev.SetSuggestionStatus(prID, id, status)
+	return err
 }
 
 // addedLines returns the 1-based lines of now that aren't in before, by a longest

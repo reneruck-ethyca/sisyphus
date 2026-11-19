@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -958,28 +959,42 @@ func TestHTTPRequiresToken(t *testing.T) {
 
 // fakeDesignGH answers the GitHub calls the design page's suggestion endpoints make.
 type fakeDesignGH struct {
-	mu      sync.Mutex
-	head    string
-	threads string   // reviewThreads nodes, as JSON
-	fail    bool     // comment writes get a 422
-	writes  []string // comment writes, as "METHOD path" or the GraphQL mutation
+	mu          sync.Mutex
+	head        string
+	threads     string        // reviewThreads nodes, as JSON
+	threadsFail bool          // reading threads gets a 502
+	fail        int           // comment writes get this status; -1 is a dropped connection
+	writes      []string      // comment writes, as "METHOD path" or the GraphQL mutation
+	entered     chan struct{} // with gate: a comment write says it arrived, then waits for gate
+	gate        chan struct{}
 }
 
 func (f *fakeDesignGH) RoundTrip(r *http.Request) (*http.Response, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	b, _ := io.ReadAll(r.Body)
 	q := string(b)
+	isWrite := r.URL.Path != "/graphql" || strings.Contains(q, "addPullRequestReviewThread")
+	if isWrite && f.gate != nil {
+		f.entered <- struct{}{}
+		<-f.gate
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	status, body := 200, `{"message":"Not Found"}`
 	write := func(ok string) {
 		f.writes = append(f.writes, r.Method+" "+r.URL.Path+" "+q)
-		if body = ok; f.fail {
-			status, body = 422, `{"message":"Validation Failed"}`
+		if body = ok; f.fail > 0 {
+			status, body = f.fail, `{"message":"no"}`
 		}
+	}
+	if isWrite && f.fail < 0 {
+		f.writes = append(f.writes, r.Method+" "+r.URL.Path+" "+q)
+		return nil, errors.New("connection reset")
 	}
 	switch {
 	case r.URL.Path == "/graphql" && strings.Contains(q, "viewer { login }"):
 		body = `{"data":{"viewer":{"login":"me"},"repository":{"pullRequest":{"id":"PR1","headRefOid":"` + f.head + `"}}}}`
+	case r.URL.Path == "/graphql" && strings.Contains(q, "reviewThreads") && f.threadsFail:
+		status = 502
 	case r.URL.Path == "/graphql" && strings.Contains(q, "reviewThreads"):
 		body = `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":` + cmp.Or(f.threads, "[]") + `}}}}}`
 	case r.URL.Path == "/graphql" && strings.Contains(q, "reviews(states:PENDING"):
@@ -1073,6 +1088,8 @@ func sugItem(t *testing.T, rev *review.Reviewer, id string) review.Suggestion {
 
 var openComment = review.Suggestion{ID: "r1-c0", Run: "r1", Head: "h1", Kind: "comment", Path: "docs/a.md", Line: 3, StartLine: 2, Body: "Why?", Status: review.SugOpen}
 
+var openComment2 = review.Suggestion{ID: "r1-c2", Run: "r1", Head: "h1", Kind: "comment", Path: "docs/a.md", Line: 5, Body: "And?", Status: review.SugOpen}
+
 const acceptNow = `{"body":"Why not?","mode":"now","subjectType":"LINE","startLine":2,"line":3}`
 
 func TestSuggestionsList(t *testing.T) {
@@ -1165,7 +1182,7 @@ func TestAcceptTwice409(t *testing.T) {
 
 func TestAcceptFailureLeavesOpen(t *testing.T) {
 	srv, rev, fake := suggestionServer(t, "h1", openComment)
-	fake.fail = true
+	fake.fail = 422
 	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusUnprocessableEntity {
 		t.Fatalf("accept: %d %s", code, body)
 	}
@@ -1217,8 +1234,11 @@ func TestDismissNoHeadCheck(t *testing.T) {
 	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c1/status", "", `{"status":"open"}`); code != http.StatusConflict {
 		t.Fatalf("reopen from review: %d", code)
 	}
-	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c1/status", "", `{"status":"posted"}`); code != http.StatusBadRequest {
-		t.Fatalf("set posted: %d", code)
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c1/status", "", `{"status":"posted"}`); code != http.StatusConflict {
+		t.Fatalf("posted from review: %d", code)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c1/status", "", `{"status":"review"}`); code != http.StatusBadRequest {
+		t.Fatalf("set review: %d", code)
 	}
 	if code, _ := sugPost(t, srv.URL+sugBase+"/nope/status", "", `{"status":"dismissed"}`); code != http.StatusNotFound {
 		t.Fatalf("unknown id: %d", code)
@@ -1252,5 +1272,63 @@ func TestCancelAction(t *testing.T) {
 	plain, _, _ := newTestServer(t) // reviews disabled
 	if code, _ := sugPost(t, plain.URL+"/api/prs/ethyca/a/1/cancel", "", ""); code != http.StatusConflict {
 		t.Fatalf("cancel without reviews: %d", code)
+	}
+}
+
+// An accept whose outcome is unknown (GitHub may have the comment) stays posting, for the user to settle.
+func TestAcceptUnknownOutcomeStaysPosting(t *testing.T) {
+	for _, fail := range []int{502, -1} {
+		srv, rev, fake := suggestionServer(t, "h1", openComment)
+		fake.fail = fail
+		if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusBadGateway {
+			t.Fatalf("%d: accept: %d %s", fail, code, body)
+		}
+		if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugPosting {
+			t.Fatalf("%d: item %+v", fail, it)
+		}
+	}
+}
+
+func TestResolveStuckPosting(t *testing.T) {
+	stuck := func(id string) review.Suggestion {
+		s := openComment
+		s.ID, s.Status = id, review.SugPosting
+		return s
+	}
+	srv, rev, fake := suggestionServer(t, "h1", stuck("r1-c0"), stuck("r1-c1"), openComment2)
+	for id, to := range map[string]string{"r1-c0": review.SugPosted, "r1-c1": review.SugOpen} {
+		if code, body := sugPost(t, srv.URL+sugBase+"/"+id+"/status", "", `{"status":"`+to+`"}`); code != http.StatusNoContent {
+			t.Fatalf("%s to %s: %d %s", id, to, code, body)
+		}
+		if it := sugItem(t, rev, id); it.Status != to {
+			t.Fatalf("item %+v", it)
+		}
+	}
+	fake.entered, fake.gate = make(chan struct{}), make(chan struct{})
+	done := make(chan int)
+	go func() {
+		code, _ := sugPost(t, srv.URL+sugBase+"/r1-c2/accept", "h1", acceptNow)
+		done <- code
+	}()
+	<-fake.entered
+	for _, to := range []string{review.SugPosted, review.SugOpen} {
+		if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c2/status", "", `{"status":"`+to+`"}`); code != http.StatusConflict {
+			t.Errorf("%s while accepting: %d", to, code)
+		}
+	}
+	close(fake.gate)
+	if code := <-done; code != http.StatusNoContent {
+		t.Fatalf("accept: %d", code)
+	}
+	if it := sugItem(t, rev, "r1-c2"); it.Status != review.SugPosted {
+		t.Fatalf("item %+v", it)
+	}
+}
+
+func TestSuggestionsListWhenGitHubFails(t *testing.T) {
+	srv, _, fake := suggestionServer(t, "h1", inReview("r1-c0", "C1"))
+	fake.threadsFail = true
+	if s := sugGet(t, srv); len(s.Items) != 1 || s.Items[0].Status != review.SugReview {
+		t.Fatalf("got %+v", s.Items)
 	}
 }
