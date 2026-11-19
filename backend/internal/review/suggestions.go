@@ -116,6 +116,9 @@ func (r *Reviewer) addSuggestions(prID, runID, head string, at time.Time, f *Rev
 	if err != nil {
 		return 0, err
 	}
+	if slices.ContainsFunc(s.Runs, func(x SuggestionRun) bool { return x.Run == runID }) { // stored before a crash
+		return len(slices.DeleteFunc(slices.Clone(s.Items), func(x Suggestion) bool { return x.Run != runID })), nil
+	}
 	s.Runs = append(s.Runs, SuggestionRun{Run: runID, Head: head, Event: f.Event, Body: f.Body, At: at})
 	n := 0
 	add := func(sg Suggestion) {

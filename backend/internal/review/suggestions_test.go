@@ -179,3 +179,14 @@ func TestReconcileSuggestion(t *testing.T) {
 		t.Errorf("no longer in review: %v", err)
 	}
 }
+
+func TestAddSuggestionsTwiceForOneRun(t *testing.T) {
+	r := sugFixture(t)
+	f := &ReviewFile{Comments: []InlineComment{{Path: "a.go", Line: 3, Body: "x"}, {Path: "b.go", Line: 5, Body: "y"}}, Replies: []Reply{{CommentID: 77, Body: "z"}}}
+	if n, err := r.addSuggestions(sugPR, "R1", "h1", time.Now(), f); err != nil || n != 3 {
+		t.Fatalf("again: %d, %v", n, err)
+	}
+	if s, _ := r.Suggestions(sugPR); len(s.Runs) != 1 || len(s.Items) != 3 {
+		t.Fatalf("got %d runs, %d items", len(s.Runs), len(s.Items))
+	}
+}
