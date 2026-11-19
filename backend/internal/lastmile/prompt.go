@@ -40,6 +40,7 @@ Branch: {{.Branch}} (base: {{.Base}})
 - Edit files in the working directory only. Do not run git. Do not run gh or call GitHub. Do not commit, push or stage.
 - Fix the cause of the failure with the smallest change that does it. Do not touch CI workflows, migrations or lockfiles.
 - If the failure is not something you can fix from here (infrastructure, a missing secret, a test that needs a service you do not have, a design decision), do not guess: set "escalate" to true and say why.
+- If the branch is behind {{.Base}} and that is the cause (the fix landed on {{.Base}}, or the branch must catch up before your change makes sense), set "rebase": true and say why in "rebase_reason": TLM rebases the branch after your run. With "rebase" you may leave the code untouched.
 - When you are done, write /out/result.json:
 
 ` + "```json" + `
@@ -47,6 +48,8 @@ Branch: {{.Branch}} (base: {{.Base}})
  "confidence": "low|medium|high",
  "escalate": false,
  "escalate_reason": "",
+ "rebase": false,
+ "rebase_reason": "",
  "body": "optional: a new PR description, only if the old one is now wrong",
  "body_reason": "optional: why"}
 ` + "```" + `
@@ -99,6 +102,7 @@ The same JSON is at /sisyphus/context/feedback.json. Snapshot of the PR (JSON; /
 - Be critical. Judge each item on its merits. A nitpick, a restatement of what the code already does, a style preference or a suggestion you disagree with on weak grounds gets "skip" and a reason: no reply is posted for it. Only a real problem you fixed, or a real disagreement worth stating, gets a reply. Do not thank people, do not acknowledge for the sake of it.
 - Fix what is actually wrong with the smallest change. Do not touch CI workflows, migrations or lockfiles. Run the repo's checks in your container if you can.
 - If an item needs a decision you cannot make (design, scope, a missing secret), use "defer" with a reply that says what is needed; if the whole round is beyond you, set "escalate" to true and say why.
+- If the branch is behind {{.Base}} and that is the cause (the fix landed on {{.Base}}, or the branch must catch up before your change makes sense), set "rebase": true and say why in "rebase_reason": TLM rebases the branch after your run.
 - One entry in "actions" per item, "thread_id" being the item's "id" exactly. Actions: "fix" (you changed code for it; "reply" is optional extra text, "Fixed in <sha>." is added for you), "reply" (answer without a change), "defer", "skip".
 - When you are done, write /out/result.json:
 
@@ -107,6 +111,8 @@ The same JSON is at /sisyphus/context/feedback.json. Snapshot of the PR (JSON; /
  "confidence": "low|medium|high",
  "escalate": false,
  "escalate_reason": "",
+ "rebase": false,
+ "rebase_reason": "",
  "actions": [{"thread_id": "...", "action": "fix|reply|defer|skip", "reply": "text to post, if any", "reason": "why, for the log"}],
  "body": "optional: a new PR description, only if your changes made the old one wrong",
  "body_reason": "optional: why"}

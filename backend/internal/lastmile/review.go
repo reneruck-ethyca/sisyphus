@@ -105,6 +105,9 @@ func (m *Manager) reviewAgent(ctx context.Context, h Handoff, s Snapshot, items 
 				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
 				return "writing the fix failed: " + err.Error()
 			}
+			if reason == "" || reason == reasonNoChanges {
+				fx.askRebase("review agent", out.AgentResult)
+			}
 			sha := ""
 			switch reason {
 			case "": // pushed

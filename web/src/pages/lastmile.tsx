@@ -111,8 +111,13 @@ export function MergeControls({ v }: { v: HandoffView }) {
 export function Actions({ v, merge = true }: { v: HandoffView; merge?: boolean }) {
   const [busy, act] = useAct();
   const id = encodeURIComponent(v.id), resume = `/api/handoffs/${id}/resume`, cancel = `/api/handoffs/${id}/cancel`;
+  const behind = v.snapshot?.behind ?? 0;
   return <>
     {v.state === "needs-human" && <><button class="btn small" disabled={!!busy} onClick={() => act(resume)}>Resume</button>{" "}</>}
+    {v.rebase_asked ? <><span class="muted">rebase pending ({v.rebase_asked})</span>{" "}</>
+      : !v.over && v.state !== "needs-human" && behind > 0 && <><button class="btn quiet small" disabled={!!busy}
+        title={`Rebase ${v.branch} onto ${v.base}; a conflict goes to the conflict agent or to you`}
+        onClick={() => act(`/api/handoffs/${id}/rebase`)}>Rebase ({behind} behind)</button>{" "}</>}
     {merge && <MergeControls v={v} />}{" "}
     {!v.over && <button class="btn quiet small" disabled={!!busy} onClick={() => act(cancel)}>Cancel</button>}
   </>;

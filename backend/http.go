@@ -323,6 +323,10 @@ func newHandler(srv server) http.Handler {
 		h, err := lm.Merge(context.WithoutCancel(r.Context()), r.PathValue("id"))
 		writeLastMile(w, r, http.StatusOK, h, err)
 	}))
+	mux.HandleFunc("POST /api/handoffs/{id}/rebase", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		h, err := lm.Rebase(context.WithoutCancel(r.Context()), r.PathValue("id"))
+		writeLastMile(w, r, http.StatusOK, h, err)
+	}))
 	mux.HandleFunc("PUT /api/handoffs/{id}/merge-mode", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
 		var body struct {
 			Mode string `json:"mode"`

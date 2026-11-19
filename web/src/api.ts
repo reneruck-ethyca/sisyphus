@@ -67,7 +67,7 @@ export type Handoff = {
   reviewers?: string[]; reviewers_set?: boolean; reviewers_pending?: boolean; requested?: string[]; removed?: string[];
   autonomy: { fix_ci: boolean; address_reviews: boolean; merge: string };
   max_fix_rounds: number; fix_rounds?: Record<string, number>;
-  merge_requested?: boolean; auto_merge_set?: boolean; queue_kicks?: number; enqueued_at?: string;
+  merge_requested?: boolean; rebase_asked?: string; auto_merge_set?: boolean; queue_kicks?: number; enqueued_at?: string;
   state: string; prev_state?: string; reason?: string; error?: string; warning?: string;
   pr_number?: number; pr_url?: string;
   events?: HandoffEvent[]; snapshot?: Snapshot; dirty?: Dirty; shadow?: Verdict;

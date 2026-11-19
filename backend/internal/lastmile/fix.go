@@ -37,6 +37,7 @@ type effects struct {
 	rounds    int      // conflict agent runs, counted in FixRounds
 	failures  []string // fingerprints a fix round was spent on
 	unstack   bool     // the child now sits on the parent's old base: it is a plain handoff
+	rebase    string   // the agent that asked for a rebase onto the base
 
 	downrevFrom, downrevHead string // a downrev-only restack (design §7.4): the head before it, and the one it pushed
 	downrevDropped           bool   // the downrev label came off before a push that didn't qualify for it
@@ -68,6 +69,9 @@ func (e effects) apply(h *Handoff) {
 	h.FixedFailures = append(slices.Clone(h.FixedFailures), e.failures...)
 	for range e.rounds {
 		h.FixRounds = bump(h.FixRounds, TriggerConflict)
+	}
+	if e.rebase != "" {
+		h.RebaseAsked = e.rebase
 	}
 	if e.unstack {
 		h.StackParent, h.ParentHead = "", ""
@@ -506,6 +510,13 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
 				slog.Warn("lastmile write path failed", "id", h.ID, "err", err)
 				return "writing the fix failed: " + err.Error()
 			}
+			if reason == "" || reason == reasonNoChanges {
+				fx.askRebase("fix agent", out)
+			}
+			if reason == reasonNoChanges && out.Rebase { // the fix is on the base already: the rebase is the fix
+				fx.log("agent", "fix agent: %s (confidence %s)", out.Summary, out.Confidence)
+				return ""
+			}
 			if reason != "" {
 				return reason
 			}
@@ -518,6 +529,14 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
 			return ""
 		})
 	return outcome{reason: reason, fx: fx}
+}
+
+// askRebase notes an agent's request to rebase after its run (drift does it).
+func (fx *effects) askRebase(kind string, res AgentResult) {
+	if res.Rebase {
+		fx.rebase = kind
+		fx.log("rebase", "%s asked for a rebase onto the base: %s", kind, res.RebaseReason)
+	}
 }
 
 // headShort is the worktree's head, abbreviated.

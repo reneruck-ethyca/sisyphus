@@ -89,6 +89,8 @@ type AgentResult struct {
 	EscalateReason string `json:"escalate_reason"`
 	Body           string `json:"body,omitempty"`        // a PR body update; acted on from phase 4
 	BodyReason     string `json:"body_reason,omitempty"` // why the body should change
+	Rebase         bool   `json:"rebase,omitempty"`      // rebase the branch onto its base after this run
+	RebaseReason   string `json:"rebase_reason,omitempty"`
 }
 
 // changedFiles lists what the worktree differs from HEAD in: tracked changes

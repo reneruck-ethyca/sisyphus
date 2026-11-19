@@ -38,6 +38,32 @@ func (m *Manager) Merge(_ context.Context, id string) (Handoff, error) {
 	return h, nil
 }
 
+// Rebase asks for the branch to be rebased onto its base on the next tick, as when
+// GitHub reports it behind: a clean rebase runs on the host, a conflicting one goes
+// to the conflict agent (fix-ci) or a human.
+func (m *Manager) Rebase(_ context.Context, id string) (Handoff, error) {
+	h, err := m.update(id, func(h *Handoff) error {
+		switch {
+		case Terminal(h.State):
+			return invalid("handoff %s is %s", id, h.State)
+		case h.State == StateNeedsHuman:
+			return invalid("handoff %s is needs-human: resume it first", id)
+		case h.Snapshot == nil || h.Snapshot.Behind == 0:
+			return invalid("%s is not behind its base", h.Branch)
+		}
+		h.RebaseAsked = "dashboard"
+		logEvent(h, m.now(), "rebase", "rebase requested from the dashboard")
+		return nil
+	})
+	if err != nil {
+		return h, err
+	}
+	slog.Info("lastmile rebase requested", "id", id)
+	m.changed()
+	m.Kick()
+	return h, nil
+}
+
 // mergeRefusal says why the merge button can't be pressed for h, or "".
 func mergeRefusal(h Handoff) string {
 	s := h.Snapshot

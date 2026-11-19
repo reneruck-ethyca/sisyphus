@@ -533,3 +533,51 @@ func TestStackParentHeadKeepsForkPointAfterParentRewrite(t *testing.T) {
 		t.Errorf("parent head = %.12s, want the fork point %.12s: the child isn't built on the rewritten head", got, fork)
 	}
 }
+
+func TestRebaseOnRequest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, _, id := opened(t, Request{})
+	h := m.must(t, id)
+	pre := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: pre, BaseRef: "main", Author: "me", MergeState: "CLEAN"}
+	m.tick(ctx)
+	if _, err := m.Rebase(ctx, id); err == nil {
+		t.Fatal("rebase accepted on a branch that isn't behind")
+	}
+	advanceMain(t, h.Worktree, "main-only.txt", "m")
+	m.tick(ctx) // sees it behind; GitHub's CLEAN alone starts nothing
+	if got := gittest.Git(t, h.Worktree, "rev-parse", "HEAD"); got != pre {
+		t.Fatal("rebased without being asked")
+	}
+	if h, err := m.Rebase(ctx, id); err != nil || h.RebaseAsked != "dashboard" {
+		t.Fatalf("rebase = %+v, %v", h, err)
+	}
+	m.tick(ctx)
+	m.Wait()
+	m.tick(ctx)
+	h = m.must(t, id)
+	if h.RebaseAsked != "" || gittest.Git(t, h.Worktree, "rev-parse", "HEAD") == pre || !strings.Contains(eventKinds(h), "rebase") {
+		t.Errorf("not rebased: %+v", h)
+	}
+}
+
+func TestFixAgentAsksForRebase(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tasks := &fakeTasks{result: `{"summary":"main has the fix","confidence":"high","rebase":true,"rebase_reason":"fixed on main by #12"}`}
+	m, _, id, head := redFixture(t, tasks)
+	m.tickWait(t)
+	m.tick(ctx) // applies the outcome: no edits, but a rebase is the fix
+	h := m.must(t, id)
+	if h.State == StateNeedsHuman || h.RebaseAsked != "fix agent" || !strings.Contains(tasks.calls[0].Prompt, `"rebase"`) {
+		t.Fatalf("after run: %+v", h)
+	}
+	advanceMain(t, h.Worktree, "main-only.txt", "m")
+	m.tick(ctx)
+	m.Wait()
+	m.tick(ctx)
+	if h = m.must(t, id); h.RebaseAsked != "" || gittest.Git(t, h.Worktree, "rev-parse", "HEAD") == head {
+		t.Errorf("not rebased: %+v", h)
+	}
+}

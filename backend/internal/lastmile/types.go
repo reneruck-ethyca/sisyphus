@@ -163,6 +163,7 @@ type Handoff struct {
 
 	// Merge bookkeeping (design §7.1, §7.2).
 	MergeRequested bool      `json:"merge_requested,omitempty"`  // a person pressed merge
+	RebaseAsked    string    `json:"rebase_asked,omitempty"`     // who asked for a rebase onto the base ("dashboard", "fix agent", …); "" = none pending
 	AutoMergeSet   bool      `json:"auto_merge_set,omitempty"`   // TLM turned GitHub auto-merge on; one a human turned on is theirs
 	AutoMergeHead  string    `json:"auto_merge_head,omitempty"`  // the head when TLM turned auto-merge on
 	AutoMergeAt    time.Time `json:"auto_merge_at,omitzero"`     // when TLM turned auto-merge on

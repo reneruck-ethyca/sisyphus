@@ -35,3 +35,17 @@ it("asks before merging, and says a pressed merge is pending", () => {
   expect(el.textContent).toContain("merge pending");
   expect(el.textContent).not.toContain("Squash and merge");
 });
+
+it("offers a rebase only when the branch is behind, and says one is pending", () => {
+  const el = document.createElement("div");
+  const rebase = () => [...el.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Rebase"));
+  render(<Actions v={view({})} />, el);
+  expect(rebase()).toBeUndefined();
+  render(<Actions v={view({ snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
+  expect(rebase()!.textContent).toBe("Rebase (4 behind)");
+  render(<Actions v={view({ state: "needs-human", snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
+  expect(rebase()).toBeUndefined();
+  render(<Actions v={view({ rebase_asked: "fix agent", snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
+  expect(rebase()).toBeUndefined();
+  expect(el.textContent).toContain("rebase pending (fix agent)");
+});

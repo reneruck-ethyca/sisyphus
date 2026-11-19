@@ -116,7 +116,9 @@ closed by a human ──→ closed ✖
 - builds the PR snapshot: head, checks, failed job logs, threads since the last cursor,
   mergeability, base drift
 - reruns known flakes and cancelled checks within a budget
-- rebases when the base moved and `merge-tree` reports no conflict
+- rebases when the base moved and `merge-tree` reports no conflict, and when someone asked for it: the
+  dashboard's Rebase button, or a fix or review agent's `"rebase": true` in its result (conflicts go to the
+  conflict agent with fix-ci, else to a human)
 - moves a draft PR to ready once the bot has reviewed it and CI is green (§6)
 - requests reviewers (once, see §6) and re-requests after addressing their feedback
 
@@ -660,3 +662,10 @@ None right now.
   check. Checks now carry GitHub's `isRequired` for the PR, and when any check is required only those decide
   red, pending and green. A repo without required checks keeps the old rule. The fix agent still gets the logs
   of every failed job, since a required summary job fails because of them.
+- **2026-11-19:** Rebase on request. A handoff can be rebased onto its base without waiting for GitHub to call
+  it behind: the dashboard's Rebase button (`POST /api/handoffs/{id}/rebase`, refused unless the branch is
+  behind and the handoff is open and not needs-human), or the fix and review agents, which may set
+  `"rebase": true` with a `rebase_reason` in result.json. The request is `rebase_asked` on the handoff and the
+  next tick's drift step runs it like any rebase. An agent asks through its result rather than a tool: agents
+  get no route to the sisyphus API from their container, and the rebase runs after the run anyway. A fix
+  agent that changes nothing but asks for a rebase (the fix is on the base already) no longer escalates.

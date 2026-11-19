@@ -102,7 +102,11 @@ func mergeTree(ctx context.Context, dir, base string) ([]string, error) {
 // predicts clean runs in the background; a conflicting one needs the conflict agent
 // (fix-ci), else a human. It returns true when it took over this tick.
 func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string) (bool, error) {
-	if stale := s.MergeState == "BEHIND" || s.MergeState == "DIRTY" || s.Mergeable == "CONFLICTING"; s.Behind == 0 || !stale {
+	asked := h.RebaseAsked
+	if s.Behind == 0 {
+		h.RebaseAsked = "" // nothing to rebase onto
+	}
+	if stale := asked != "" || s.MergeState == "BEHIND" || s.MergeState == "DIRTY" || s.Mergeable == "CONFLICTING"; s.Behind == 0 || !stale {
 		return false, nil
 	}
 	if head, err := m.lockedGit(ctx, *h, "rev-parse", "HEAD"); err != nil || head != s.Head {
@@ -121,6 +125,10 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 	spec := restackSpec{onto: base, head: s.Head, green: s.CI == CIGreen}
 	if !m.launch(ctx, h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
 		return true, nil
+	}
+	h.RebaseAsked = ""
+	if asked != "" {
+		logEvent(h, m.now(), "rebase", "rebase asked by "+asked)
 	}
 	if len(conflicts) > 0 {
 		logEvent(h, m.now(), "rebase", "base moved, conflicts predicted in "+files)
