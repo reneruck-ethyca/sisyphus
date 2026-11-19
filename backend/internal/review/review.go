@@ -163,6 +163,7 @@ type Reviewer struct {
 
 	wg          sync.WaitGroup // goroutines Run and Reattach start; Wait for them after ctx ends
 	mu          sync.Mutex
+	sugMu       sync.Mutex // guards every load-modify-save of a PR's suggestions file
 	st          store
 	active      map[string]context.CancelCauseFunc // running, by PR ID
 	wake        chan struct{}
