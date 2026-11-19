@@ -550,8 +550,8 @@ func TestRebaseOnRequest(t *testing.T) {
 	if got := gittest.Git(t, h.Worktree, "rev-parse", "HEAD"); got != pre {
 		t.Fatal("rebased without being asked")
 	}
-	if h, err := m.Rebase(ctx, id); err != nil || h.RebaseAsked != "dashboard" {
-		t.Fatalf("rebase = %+v, %v", h, err)
+	if h, err := m.Rebase(ctx, id); err != nil || h.RebaseAsked != "dashboard" || len(m.kick) != 1 {
+		t.Fatalf("rebase = %+v, %v; kicks %d", h, err, len(m.kick))
 	}
 	m.tick(ctx)
 	m.Wait()
@@ -568,8 +568,12 @@ func TestFixAgentAsksForRebase(t *testing.T) {
 	tasks := &fakeTasks{result: `{"summary":"main has the fix","confidence":"high","rebase":true,"rebase_reason":"fixed on main by #12"}`}
 	m, _, id, head := redFixture(t, tasks)
 	m.tickWait(t)
+	<-m.kick    // the run's own "I'm done"
 	m.tick(ctx) // applies the outcome: no edits, but a rebase is the fix
 	h := m.must(t, id)
+	if len(m.kick) != 1 {
+		t.Error("no immediate tick queued for the rebase")
+	}
 	if h.State == StateNeedsHuman || h.RebaseAsked != "fix agent" || !strings.Contains(tasks.calls[0].Prompt, `"rebase"`) {
 		t.Fatalf("after run: %+v", h)
 	}

@@ -427,7 +427,7 @@ never inside a merge freeze. Every merge TLM makes itself needs green checks and
 head; with GitHub auto-merge, GitHub's own rules decide. When TLM escalates, is cancelled or the mode goes `off`,
 it turns off its auto-merge and takes the PR out of the merge queue it put it in. A merge GitHub refuses (other
 than for a head that just moved) goes to needs-human. After a merge, TLM removes the worktree and its local branch,
-unless the worktree has uncommitted or unpushed work or isn't a linked worktree. The Rebase button (`POST /api/handoffs/<id>/rebase`) rebases a branch that is behind its base on the next tick;
+unless the worktree has uncommitted or unpushed work or isn't a linked worktree. The Rebase button (`POST /api/handoffs/<id>/rebase`) rebases a branch that is behind its base right away (after a running agent, if any);
 fix and review agents can ask for the same with `"rebase": true` in their result. The dashboard's merge button (`POST /api/handoffs/<id>/merge`) merges the same way, without
 GitHub auto-merge and regardless of a freeze; `PUT /api/handoffs/<id>/merge-mode` with
 `{"mode": "off|shadow|auto|approved"}` changes the mode (`off` and `shadow` also withdraw a pressed button).

@@ -665,7 +665,8 @@ None right now.
 - **2026-11-19:** Rebase on request. A handoff can be rebased onto its base without waiting for GitHub to call
   it behind: the dashboard's Rebase button (`POST /api/handoffs/{id}/rebase`, refused unless the branch is
   behind and the handoff is open and not needs-human), or the fix and review agents, which may set
-  `"rebase": true` with a `rebase_reason` in result.json. The request is `rebase_asked` on the handoff and the
-  next tick's drift step runs it like any rebase. An agent asks through its result rather than a tool: agents
+  `"rebase": true` with a `rebase_reason` in result.json. The request is `rebase_asked` on the handoff, and
+  both start a tick at once (not at `lastmile.interval`), whose drift step runs it like any rebase; while
+  GitHub hasn't caught up with an agent's push the tick looks again every 15 seconds. An agent asks through its result rather than a tool: agents
   get no route to the sisyphus API from their container, and the rebase runs after the run anyway. A fix
   agent that changes nothing but asks for a rebase (the fix is on the base already) no longer escalates.

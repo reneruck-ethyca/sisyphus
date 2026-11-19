@@ -82,6 +82,9 @@ func (m *Manager) advance(ctx context.Context, h *Handoff) (finished bool, err e
 		// A run just ended. Don't read the PR in the same tick: right after a push GitHub
 		// may still show the old head's red checks. The next tick reads the new head.
 		m.agentFinished(ctx, h, a)
+		if h.RebaseAsked != "" {
+			m.Kick() // the agent asked for a rebase: the next tick runs it now, not at the interval
+		}
 		return true, nil
 	}
 	return false, m.follow(ctx, h)
@@ -191,6 +194,9 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 		return nil
 	}
 	if m.githubLagging(ctx, *h, s.Head) {
+		if h.RebaseAsked != "" {
+			time.AfterFunc(lagRetry, m.Kick) // a rebase is waiting on GitHub catching up with a push
+		}
 		return nil
 	}
 
@@ -398,6 +404,9 @@ func (m *Manager) keepArmed(i int, before, after Handoff) *Handoff {
 	}
 	return release
 }
+
+// lagRetry is how soon a tick looks again when GitHub lags behind a push and a rebase waits.
+const lagRetry = 15 * time.Second
 
 // githubLagging says the worktree holds a push GitHub doesn't report yet: HEAD
 // is what origin has for the branch and descends from the PR's head. Acting on
