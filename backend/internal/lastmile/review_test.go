@@ -303,6 +303,26 @@ func TestReviewRoundCapAndResume(t *testing.T) {
 	}
 }
 
+func TestBotFeedbackHasItsOwnRounds(t *testing.T) {
+	t.Parallel()
+	tasks := &fakeTasks{result: result()}
+	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(1, "ethycabot", "nit"))}}
+	m, _, id := reviewFixture(t, "address-reviews", tasks, in)
+	m.tickWait(t)
+	if h := m.must(t, id); tasks.n() != 1 || h.BotRounds != 1 || h.FixRounds["review"] != 0 {
+		t.Fatalf("bot round: runs %d %+v", tasks.n(), h)
+	}
+
+	// Past the cap the bot's items are left for the humans: no agent, no needs-human.
+	m, _, id = reviewFixture(t, "address-reviews", tasks, in)
+	m.set(t, id, func(h *Handoff) { h.BotRounds = maxBotRounds })
+	m.tickWait(t)
+	h := m.must(t, id)
+	if tasks.n() != 1 || h.State == StateNeedsHuman || h.Cursor.Threads["T1"] != 1 || !strings.Contains(eventKinds(h), "bot-cap") {
+		t.Fatalf("capped: runs %d %+v", tasks.n(), h)
+	}
+}
+
 func TestFeedbackWithAddressReviewsOff(t *testing.T) {
 	t.Parallel()
 	tasks := &fakeTasks{result: result()}

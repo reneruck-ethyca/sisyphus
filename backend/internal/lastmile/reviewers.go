@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/reneruck/sisyphus/internal/github"
 )
@@ -97,22 +98,20 @@ func noteRemoved(h *Handoff, p github.PRSnapshot) {
 	}
 }
 
-// requestReviewers asks for the bot reviewer once the PR is ready, and for the
-// humans once CI is first green (design §6), each once. Edits to the human
+// requestReviewers asks for the bot reviewer at once, draft or not, and for the
+// humans once the PR is ready for them (design §6), each once. Edits to the human
 // list made after that are applied as a diff. It records what it did on h.
 func (m *Manager) requestReviewers(ctx context.Context, h *Handoff, ref github.PRRef, s Snapshot) error {
-	bot := m.cfg.LastMile.BotReviewer
-	if !h.BotRequested && s.Ready() {
-		if bot != "" && !strings.EqualFold(bot, s.Author) {
-			if err := m.GH.EditPR(ctx, ref, github.PREdit{AddReviewers: []string{bot}}); err != nil {
-				return fmt.Errorf("requesting %s: %w", bot, err)
+	if !h.BotRequested {
+		if bot := m.bot(s); bot != "" {
+			if err := m.askBot(ctx, h, ref, bot); err != nil {
+				return err
 			}
-			h.Requested = union(h.Requested, bot)
 		}
 		h.BotRequested = true
 	}
 	switch {
-	case !h.HumansRequested && s.Ready() && s.CI == CIGreen:
+	case !h.HumansRequested && s.Ready():
 		humans, have := h.Reviewers, m.humansOn(s)
 		if !h.ReviewersSet && len(humans) == 0 {
 			humans = m.rosterPick(*h, s.Author, have)
@@ -136,7 +135,7 @@ func (m *Manager) requestReviewers(ctx context.Context, h *Handoff, ref github.P
 		add := without(want, append(slices.Clone(s.Requested), h.Removed...)...)
 		var drop []string
 		for _, u := range h.Requested {
-			if u != bot && !slices.Contains(want, u) && slices.Contains(s.Requested, u) {
+			if !strings.EqualFold(u, m.cfg.LastMile.BotReviewer) && !slices.Contains(want, u) && slices.Contains(s.Requested, u) {
 				drop = append(drop, u)
 			}
 		}
@@ -148,6 +147,77 @@ func (m *Manager) requestReviewers(ctx context.Context, h *Handoff, ref github.P
 		h.Requested = union(without(h.Requested, drop...), add...)
 		h.ReviewersPending = false
 	}
+	return nil
+}
+
+// maxBotRounds caps the review agent rounds spent on the bot's feedback alone;
+// botWait is how long a draft waits for the bot to review its head.
+const (
+	maxBotRounds = 3
+	botWait      = 30 * time.Minute
+)
+
+// bot is the bot reviewer for s's PR, or "" when there is none (none set, or it wrote the PR).
+func (m *Manager) bot(s Snapshot) string {
+	if bot := m.cfg.LastMile.BotReviewer; bot != "" && !strings.EqualFold(bot, s.Author) {
+		return bot
+	}
+	return ""
+}
+
+// askBot requests a review from bot and starts the wait for it.
+func (m *Manager) askBot(ctx context.Context, h *Handoff, ref github.PRRef, bot string) error {
+	if err := m.GH.EditPR(ctx, ref, github.PREdit{AddReviewers: []string{bot}}); err != nil {
+		return fmt.Errorf("requesting %s: %w", bot, err)
+	}
+	h.Requested = union(h.Requested, bot)
+	h.BotAsked = m.now()
+	return nil
+}
+
+// draftStep moves a draft PR towards ready (design §6): a ready PR means ready for
+// human review, so the bot reviews first, its feedback is fixed (maxBotRounds at
+// most), and the PR goes ready once CI is green and no agent is at work. A head the
+// bot hasn't seen is put to it again; a bot that stays quiet for botWait is passed
+// over. state is what the tick computed so far.
+func (m *Manager) draftStep(ctx context.Context, h *Handoff, ref github.PRRef, p github.PRSnapshot, s *Snapshot, state string) error {
+	bot := m.bot(*s)
+	if bot != "" && !h.BotRequested {
+		return nil // requestReviewers asks for it this tick
+	}
+	reviewed := bot != "" && slices.ContainsFunc(p.Reviews, func(r github.SnapReview) bool {
+		return strings.EqualFold(r.User, bot) && r.CommitSHA == s.Head
+	})
+	if reviewed {
+		h.BotAsked = time.Time{}
+	}
+	quiet := !h.BotAsked.IsZero() && m.now().Sub(h.BotAsked) >= botWait
+	done := bot == "" || reviewed || quiet || h.BotRounds >= maxBotRounds
+	if !done && h.BotAsked.IsZero() { // the head moved on since the bot's last review
+		if err := m.askBot(ctx, h, ref, bot); err != nil {
+			return err
+		}
+		logEvent(h, m.now(), "reviewer", "asked "+bot+" to review the new head")
+		return nil
+	}
+	if !done || s.CI != CIGreen || state == StateFeedback || state == StateNeedsHuman {
+		return nil
+	}
+	if err := m.GH.MarkReady(ctx, ref); err != nil {
+		return err
+	}
+	s.Draft = false
+	why := "CI green"
+	switch {
+	case bot == "":
+	case reviewed:
+		why += ", " + bot + " reviewed"
+	case h.BotRounds >= maxBotRounds:
+		why += fmt.Sprintf(", %d rounds on %s's feedback", h.BotRounds, bot)
+	default:
+		why += fmt.Sprintf(", no review from %s in %s", bot, botWait)
+	}
+	logEvent(h, m.now(), "ready", "marked ready for review: "+why)
 	return nil
 }
 

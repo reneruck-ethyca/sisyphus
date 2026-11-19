@@ -119,8 +119,9 @@ func prBody(ctx context.Context, h Handoff) string {
 	return b
 }
 
-// openPR pushes the branch and opens the PR, or adopts the one already open
-// for the branch: a crash between the two must not open a second PR.
+// openPR pushes the branch and opens the PR as a draft, or adopts the one already
+// open for the branch: a crash between the two must not open a second PR. A draft
+// goes ready once the bot has had its say and CI is green (draftStep).
 func (m *Manager) openPR(ctx context.Context, h *Handoff) error {
 	if _, err := m.lockedGit(ctx, *h, "push", "-u", "origin", h.Branch); err != nil {
 		return err
@@ -132,7 +133,7 @@ func (m *Manager) openPR(ctx context.Context, h *Handoff) error {
 	if !found {
 		body := prBody(ctx, *h)
 		if ref, err = m.GH.CreatePR(ctx, h.Repo, github.NewPR{Base: h.Base, Head: h.Branch, Title: prTitle(h.Title, h.Jira),
-			Body: body, Draft: h.Draft, Labels: h.Labels}); err != nil {
+			Body: body, Draft: true, Labels: h.Labels}); err != nil {
 			return err
 		}
 		h.LastBodyWritten = body
@@ -189,12 +190,6 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	}
 
 	noteRemoved(h, p)
-	if s.Draft && !h.Draft { // asked for a ready PR, so make it one
-		if err := m.GH.MarkReady(ctx, ref); err != nil {
-			return err
-		}
-		s.Draft = false
-	}
 	if done, err := m.stack(ctx, h, p, s); done || err != nil {
 		return err
 	}
@@ -231,8 +226,13 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 			return err
 		}
 	}
-	// Requests follow the state computed before them: humans are asked at the first green,
-	// and the handoff shows ci-green until the next tick.
+	if s.Draft {
+		if err := m.draftStep(ctx, h, ref, p, &s, state); err != nil {
+			return err
+		}
+	}
+	// Requests follow the state computed before them: humans are asked once the PR is
+	// ready, and the handoff shows the old state until the next tick.
 	if err := m.requestReviewers(ctx, h, ref, s); err != nil {
 		return err
 	}

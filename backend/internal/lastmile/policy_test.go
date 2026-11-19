@@ -196,7 +196,7 @@ func TestShadowOffAndDraft(t *testing.T) {
 		t.Errorf("off: shadow %+v, lines %v", h.Shadow, shadowLines(t, m))
 	}
 	// A draft PR is not evaluated.
-	m, gh, _, id = opened(t, Request{Draft: true, Autonomy: "merge=shadow"})
+	m, gh, _, id = opened(t, Request{Autonomy: "merge=shadow"})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", Draft: true, HeadSHA: "h", Author: "me"}
 	m.tick(context.Background())
 	if h := m.must(t, id); h.Shadow != nil || shadowLines(t, m) != nil {

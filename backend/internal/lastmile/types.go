@@ -84,9 +84,8 @@ type Request struct {
 	Jira         string   `json:"jira,omitempty"`
 	Labels       []string `json:"labels,omitempty"`
 	Reviewers    []string `json:"reviewers,omitempty"` // replace the roster
-	Draft        bool     `json:"draft"`
-	Autonomy     string   `json:"autonomy,omitempty"` // "fix-ci,address-reviews,merge=off|shadow|auto|approved"
-	Notify       string   `json:"notify,omitempty"`   // Go text/template, run through sh -c
+	Autonomy     string   `json:"autonomy,omitempty"`  // "fix-ci,address-reviews,merge=off|shadow|auto|approved"
+	Notify       string   `json:"notify,omitempty"`    // Go text/template, run through sh -c
 	NotifyOn     []string `json:"notify_on,omitempty"`
 	Agent        string   `json:"agent,omitempty"` // "vendor:model:effort"; "" = review.agent
 	MaxFixRounds int      `json:"max_fix_rounds,omitempty"`
@@ -106,7 +105,6 @@ type Handoff struct {
 	Jira         string       `json:"jira,omitempty"`
 	Labels       []string     `json:"labels,omitempty"`
 	Reviewers    []string     `json:"reviewers,omitempty"`
-	Draft        bool         `json:"draft"`
 	Autonomy     Autonomy     `json:"autonomy"`
 	Notify       string       `json:"notify,omitempty"`
 	NotifyOn     []string     `json:"notify_on,omitempty"`
@@ -143,11 +141,13 @@ type Handoff struct {
 	ParentMerged bool   `json:"parent_merged,omitempty"` // the parent merged, and stack-parent-merged was sent
 
 	// Reviewer bookkeeping (design §6): GitHub is the source of truth after the first request.
-	BotRequested     bool     `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once
-	HumansRequested  bool     `json:"humans_requested,omitempty"`  // the humans were requested, once
-	Requested        []string `json:"requested,omitempty"`         // everyone TLM requested
-	Removed          []string `json:"removed,omitempty"`           // requested by TLM, removed on GitHub by a human
-	ReviewersPending bool     `json:"reviewers_pending,omitempty"` // a reviewer edit waits to be applied on GitHub
+	BotRequested     bool      `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once
+	HumansRequested  bool      `json:"humans_requested,omitempty"`  // the humans were requested, once
+	BotAsked         time.Time `json:"bot_asked,omitzero"`          // the bot was (re)requested and hasn't reviewed the head since
+	BotRounds        int       `json:"bot_rounds,omitempty"`        // review agent rounds spent on the bot's feedback alone
+	Requested        []string  `json:"requested,omitempty"`         // everyone TLM requested
+	Removed          []string  `json:"removed,omitempty"`           // requested by TLM, removed on GitHub by a human
+	ReviewersPending bool      `json:"reviewers_pending,omitempty"` // a reviewer edit waits to be applied on GitHub
 
 	// Review inbox bookkeeping (design §4, §5).
 	Cursor       Cursor   `json:"cursor"`                  // what the review agent has been handed

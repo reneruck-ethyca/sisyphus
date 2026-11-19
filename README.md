@@ -333,8 +333,9 @@ merge verdict); `/lastmile/shadow` is the shadow merge report (verdict vs what t
 and `/lastmile/shadow?handoff={id}` or `?pr=owner/repo%23n` adds that PR's verdict history. The overview shows
 a line when handoffs need you.
 
-Reviewers: the bot (`lastmile.bot_reviewer`) is requested once the PR is ready (a PR the handoff didn't ask
-to be a draft is marked ready); humans are requested once, at the first green CI, from `--reviewers` as
+Reviewers: TLM opens every PR as a draft and requests the bot (`lastmile.bot_reviewer`) at once. A draft
+goes ready when CI is green and the bot has reviewed its head (or had 3 rounds of fixes, or stayed quiet for
+30 minutes); a PR adopted as ready skips that. Humans are requested once the PR is ready, from `--reviewers` as
 given, else `lastmile.reviewers` (per-repo override, `count`, round-robin skipping the PR author, the cursor
 kept in `lastmile.json`), else nobody and a warning. After that GitHub decides: whoever a human removes is
 never re-added, reviewers a human adds are left alone. `PUT /api/handoffs/{id}/reviewers` (a JSON list, or
@@ -446,7 +447,7 @@ A corrupt log line is skipped. A merge freeze window is `{"weekday": "friday", "
 
 ```
 tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira ENG-1234 \
-  --labels a,b --reviewers alice,bob --draft \
+  --labels a,b --reviewers alice,bob \
   --autonomy fix-ci,address-reviews,merge=off|shadow|auto|approved \
   --notify '<command template>' --notify-on merged,needs-human,closed \
   --agent claude:opus:medium --max-fix-rounds 3 --stack-parent <id|branch> --requester <who>

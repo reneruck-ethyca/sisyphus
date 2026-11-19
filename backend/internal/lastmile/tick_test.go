@@ -69,7 +69,7 @@ func TestOpenPR(t *testing.T) {
 	gittest.Git(t, clone, "add", ".github")
 	gittest.Git(t, clone, "commit", "-qm", "template")
 	h, err := m.Handoff(context.Background(), Request{Worktree: clone, Base: "main", Jira: "ENG-12", Title: "Do it", Labels: []string{"a"},
-		Draft: true, Notify: "true", NotifyOn: []string{EventPROpened}})
+		Notify: "true", NotifyOn: []string{EventPROpened}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +174,17 @@ func TestLifecycle(t *testing.T) {
 	gh.Snapshots[prRef.Key()] = snap
 	tick := func() Handoff { m.tick(context.Background()); return m.must(t, id) }
 
-	// The handoff wasn't asked to be draft, so TLM makes the PR ready, asks the bot, then the humans at green.
+	// A draft gets the bot first; the humans only once it is ready.
 	h := tick()
-	if len(gh.Ready) != 1 || h.State != StateCIGreen || !h.BotRequested || !h.HumansRequested ||
-		!reflect.DeepEqual(h.Requested, []string{"ethycabot", "carol"}) {
-		t.Fatalf("first green: ready %v, handoff %+v", gh.Ready, h)
+	if len(gh.Ready) != 0 || h.State != StateCIGreen || !h.BotRequested || h.HumansRequested || h.BotAsked.IsZero() {
+		t.Fatalf("draft: ready %v, handoff %+v", gh.Ready, h)
+	}
+	// The bot reviewed the head and CI is green: ready, and the humans are asked.
+	snap.Reviews = []github.SnapReview{{User: "ethycabot", State: "COMMENTED", CommitSHA: "h"}}
+	gh.Snapshots[prRef.Key()] = snap
+	h = tick()
+	if len(gh.Ready) != 1 || !h.HumansRequested || !h.BotAsked.IsZero() || !reflect.DeepEqual(h.Requested, []string{"ethycabot", "carol"}) {
+		t.Fatalf("ready: ready %v, handoff %+v", gh.Ready, h)
 	}
 	if len(gh.Edits) != 2 || !reflect.DeepEqual(gh.Edits[0].AddReviewers, []string{"ethycabot"}) || !reflect.DeepEqual(gh.Edits[1].AddReviewers, []string{"carol"}) {
 		t.Errorf("edits = %+v", gh.Edits)
@@ -210,13 +216,81 @@ func TestLifecycle(t *testing.T) {
 	}
 }
 
-func TestDraftHandoffStaysDraft(t *testing.T) {
+func TestDraftWaitsForBot(t *testing.T) {
 	t.Parallel()
-	m, gh, _, id := opened(t, Request{Draft: true, Reviewers: []string{"carol"}})
-	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", Draft: true, Author: "me", Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
+	m, gh, _, id := opened(t, Request{Reviewers: []string{"carol"}})
+	snap := github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Draft: true, Checks: []github.Check{chk("a", "IN_PROGRESS", "")}}
+	gh.Snapshots[prRef.Key()] = snap
+	tick := func() Handoff { m.tick(context.Background()); return m.must(t, id) }
+	asked := func() int {
+		n := 0
+		for _, e := range gh.Edits {
+			if slices.Contains(e.AddReviewers, "ethycabot") {
+				n++
+			}
+		}
+		return n
+	}
+	tick()
+	// Reviewed while CI runs: not ready yet.
+	snap.Reviews = []github.SnapReview{{User: "ethycabot", State: "COMMENTED", CommitSHA: "h"}}
+	gh.Snapshots[prRef.Key()] = snap
+	if h := tick(); len(gh.Ready) != 0 || !h.BotAsked.IsZero() || asked() != 1 {
+		t.Fatalf("pending: ready %v asked %d %+v", gh.Ready, asked(), h)
+	}
+	// A new head the bot hasn't seen is put to it again, once.
+	snap.HeadSHA = "h2"
+	gh.Snapshots[prRef.Key()] = snap
+	tick()
+	if h := tick(); asked() != 2 || h.BotAsked.IsZero() || len(gh.Ready) != 0 || !strings.Contains(eventKinds(h), "reviewer") {
+		t.Fatalf("new head: asked %d %+v", asked(), h)
+	}
+	// Green, but the bot is quiet: ready once botWait has passed, not before.
+	snap.Checks = []github.Check{chk("a", "COMPLETED", "SUCCESS")}
+	gh.Snapshots[prRef.Key()] = snap
+	if tick(); len(gh.Ready) != 0 {
+		t.Fatal("ready before the bot had its say")
+	}
+	m.now = func() time.Time { return time.Now().Add(botWait) }
+	h := tick()
+	if len(gh.Ready) != 1 || !h.HumansRequested || !strings.Contains(h.Events[len(h.Events)-1].Text+h.Events[len(h.Events)-2].Text, "no review from ethycabot") {
+		t.Errorf("quiet bot: ready %v %+v", gh.Ready, h.Events)
+	}
+}
+
+func TestDraftGoesReady(t *testing.T) {
+	t.Parallel()
+	green := github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Draft: true, Checks: []github.Check{chk("a", "COMPLETED", "SUCCESS")}}
+	cases := []struct {
+		name  string
+		setup func(m *Manager, h *Handoff)
+		ticks int
+	}{
+		{"no bot reviewer", func(m *Manager, h *Handoff) { m.cfg.LastMile.BotReviewer = "" }, 1},
+		{"bot rounds used up", func(m *Manager, h *Handoff) { h.BotRounds = maxBotRounds }, 2}, // the first tick asks the bot
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, gh, _, id := opened(t, Request{Reviewers: []string{"carol"}})
+			m.set(t, id, func(h *Handoff) { c.setup(m, h) })
+			gh.Snapshots[prRef.Key()] = green
+			for range c.ticks {
+				m.tick(context.Background())
+			}
+			if h := m.must(t, id); len(gh.Ready) != 1 || !h.HumansRequested {
+				t.Errorf("ready %v, handoff %+v", gh.Ready, h)
+			}
+		})
+	}
+}
+
+func TestReadyPRGetsHumansAtOnce(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{Reviewers: []string{"carol"}})
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{chk("a", "IN_PROGRESS", "")}}
 	m.tick(context.Background())
-	if h := m.must(t, id); len(gh.Ready) != 0 || len(gh.Edits) != 0 || h.State != StateCIGreen || h.BotRequested {
-		t.Errorf("ready %v edits %v handoff %+v", gh.Ready, gh.Edits, h)
+	if h := m.must(t, id); len(gh.Ready) != 0 || !reflect.DeepEqual(h.Requested, []string{"ethycabot", "carol"}) || h.State != StateCIRunning {
+		t.Errorf("ready %v, handoff %+v", gh.Ready, h)
 	}
 }
 

@@ -49,13 +49,25 @@ func (m *Manager) feedback(ctx context.Context, h *Handoff, p github.PRSnapshot,
 		}
 		return state, reason, nil
 	}
+	// The bot's feedback alone gets maxBotRounds rounds of its own, and past them is left
+	// to the human reviewers: it must neither use up their rounds nor stop the handoff.
+	botOnly := box.humanCount() == 0
+	if botOnly && h.BotRounds >= maxBotRounds {
+		h.Cursor = advanceCursor(h.Cursor, box.New)
+		logEvent(h, m.now(), "bot-cap", fmt.Sprintf("%d new bot items after %d rounds on bot feedback, left for the human reviewers", len(box.New), h.BotRounds))
+		return state, reason, nil
+	}
 	if m.Tasks == nil {
 		return stop(false, "agents need reviews enabled")
 	}
-	if n := h.FixRounds[TriggerReview]; n >= h.MaxFixRounds {
-		return stop(false, fmt.Sprintf("review feedback keeps coming after %d rounds", n))
+	if botOnly {
+		h.BotRounds++
+	} else {
+		if n := h.FixRounds[TriggerReview]; n >= h.MaxFixRounds {
+			return stop(false, fmt.Sprintf("review feedback keeps coming after %d rounds", n))
+		}
+		h.FixRounds = bump(h.FixRounds, TriggerReview)
 	}
-	h.FixRounds = bump(h.FixRounds, TriggerReview)
 	logEvent(h, m.now(), "agent", fmt.Sprintf("review agent started on %d items", len(box.New)))
 	snap := *s
 	snap.Failures = nil

@@ -78,7 +78,7 @@ func (m *Manager) add(h *Handoff) error {
 // parse checks what req says by itself, without looking at the worktree.
 func (m *Manager) parse(req Request) (Handoff, error) {
 	h := Handoff{Worktree: filepath.Clean(req.Worktree), Base: req.Base, Title: strings.TrimSpace(req.Title),
-		Body: req.Body, Jira: req.Jira, Draft: req.Draft, Notify: req.Notify, Requester: req.Requester,
+		Body: req.Body, Jira: req.Jira, Notify: req.Notify, Requester: req.Requester,
 		State: StateHandedOff, MaxFixRounds: req.MaxFixRounds}
 	if !filepath.IsAbs(req.Worktree) {
 		return h, invalid("worktree must be an absolute path")

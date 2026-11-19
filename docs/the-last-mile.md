@@ -61,7 +61,7 @@ tlm handoff \
   --worktree ~/Dev/.worktrees/fidesplus/ENG-1234 \
   --base dev [--stack-parent <handoff-id|branch>] \
   --title "…" --body-file pr.md --jira ENG-1234 \
-  --labels … [--reviewers a,b] --draft=false \
+  --labels … [--reviewers a,b] \
   --autonomy fix-ci,address-reviews,merge=shadow \
   --notify '<command template>' --notify-on merged,needs-human,closed \
   --agent claude:opus:medium --max-fix-rounds 3
@@ -116,7 +116,7 @@ closed by a human ──→ closed ✖
   mergeability, base drift
 - reruns known flakes within a budget
 - rebases when the base moved and `merge-tree` reports no conflict
-- moves the PR from draft to ready
+- moves a draft PR to ready once the bot has reviewed it and CI is green (§6)
 - requests reviewers (once, see §6) and re-requests after addressing their feedback
 
 **An agent starts only in these cases:**
@@ -256,8 +256,20 @@ Human reviewers come from the first source that has any:
    topped up.
 3. nobody, with a dashboard warning (not when the PR already has humans)
 
-**When.** ethycabot is requested when the PR is ready for review. Humans are requested once, when CI
-first goes green, so nobody is pinged on a red PR. After that, **GitHub is the source of truth**:
+**When.** A ready PR means "ready for human review", so TLM opens every PR as a draft and the bot goes
+first. Which path a handoff takes depends on the PR it finds:
+- **No PR, or a draft PR.** TLM opens the PR as a draft (or adopts the draft) and requests ethycabot at
+  once. It gets CI green and addresses ethycabot's reviews, at most 3 review-agent rounds on the bot's
+  feedback alone (`maxBotRounds`); after a push the bot is asked to review the new head. Once CI is green,
+  no agent is at work and the bot has reviewed the head (or the 3 rounds are spent, or it stayed quiet
+  for 30 minutes), TLM marks the PR ready and requests the humans. From there it is the normal loop.
+- **A ready PR.** ethycabot and the humans are requested at once; humans already on the PR count, so it
+  is only topped up. Then the normal loop: CI green, the bot's feedback (same 3-round cap), the humans'.
+
+Bot feedback past its 3 rounds is left on the PR for the humans: it neither escalates nor uses up the
+human feedback rounds (`max_fix_rounds`). fidesplus runs CI on drafts, so the draft phase doesn't save
+CI runs; it keeps humans out until the bot's findings are dealt with. After the first request,
+**GitHub is the source of truth**:
 - TLM records the set it requested.
 - Someone a human removed on GitHub is never re-added.
 - Reviewers a human added are left alone.
@@ -506,7 +518,7 @@ None right now.
   now (a) its existing reviews, comments and threads are history, not feedback: the review cursor
   starts past them, and (b) humans already requested or with a standing review count toward the
   roster count. Adopting still marks a draft PR ready unless the handoff asked for `--draft` (kept
-  on purpose). Title, body and labels of an adopted PR are left as they are.
+  on purpose; superseded 2026-11-19, see below). Title, body and labels of an adopted PR are left as they are.
 - **2026-11-06:** Gitignored-file check moved after container setup. A review round on fidesplus#7136
   went to needs-human because the setup's `npm install` in `clients/` rewrote workspace `node_modules`
   (about 15k files), which counted as the agent's change and were deleted. The snapshot is now taken
@@ -626,3 +638,11 @@ None right now.
   revision ids validated.
 - **2026-11-18:** §7.4: TLM's own non-qualifying pushes from a labelled head take the label off
   first; a person's push is left to fidesplus's `check_downrev_only.py` and the merge queue.
+- **2026-11-19:** Draft first, humans after the bot (§6). `--draft` is gone: every PR opens as a draft,
+  ethycabot is requested at once, and TLM marks the PR ready (and requests the humans) when CI is green
+  and the bot has reviewed the head, its feedback has had 3 rounds, or it stayed quiet for 30 minutes.
+  A PR adopted as ready gets ethycabot and the humans at once, no longer at the first green. The bot's
+  feedback alone has its own 3-round cap; past it, its items are left for the humans instead of
+  escalating. Why: a handoff with `--draft` stayed draft and never got a reviewer, and humans were
+  pinged before the bot's findings were fixed. fidesplus runs CI on drafts (only `openhands` drafts
+  are held), so the draft phase can't hold CI back; reviewing before the PR exists was the alternative.

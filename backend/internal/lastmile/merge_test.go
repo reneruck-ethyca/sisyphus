@@ -158,7 +158,7 @@ func TestMergeNativeIgnoresEvaluator(t *testing.T) {
 	}
 
 	// A draft can't have auto-merge.
-	m, gh, _, _ = opened(t, Request{Autonomy: "merge=auto", Draft: true})
+	m, gh, _, _ = opened(t, Request{Autonomy: "merge=auto"})
 	p.Draft = true
 	gh.Snapshots[prRef.Key()] = p
 	m.tick(context.Background())
