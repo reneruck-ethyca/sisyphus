@@ -206,7 +206,7 @@ func (m *Manager) draftStep(ctx context.Context, h *Handoff, ref github.PRRef, p
 	if err := m.GH.MarkReady(ctx, ref); err != nil {
 		return err
 	}
-	s.Draft = false
+	s.Draft, h.ReadyAt = false, m.now()
 	why := "CI green"
 	switch {
 	case bot == "":
