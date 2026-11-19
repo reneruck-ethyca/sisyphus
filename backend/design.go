@@ -276,9 +276,6 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		}
 		return srv.rev.Suggestions(ref.Key())
 	}))
-	// accepting holds prID/id of the accepts in flight; a posting suggestion outside it was left
-	// by one interrupted (unknown outcome, a restart), and the user may settle it.
-	var accepting sync.Map
 	mux.HandleFunc("POST "+base+"/suggestions/{id}/accept", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, r *http.Request) error {
 		if srv.rev == nil {
 			return review.ErrNoSuggestion
@@ -323,7 +320,15 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		if in.Mode == "now" {
 			status = review.SugPosted
 		}
-		return srv.rev.FinishAccept(pid, id, status, in.Body, commentID)
+		if err := srv.rev.FinishAccept(pid, id, status, in.Body, commentID); err != nil {
+			if errors.Is(err, review.ErrNoSuggestion) {
+				slog.Warn("accepted suggestion gone after posting it", "pr", pid, "id", id, "comment", commentID)
+			} else {
+				slog.Error("settling a posted suggestion", "pr", pid, "id", id, "comment", commentID, "err", err)
+			}
+			return err
+		}
+		return nil
 	}))
 	// status dismisses a suggestion, undoes that, or settles one an interrupted accept left posting.
 	mux.HandleFunc("POST "+base+"/suggestions/{id}/status", func(w http.ResponseWriter, r *http.Request) {
@@ -331,11 +336,16 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		if !ok {
 			return
 		}
+		pid, id := ref.Key(), r.PathValue("id")
+		// Claimed, not just checked, so an accept can't start between the check and the move.
+		_, busy := accepting.LoadOrStore(pid+"/"+id, true)
+		if !busy {
+			defer accepting.Delete(pid + "/" + id)
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var in struct{ Status string }
 		err := decodeDesign(r, &in)
 		if err == nil {
-			pid, id := ref.Key(), r.PathValue("id")
-			_, busy := accepting.Load(pid + "/" + id)
 			err = setSuggestionStatus(srv.rev, pid, id, in.Status, busy)
 		}
 		if err != nil {
@@ -345,6 +355,10 @@ func designHandlers(mux *http.ServeMux, srv server) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 }
+
+// accepting holds prID/id of the accepts and status changes in flight; a posting suggestion outside it was left
+// by one interrupted (unknown outcome, a restart), and the user may settle it.
+var accepting sync.Map
 
 // refusedByGitHub says whether a failed write surely left nothing on GitHub: it answered
 // 4xx, or the GraphQL mutation errored. Anything else (no answer, 5xx) may have posted.

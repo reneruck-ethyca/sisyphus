@@ -1337,6 +1337,43 @@ func TestResolveStuckPosting(t *testing.T) {
 	}
 }
 
+func TestAcceptRefusedWhileStatusChanges(t *testing.T) {
+	srv, rev, fake := suggestionServer(t, "h1", openComment)
+	pr, pw := io.Pipe()
+	done := make(chan int)
+	go func() {
+		code := 0
+		if resp, err := http.Post(srv.URL+sugBase+"/r1-c0/status", "application/json", pr); err == nil {
+			resp.Body.Close()
+			code = resp.StatusCode
+		}
+		done <- code
+	}()
+	// The status change claims the key, then waits on its body.
+	for start := time.Now(); ; time.Sleep(time.Millisecond) {
+		if _, ok := accepting.Load("ethyca/a#1/r1-c0"); ok {
+			break
+		}
+		if time.Since(start) > 5*time.Second {
+			t.Fatal("the status change never claimed the key")
+		}
+	}
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusConflict {
+		t.Fatalf("accept while a status change holds the key: %d %s", code, body)
+	}
+	pw.Write([]byte(`{"status":"dismissed"}`))
+	pw.Close()
+	if code := <-done; code != http.StatusNoContent {
+		t.Fatalf("status: %d", code)
+	}
+	if w := fake.posted(); len(w) != 0 {
+		t.Fatalf("writes %v", w)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugDismissed {
+		t.Fatalf("item %+v", it)
+	}
+}
+
 func TestSuggestionsListWhenGitHubFails(t *testing.T) {
 	srv, _, fake := suggestionServer(t, "h1", inReview("r1-c0", "C1"))
 	fake.threadsFail = true
