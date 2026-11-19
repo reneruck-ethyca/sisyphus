@@ -1,5 +1,5 @@
 // The design page's calls: /api/prs/{owner}/{repo}/{n}/design. Mirrors backend/design.go.
-import { HTTPError, call as request } from "../api";
+import { HTTPError, call as request, type PRView } from "../api";
 
 export type DocStatus = "added" | "modified" | "renamed";
 export type Hunk = { start: number; end: number };
@@ -38,6 +38,23 @@ export type CreateThread = {
 };
 export type Verdict = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 
+export type SuggestionStatus = "open" | "posting" | "review" | "posted" | "dismissed";
+export type Suggestion = {
+  id: string; run: string; head: string; kind: "comment" | "reply";
+  path?: string; line?: number; start_line?: number; side?: string; comment_id?: number;
+  body: string; status: SuggestionStatus; decided_at?: string; edited_body?: string; github_id?: string;
+};
+export type Suggestions = { runs: { run: string; head: string; event: string; body: string; at: string }[]; items: Suggestion[] };
+
+// askLabel is the "Ask the AI" button: disabled while a review is queued or running.
+export function askLabel(pr: PRView): { text: string; disabled: boolean } {
+  const state = pr.review.state;
+  if (state === "running") return { text: "Review running", disabled: true };
+  if (state === "queued") return { text: "Review queued", disabled: true };
+  const again = !!pr.review.runs?.length;
+  return { text: pr.design ? (again ? "Ask the AI again" : "Ask the AI for a review") : again ? "Review again" : "Review now", disabled: false };
+}
+
 // isStale: the 409 a write gets once commits landed after the page rendered.
 export const isStale = (e: unknown) => e instanceof HTTPError && e.status === 409;
 
@@ -60,6 +77,10 @@ export function designAPI(repo: string, number: number, head: () => string) {
       call("POST", `/threads/${encodeURIComponent(id)}/${resolved ? "resolve" : "unresolve"}`),
     submit: (event: Verdict, body: string) => call("POST", "/review", { event, body }),
     discard: () => call("DELETE", "/review"),
+    suggestions: () => call<Suggestions>("GET", "/suggestions"),
+    accept: (id: string, p: { body: string; mode: Mode; subjectType: "LINE" | "FILE"; startLine?: number; line?: number }) =>
+      call("POST", `/suggestions/${encodeURIComponent(id)}/accept`, p),
+    setSuggestion: (id: string, status: SuggestionStatus) => call("POST", `/suggestions/${encodeURIComponent(id)}/status`, { status }),
   };
 }
 export type DesignAPI = ReturnType<typeof designAPI>;

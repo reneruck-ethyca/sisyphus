@@ -2,6 +2,7 @@
 import { Fragment } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { HTTPError, post, prAPI, put, type HistoryRow, type PRView, type ReviewEvent, type ReviewFile, type Run, type RunLog, type StackStatus, type Status } from "../api";
+import { askLabel } from "../design/api";
 import { Ago, Chip, Ext, Loading, Md, Notices, Page, RunChip, RunTable } from "../components";
 import { base, dur, fuzzy, isZero, plural, profiles, reason, runPath, short, stamp, when, withCurrent } from "../format";
 import { loadSession, navigate, saveSession, stream, unstream, useFetch, useTick } from "../live";
@@ -156,12 +157,14 @@ function LatestReview({ pr, runs, runBase, foot }: { pr: { id: string }; runs: R
   </div>;
 }
 
-function PRPage({ status: s, pr }: { status: Status; pr: PRView }) {
+export function PRPage({ status: s, pr }: { status: Status; pr: PRView }) {
   const api = prAPI(pr);
   const [msg, setMsg] = useState<{ text: string; err?: boolean }>({ text: "" });
   const [busy, setBusy] = useState("");
   const menu = useRef<HTMLDetailsElement>(null);
   const runs = pr.review.runs ?? [];
+  const ask = askLabel(pr);
+  const open = pr.review.suggestions ?? 0;
   const stack = useFetch<StackStatus | null>(`${api}/stack`, pr.head_sha + pr.review.state);
 
   const act = async (action: string, ask?: string, then?: string) => {
@@ -187,8 +190,8 @@ function PRPage({ status: s, pr }: { status: Status; pr: PRView }) {
         <code>{pr.head_ref}</code><span>tracked <Ago t={pr.tracked_at} /></span></div>
       <div class="actions">
         {pr.design && <a class="btn" href={`/prs/${pr.repo}/${pr.number}/design`}>{isZero(pr.design.reviewed_at) ? "Review design" : "Open the docs"}</a>}
-        <button class={"btn" + (pr.design ? " quiet" : "")} disabled={busy === "review"} onClick={() => act("review")}>
-          {pr.design ? (runs.length ? "Ask the AI again" : "Ask the AI for a review") : runs.length ? "Review again" : "Review now"}</button>
+        <button class={"btn" + (pr.design ? " quiet" : "")} disabled={ask.disabled || busy === "review"} onClick={() => act("review")}>{ask.text}</button>
+        {pr.design && open > 0 && <a href={`/prs/${pr.repo}/${pr.number}/design`}><Chip tone="live">{plural(open, "AI suggestion")} to review</Chip></a>}
         <Ext class="btn quiet" href={pr.url}>Open on GitHub ↗</Ext>
         <details class="menu" ref={menu}><summary class="btn quiet">More ▾</summary><div>
           <button disabled={!!busy} onClick={() => act("reset", "Reset the review status? Stops a running review and forgets the review history; a fresh review is queued. The stack stays.")}>

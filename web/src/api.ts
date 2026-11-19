@@ -30,7 +30,7 @@ export type Run = {
   post_note?: string; overdue?: boolean;
 };
 
-export type PRStatus = { state: "" | "queued" | "running"; runs: Run[] | null };
+export type PRStatus = { state: "" | "queued" | "running"; runs: Run[] | null; suggestions?: number };
 
 export type PRView = Tracked & {
   id: string; health: string; review: PRStatus; review_note: string; up_to_date: boolean;
