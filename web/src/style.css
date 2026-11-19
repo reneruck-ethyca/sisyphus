@@ -370,14 +370,25 @@ main.wide { max-width: 1220px; width: 100%; margin: 0 auto; }
 .dr-thread { border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 10px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
 .dr-thread.unread { border-color: var(--live); box-shadow: 0 0 0 2px var(--live-bg); }
 .dr-thread summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.dr-thread.flash { animation: flash 1.2s; }
+.dr-thread.flash, .dr-sugg.flash { animation: flash 1.2s; }
 @keyframes flash { from { background: var(--hl); } }
 .dr-comment { border-top: 1px solid var(--line2); padding-top: 8px; margin-top: 8px; }
-.dr-comment .who { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
-.dr-comment .who b { color: var(--fg); }
+.dr-comment .who, .dr-sugg .who { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.dr-comment .who b, .dr-sugg .who b { color: var(--fg); }
 .dr-comment .who img { border-radius: 50%; }
 .dr-comment .newtag { color: var(--live); font-weight: 700; }
 .dr-comment .markdown-body { font-size: 13px; background: transparent; color: var(--fg); }
+/* AI suggestions: dashed purple cards; decided ones collapse to a line. */
+.dr-sugg { border: 1px dashed var(--merged); border-radius: 8px; background: var(--card); padding: 10px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dr-sugg.done { border-style: solid; border-color: var(--line); background: var(--side); }
+.dr-sugg.summary { border-style: solid; border-color: var(--merged-bg); }
+.dr-sugg .who .end { margin-left: auto; }
+.dr-sugg .short { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-sugg blockquote { margin: 0; padding-left: 8px; border-left: 3px solid var(--line); color: var(--muted); font-size: 12px; }
+.dr-sugg .note { margin: 0; font-size: 12px; color: var(--changes); }
+.dr-sugg .markdown-body { font-size: 13px; background: transparent; color: var(--fg); }
+.dr-doc .badge.ai { background: var(--merged); color: var(--on-accent); }
+.dr-doc .markdown-body .ai-block { background: var(--merged-bg); }
 .btn.danger { color: var(--bad); }
 .dr-dialog { width: min(560px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--fg); padding: 22px 24px; }
 .dr-dialog::backdrop { background: rgba(0, 0, 0, .3); }

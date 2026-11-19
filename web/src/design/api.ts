@@ -44,6 +44,8 @@ export type Suggestion = {
   path?: string; line?: number; start_line?: number; side?: string; comment_id?: number;
   body: string; status: SuggestionStatus; decided_at?: string; edited_body?: string; github_id?: string;
 };
+// Accept is where an accepted suggestion goes: a reply sends only its body.
+export type Accept = { body: string; subjectType?: "LINE" | "FILE"; startLine?: number; line?: number };
 export type Suggestions = { runs: { run: string; head: string; event: string; body: string; at: string }[]; items: Suggestion[] };
 
 // askLabel is the "Ask the AI" button: disabled while a review is queued or running.
@@ -78,7 +80,7 @@ export function designAPI(repo: string, number: number, head: () => string) {
     submit: (event: Verdict, body: string) => call("POST", "/review", { event, body }),
     discard: () => call("DELETE", "/review"),
     suggestions: () => call<Suggestions>("GET", "/suggestions"),
-    accept: (id: string, p: { body: string; mode: Mode; subjectType: "LINE" | "FILE"; startLine?: number; line?: number }) =>
+    accept: (id: string, p: Accept & { mode: Mode }) =>
       call("POST", `/suggestions/${encodeURIComponent(id)}/accept`, p),
     setSuggestion: (id: string, status: SuggestionStatus) => call("POST", `/suggestions/${encodeURIComponent(id)}/status`, { status }),
   };
