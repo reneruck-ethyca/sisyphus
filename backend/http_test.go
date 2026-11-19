@@ -1118,6 +1118,18 @@ func TestAcceptPostsNow(t *testing.T) {
 	}
 }
 
+func TestAcceptPostsLeftSide(t *testing.T) {
+	left := openComment
+	left.Side = "LEFT"
+	srv, _, fake := suggestionServer(t, "h1", left)
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", `{"body":"Why?","mode":"now","subjectType":"LINE","startLine":2,"line":3,"side":"RIGHT"}`); code != http.StatusNoContent {
+		t.Fatalf("accept: %d %s", code, body)
+	}
+	if w := fake.posted(); len(w) != 1 || !strings.Contains(w[0], `"side":"LEFT"`) || !strings.Contains(w[0], `"start_side":"LEFT"`) {
+		t.Fatalf("writes %v", w)
+	}
+}
+
 func TestAcceptIntoReview(t *testing.T) {
 	srv, rev, fake := suggestionServer(t, "h1", openComment)
 	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", `{"body":"Why?","mode":"review","subjectType":"FILE"}`); code != http.StatusNoContent {

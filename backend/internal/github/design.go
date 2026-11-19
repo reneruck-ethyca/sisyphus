@@ -4,6 +4,7 @@ package github
 // review threads as the user. Ported from the gh design-review extension.
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -244,6 +245,7 @@ type NewThread struct {
 	SubjectType string `json:"subjectType"` // LINE | FILE
 	StartLine   int    `json:"startLine,omitempty"`
 	Line        int    `json:"line,omitempty"`
+	Side        string `json:"side,omitempty"` // LEFT | RIGHT (default)
 	Mode        string `json:"mode"`
 }
 
@@ -258,9 +260,10 @@ func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewTh
 		if in.SubjectType == "FILE" {
 			body["subject_type"] = "file"
 		} else {
-			body["line"], body["side"] = in.Line, "RIGHT"
+			side := cmp.Or(in.Side, "RIGHT")
+			body["line"], body["side"] = in.Line, side
 			if in.StartLine != 0 && in.StartLine != in.Line {
-				body["start_line"], body["start_side"] = in.StartLine, "RIGHT"
+				body["start_line"], body["start_side"] = in.StartLine, side
 			}
 		}
 		var resp struct {
@@ -272,9 +275,10 @@ func (a *API) CreateThread(ctx context.Context, ref PRRef, pr DesignPR, in NewTh
 	err = a.withReview(ctx, ref, pr, func(reviewID string) error {
 		input := map[string]any{"pullRequestReviewId": reviewID, "path": in.Path, "body": in.Body, "subjectType": in.SubjectType}
 		if in.SubjectType == "LINE" {
-			input["line"], input["side"] = in.Line, "RIGHT"
+			side := cmp.Or(in.Side, "RIGHT")
+			input["line"], input["side"] = in.Line, side
 			if in.StartLine != 0 && in.StartLine != in.Line {
-				input["startLine"], input["startSide"] = in.StartLine, "RIGHT"
+				input["startLine"], input["startSide"] = in.StartLine, side
 			}
 		}
 		var resp struct {

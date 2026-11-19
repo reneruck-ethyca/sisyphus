@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,28 @@ func TestThreadOfComment(t *testing.T) {
 	}
 	if _, err := a.ThreadOfComment(context.Background(), PRRef{Repo: "o/r", Number: 7}, 99); !errors.Is(err, ErrNoThread) {
 		t.Errorf("unknown id: err = %v", err)
+	}
+}
+
+func TestCreateThreadOnLeft(t *testing.T) {
+	ref, pr := PRRef{Repo: "o/r", Number: 7}, DesignPR{ID: "PR1", HeadSHA: "abc", Viewer: "me"}
+	in := NewThread{Path: "a.md", Body: "x", SubjectType: "LINE", StartLine: 2, Line: 3, Side: "LEFT", Mode: "now"}
+	a, s := newStub(map[string][]reply{"POST /repos/o/r/pulls/7/comments": {{status: 201, body: `{"node_id":"PRRC_rest"}`}}})
+	if _, err := a.CreateThread(context.Background(), ref, pr, in); err != nil {
+		t.Fatal(err)
+	}
+	if g := s.got[len(s.got)-1]; !strings.Contains(g, `"side":"LEFT"`) || !strings.Contains(g, `"start_side":"LEFT"`) {
+		t.Errorf("now: %s", g)
+	}
+	in.Mode = "review"
+	a, s = newStub(map[string][]reply{"POST /graphql": {
+		{status: 200, body: noPending}, {status: 200, body: reviewStarted},
+		{status: 200, body: `{"data":{"addPullRequestReviewThread":{"thread":{"comments":{"nodes":[{"id":"PRRC_gql"}]}}}}}`},
+	}})
+	if _, err := a.CreateThread(context.Background(), ref, pr, in); err != nil {
+		t.Fatal(err)
+	}
+	if g := s.got[len(s.got)-1]; !strings.Contains(g, `"side":"LEFT"`) || !strings.Contains(g, `"startSide":"LEFT"`) {
+		t.Errorf("review: %s", g)
 	}
 }

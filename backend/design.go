@@ -307,7 +307,7 @@ func designHandlers(mux *http.ServeMux, srv server) {
 				refused = refusedByGitHub(err)
 			}
 		} else {
-			in.Path = sg.Path
+			in.Path, in.Side = sg.Path, sg.Side
 			commentID, err = srv.gh.CreateThread(ctx, ref, d, in)
 			refused = refusedByGitHub(err)
 		}
