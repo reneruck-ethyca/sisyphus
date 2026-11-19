@@ -40,16 +40,25 @@ func (m *Manager) Merge(_ context.Context, id string) (Handoff, error) {
 
 // Rebase asks for the branch to be rebased onto its base on the next tick, as when
 // GitHub reports it behind: a clean rebase runs on the host, a conflicting one goes
-// to the conflict agent (fix-ci) or a human.
-func (m *Manager) Rebase(_ context.Context, id string) (Handoff, error) {
+// to the conflict agent (fix-ci) or a human. From needs-human it resumes the handoff
+// too: a rebase is often what the human was asked for (a fix that is on the base).
+func (m *Manager) Rebase(ctx context.Context, id string) (Handoff, error) {
+	resumed := false
 	h, err := m.update(id, func(h *Handoff) error {
 		switch {
 		case Terminal(h.State):
 			return invalid("handoff %s is %s", id, h.State)
-		case h.State == StateNeedsHuman:
-			return invalid("handoff %s is needs-human: resume it first", id)
+		case h.Dirty != nil:
+			return invalid("%s has uncommitted changes: deal with them first", h.Worktree)
 		case h.Snapshot == nil || h.Snapshot.Behind == 0:
 			return invalid("%s is not behind its base", h.Branch)
+		}
+		if h.State == StateNeedsHuman {
+			if _, busy := m.running.get(id); busy {
+				return invalid("an agent is running on %s: wait for it to finish", id)
+			}
+			m.unescalate(h)
+			resumed = true
 		}
 		h.RebaseAsked = "dashboard"
 		logEvent(h, m.now(), "rebase", "rebase requested from the dashboard")
@@ -57,6 +66,9 @@ func (m *Manager) Rebase(_ context.Context, id string) (Handoff, error) {
 	})
 	if err != nil {
 		return h, err
+	}
+	if resumed {
+		m.dropNeedsHumanLabel(ctx, h)
 	}
 	slog.Info("lastmile rebase requested", "id", id)
 	m.changed()

@@ -664,9 +664,13 @@ None right now.
   of every failed job, since a required summary job fails because of them.
 - **2026-11-19:** Rebase on request. A handoff can be rebased onto its base without waiting for GitHub to call
   it behind: the dashboard's Rebase button (`POST /api/handoffs/{id}/rebase`, refused unless the branch is
-  behind and the handoff is open and not needs-human), or the fix and review agents, which may set
+  behind and the handoff is open; from needs-human it resumes the handoff too, unless the worktree is dirty), or the fix and review agents, which may set
   `"rebase": true` with a `rebase_reason` in result.json. The request is `rebase_asked` on the handoff, and
   both start a tick at once (not at `lastmile.interval`), whose drift step runs it like any rebase; while
   GitHub hasn't caught up with an agent's push the tick looks again every 15 seconds. An agent asks through its result rather than a tool: agents
   get no route to the sisyphus API from their container, and the rebase runs after the run anyway. A fix
   agent that changes nothing but asks for a rebase (the fix is on the base already) no longer escalates.
+- **2026-11-19:** Rebase from needs-human. The Rebase button was hidden on needs-human handoffs, yet a fix agent
+  that finds the fix on the base escalates exactly there (fidesplus#6532: the Semgrep config only exists on dev,
+  828 commits ahead). Pressing Rebase on a needs-human handoff now resumes it as `tlm resume` does and asks for
+  the rebase; it stays refused while the worktree has uncommitted changes or an agent runs.

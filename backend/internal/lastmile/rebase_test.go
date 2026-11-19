@@ -550,8 +550,12 @@ func TestRebaseOnRequest(t *testing.T) {
 	if got := gittest.Git(t, h.Worktree, "rev-parse", "HEAD"); got != pre {
 		t.Fatal("rebased without being asked")
 	}
-	if h, err := m.Rebase(ctx, id); err != nil || h.RebaseAsked != "dashboard" || len(m.kick) != 1 {
+	m.set(t, id, func(h *Handoff) { h.State, h.EscalatedBy, h.Reason = StateNeedsHuman, TriggerCI, "the fix is on main" })
+	if h, err := m.Rebase(ctx, id); err != nil || h.RebaseAsked != "dashboard" || len(m.kick) != 1 || h.State != StatePROpen || h.EscalatedBy != "" {
 		t.Fatalf("rebase = %+v, %v; kicks %d", h, err, len(m.kick))
+	}
+	if len(gh.Edits) == 0 || len(gh.Edits[len(gh.Edits)-1].RemoveLabels) != 1 {
+		t.Errorf("needs-human label not removed: %+v", gh.Edits)
 	}
 	m.tick(ctx)
 	m.Wait()

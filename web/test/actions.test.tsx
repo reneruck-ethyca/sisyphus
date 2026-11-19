@@ -46,6 +46,8 @@ it("offers a rebase only when the branch is behind, and says one is pending", ()
   render(<Actions v={view({ snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
   expect(rebase()!.textContent).toBe("Rebase (4 behind)");
   render(<Actions v={view({ state: "needs-human", snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
+  expect(rebase()!.title).toContain("resuming the handoff");
+  render(<Actions v={view({ state: "needs-human", dirty: {} as HandoffView["dirty"], snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
   expect(rebase()).toBeUndefined();
   render(<Actions v={view({ rebase_asked: "fix agent", snapshot: { behind: 4 } as HandoffView["snapshot"] })} />, el);
   expect(rebase()).toBeUndefined();

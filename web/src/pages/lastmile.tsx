@@ -115,8 +115,8 @@ export function Actions({ v, merge = true }: { v: HandoffView; merge?: boolean }
   return <>
     {v.state === "needs-human" && <><button class="btn small" disabled={!!busy} onClick={() => act(resume)}>Resume</button>{" "}</>}
     {v.rebase_asked ? <><span class="muted">rebase pending ({v.rebase_asked})</span>{" "}</>
-      : !v.over && v.state !== "needs-human" && behind > 0 && <><button class="btn quiet small" disabled={!!busy}
-        title={`Rebase ${v.branch} onto ${v.base}; a conflict goes to the conflict agent or to you`}
+      : !v.over && !v.dirty && behind > 0 && <><button class="btn quiet small" disabled={!!busy}
+        title={`Rebase ${v.branch} onto ${v.base}${v.state === "needs-human" ? ", resuming the handoff" : ""}; a conflict goes to the conflict agent or to you`}
         onClick={() => act(`/api/handoffs/${id}/rebase`)}>Rebase ({behind} behind)</button>{" "}</>}
     {merge && <MergeControls v={v} />}{" "}
     {!v.over && <button class="btn quiet small" disabled={!!busy} onClick={() => act(cancel)}>Cancel</button>}
