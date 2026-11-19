@@ -484,7 +484,13 @@ func newHandler(srv server) http.Handler {
 	})
 	// The PR page's … menu: reset (reviews), wipe (+ stack), untrack (+ tracking); track undoes untrack.
 	actions := map[string]func(context.Context, string) error{
-		"reset": svc.ResetReviews, "wipe": svc.Wipe, "untrack": svc.Untrack, "track": svc.Retrack}
+		"reset": svc.ResetReviews, "wipe": svc.Wipe, "untrack": svc.Untrack, "track": svc.Retrack,
+		"cancel": func(_ context.Context, id string) error {
+			if srv.rev == nil {
+				return errors.New("reviews are disabled")
+			}
+			return srv.rev.Cancel(id)
+		}}
 	mux.HandleFunc("POST /api/prs/{owner}/{repo}/{number}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		act, ok := actions[r.PathValue("action")]
 		if !ok {

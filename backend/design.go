@@ -17,6 +17,7 @@ import (
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/review"
 )
 
 // isDoc says whether the design page renders a file.
@@ -235,6 +236,122 @@ func designHandlers(mux *http.ServeMux, srv server) {
 	mux.HandleFunc("DELETE "+base+"/review", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, _ *http.Request) error {
 		return srv.gh.DiscardReview(ctx, ref, d.Viewer)
 	}))
+
+	// suggestions settles every suggestion in the user's pending review by what GitHub
+	// has now: submitted is posted, gone (discarded, deleted) is open again.
+	mux.HandleFunc("GET "+base+"/suggestions", read(func(ctx context.Context, ref github.PRRef, _ *http.Request) (any, error) {
+		if srv.rev == nil {
+			return review.Suggestions{Runs: []review.SuggestionRun{}, Items: []review.Suggestion{}}, nil
+		}
+		s, err := srv.rev.Suggestions(ref.Key())
+		if err != nil || !slices.ContainsFunc(s.Items, func(x review.Suggestion) bool { return x.Status == review.SugReview && x.GitHubID != "" }) {
+			return s, err
+		}
+		threads, err := srv.gh.Threads(ctx, ref, "")
+		if err != nil {
+			return nil, err
+		}
+		state := map[string]string{}
+		for _, t := range threads {
+			for _, c := range t.Comments {
+				state[c.ID] = c.State
+			}
+		}
+		for _, x := range s.Items {
+			if x.Status != review.SugReview || x.GitHubID == "" {
+				continue
+			}
+			st, ok := state[x.GitHubID]
+			to := review.SugPosted
+			if !ok {
+				to = review.SugOpen
+			} else if st != "SUBMITTED" {
+				continue
+			}
+			if err := srv.rev.SetSuggestionStatus(ref.Key(), x.ID, to); err != nil && !errors.Is(err, review.ErrSuggestionState) {
+				return nil, err
+			}
+		}
+		return srv.rev.Suggestions(ref.Key())
+	}))
+	mux.HandleFunc("POST "+base+"/suggestions/{id}/accept", write(func(ctx context.Context, ref github.PRRef, d github.DesignPR, r *http.Request) error {
+		if srv.rev == nil {
+			return review.ErrNoSuggestion
+		}
+		var in github.NewThread
+		if err := decodeDesign(r, &in); err != nil {
+			return err
+		}
+		ctx = context.WithoutCancel(ctx) // a page closed mid-post mustn't reopen a comment GitHub has
+		pid, id := ref.Key(), r.PathValue("id")
+		sg, err := srv.rev.BeginAccept(pid, id, d.HeadSHA)
+		if err != nil {
+			return err
+		}
+		var commentID string
+		if sg.Kind == "reply" {
+			var t github.DocThread
+			if t, err = srv.gh.ThreadOfComment(ctx, ref, sg.CommentID); err == nil {
+				commentID, err = srv.gh.ReplyThread(ctx, ref, d, t.ID, t.Comments[0].DatabaseID, in.Body, in.Mode)
+			}
+		} else {
+			in.Path = sg.Path
+			commentID, err = srv.gh.CreateThread(ctx, ref, d, in)
+		}
+		if err != nil {
+			if e := srv.rev.SetSuggestionStatus(pid, id, review.SugOpen); e != nil {
+				slog.Error("reopening a suggestion that failed to post", "pr", pid, "id", id, "err", e)
+			}
+			return err
+		}
+		status := review.SugReview
+		if in.Mode == "now" {
+			status = review.SugPosted
+		}
+		return srv.rev.FinishAccept(pid, id, status, in.Body, commentID)
+	}))
+	// status dismisses a suggestion or undoes that; accepting and reconciling make the other moves.
+	mux.HandleFunc("POST "+base+"/suggestions/{id}/status", func(w http.ResponseWriter, r *http.Request) {
+		ref, ok := pr(w, r)
+		if !ok {
+			return
+		}
+		var in struct{ Status string }
+		err := decodeDesign(r, &in)
+		if err == nil {
+			err = setSuggestionStatus(srv.rev, ref.Key(), r.PathValue("id"), in.Status)
+		}
+		if err != nil {
+			designError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+func setSuggestionStatus(rev *review.Reviewer, prID, id, status string) error {
+	if rev == nil {
+		return review.ErrNoSuggestion
+	}
+	switch status {
+	case review.SugDismissed: // only from open, as SetSuggestionStatus checks
+	case review.SugOpen:
+		// ponytail: read then write, not atomic; undoing a dismissal twice at once while accepting is the gap.
+		s, err := rev.Suggestions(prID)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(s.Items, func(x review.Suggestion) bool { return x.ID == id })
+		if i < 0 {
+			return review.ErrNoSuggestion
+		}
+		if s.Items[i].Status != review.SugDismissed { // reopening one in review or posting would post it twice
+			return review.ErrSuggestionState
+		}
+	default:
+		return badRequest{errors.New("status must be open or dismissed")}
+	}
+	return rev.SetSuggestionStatus(prID, id, status)
 }
 
 // addedLines returns the 1-based lines of now that aren't in before, by a longest
@@ -310,8 +427,10 @@ func designError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &br):
 		code = http.StatusBadRequest
-	case errors.Is(err, errNotDoc), errors.Is(err, github.ErrNoPendingReview):
+	case errors.Is(err, errNotDoc), errors.Is(err, github.ErrNoPendingReview), errors.Is(err, github.ErrNoThread), errors.Is(err, review.ErrNoSuggestion):
 		code = http.StatusNotFound
+	case errors.Is(err, review.ErrSuggestionState):
+		code = http.StatusConflict
 	case errors.As(err, &he) && he.StatusCode >= 400 && he.StatusCode < 500 && he.StatusCode != http.StatusUnauthorized:
 		code = he.StatusCode
 	case errors.As(err, &ge):

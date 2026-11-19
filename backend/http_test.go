@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
@@ -14,10 +15,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/reneruck/sisyphus/internal/app"
 	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/container"
@@ -950,5 +953,304 @@ func TestHTTPRequiresToken(t *testing.T) {
 	}
 	if r := do("GET", "/api/status", "", r.Cookies()[0]); r.StatusCode != 200 {
 		t.Errorf("cookie = %d", r.StatusCode)
+	}
+}
+
+// fakeDesignGH answers the GitHub calls the design page's suggestion endpoints make.
+type fakeDesignGH struct {
+	mu      sync.Mutex
+	head    string
+	threads string   // reviewThreads nodes, as JSON
+	fail    bool     // comment writes get a 422
+	writes  []string // comment writes, as "METHOD path" or the GraphQL mutation
+}
+
+func (f *fakeDesignGH) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, _ := io.ReadAll(r.Body)
+	q := string(b)
+	status, body := 200, `{"message":"Not Found"}`
+	write := func(ok string) {
+		f.writes = append(f.writes, r.Method+" "+r.URL.Path+" "+q)
+		if body = ok; f.fail {
+			status, body = 422, `{"message":"Validation Failed"}`
+		}
+	}
+	switch {
+	case r.URL.Path == "/graphql" && strings.Contains(q, "viewer { login }"):
+		body = `{"data":{"viewer":{"login":"me"},"repository":{"pullRequest":{"id":"PR1","headRefOid":"` + f.head + `"}}}}`
+	case r.URL.Path == "/graphql" && strings.Contains(q, "reviewThreads"):
+		body = `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":` + cmp.Or(f.threads, "[]") + `}}}}}`
+	case r.URL.Path == "/graphql" && strings.Contains(q, "reviews(states:PENDING"):
+		body = `{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[]}}}}}`
+	case r.URL.Path == "/graphql" && strings.Contains(q, "addPullRequestReviewThreadReply("):
+		write(`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"C_reply"}}}}`)
+	case r.URL.Path == "/graphql" && strings.Contains(q, "addPullRequestReviewThread("):
+		write(`{"data":{"addPullRequestReviewThread":{"thread":{"comments":{"nodes":[{"id":"C_review"}]}}}}}`)
+	case r.URL.Path == "/graphql" && strings.Contains(q, "addPullRequestReview("):
+		body = `{"data":{"addPullRequestReview":{"pullRequestReview":{"id":"R1"}}}}`
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/repos/ethyca/a/pulls/1/comments"):
+		status = 201
+		write(`{"node_id":"C_now"}`)
+	default:
+		status = 404
+	}
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}},
+		Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+}
+
+func (f *fakeDesignGH) posted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.writes)
+}
+
+// suggestionServer serves a tracked PR (testkit.RefA) whose stored suggestions are items, against fake GitHub on head.
+func suggestionServer(t *testing.T, head string, items ...review.Suggestion) (*httptest.Server, *review.Reviewer, *fakeDesignGH) {
+	t.Helper()
+	cfg, tr := testkit.Tracker(t, &github.Fake{}, &tracker.Tracked{PRRef: testkit.RefA, HeadSHA: head, AnnouncedSHA: head})
+	dir := t.TempDir()
+	rev, err := review.New(config.Review{Repos: map[string]config.RepoReview{testkit.RefA.Repo: {Image: "img"}}}, &container.Fake{}, tr.Locks, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(review.Suggestions{Runs: []review.SuggestionRun{{Run: "r1", Head: "h1"}}, Items: items})
+	p := filepath.Join(dir, "suggestions", "ethyca", "a", "1.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDesignGH{head: head}
+	hs := newServer(cfg, tr, rev, app.NewLogBuffer(10))
+	hs.gh = github.NewAPI(api.ClientOptions{Host: "github.com", AuthToken: "t", Transport: fake})
+	srv := httptest.NewServer(newHandler(hs))
+	t.Cleanup(srv.Close)
+	return srv, rev, fake
+}
+
+const sugBase = "/api/prs/ethyca/a/1/design/suggestions"
+
+func sugPost(t *testing.T, url, head, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if head != "" {
+		req.Header.Set("X-Head", head)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func sugGet(t *testing.T, srv *httptest.Server) review.Suggestions {
+	t.Helper()
+	code, body := get(t, srv.URL+sugBase)
+	var s review.Suggestions
+	if err := json.Unmarshal([]byte(body), &s); code != 200 || err != nil {
+		t.Fatalf("GET suggestions: %d %v %s", code, err, body)
+	}
+	return s
+}
+
+func sugItem(t *testing.T, rev *review.Reviewer, id string) review.Suggestion {
+	t.Helper()
+	s, err := rev.Suggestions(testkit.RefA.Key())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(s.Items, func(x review.Suggestion) bool { return x.ID == id })
+	if i < 0 {
+		t.Fatalf("no suggestion %s in %+v", id, s.Items)
+	}
+	return s.Items[i]
+}
+
+var openComment = review.Suggestion{ID: "r1-c0", Run: "r1", Head: "h1", Kind: "comment", Path: "docs/a.md", Line: 3, StartLine: 2, Body: "Why?", Status: review.SugOpen}
+
+const acceptNow = `{"body":"Why not?","mode":"now","subjectType":"LINE","startLine":2,"line":3}`
+
+func TestSuggestionsList(t *testing.T) {
+	dismissed := review.Suggestion{ID: "r1-c1", Run: "r1", Head: "h1", Kind: "comment", Path: "docs/a.md", Body: "Hmm", Status: review.SugDismissed}
+	srv, _, fake := suggestionServer(t, "h1", openComment, dismissed)
+	s := sugGet(t, srv)
+	if len(s.Runs) != 1 || len(s.Items) != 2 || s.Items[0].ID != "r1-c0" || s.Items[1].Status != review.SugDismissed {
+		t.Fatalf("got %+v", s)
+	}
+	if w := fake.posted(); len(w) != 0 {
+		t.Fatalf("listing wrote to GitHub: %v", w)
+	}
+}
+
+func TestAcceptPostsNow(t *testing.T) {
+	srv, rev, fake := suggestionServer(t, "h1", openComment)
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusNoContent {
+		t.Fatalf("accept: %d %s", code, body)
+	}
+	w := fake.posted()
+	if len(w) != 1 || !strings.HasPrefix(w[0], "POST /repos/ethyca/a/pulls/1/comments ") || !strings.Contains(w[0], `"path":"docs/a.md"`) {
+		t.Fatalf("writes %v", w)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugPosted || it.GitHubID != "C_now" || it.EditedBody != "Why not?" {
+		t.Fatalf("item %+v", it)
+	}
+}
+
+func TestAcceptIntoReview(t *testing.T) {
+	srv, rev, fake := suggestionServer(t, "h1", openComment)
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", `{"body":"Why?","mode":"review","subjectType":"FILE"}`); code != http.StatusNoContent {
+		t.Fatalf("accept: %d %s", code, body)
+	}
+	if w := fake.posted(); len(w) != 1 || !strings.Contains(w[0], "addPullRequestReviewThread(") {
+		t.Fatalf("writes %v", w)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugReview || it.GitHubID != "C_review" || it.EditedBody != "" {
+		t.Fatalf("item %+v", it)
+	}
+}
+
+func TestAcceptReply(t *testing.T) {
+	reply := review.Suggestion{ID: "r1-r0", Run: "r1", Head: "h1", Kind: "reply", CommentID: 42, Body: "Agreed", Status: review.SugOpen}
+	gone := reply
+	gone.ID, gone.CommentID = "r1-r1", 99
+	srv, rev, fake := suggestionServer(t, "h1", reply, gone)
+	fake.threads = `[{"id":"T1","path":"docs/a.md","comments":{"nodes":[{"id":"C40","fullDatabaseId":"40","state":"SUBMITTED"},{"id":"C42","fullDatabaseId":"42","state":"SUBMITTED"}]}}]`
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-r0/accept", "h1", `{"body":"Agreed","mode":"now"}`); code != http.StatusNoContent {
+		t.Fatalf("accept: %d %s", code, body)
+	}
+	if w := fake.posted(); len(w) != 1 || !strings.HasPrefix(w[0], "POST /repos/ethyca/a/pulls/1/comments/40/replies ") {
+		t.Fatalf("writes %v", w)
+	}
+	if it := sugItem(t, rev, "r1-r0"); it.Status != review.SugPosted || it.GitHubID != "C_now" {
+		t.Fatalf("item %+v", it)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-r1/accept", "h1", `{"body":"Agreed","mode":"now"}`); code != http.StatusNotFound {
+		t.Fatalf("reply to a gone thread: %d", code)
+	}
+	if it := sugItem(t, rev, "r1-r1"); it.Status != review.SugOpen || len(fake.posted()) != 1 {
+		t.Fatalf("item %+v, writes %v", it, fake.posted())
+	}
+}
+
+func TestAcceptOutdated409(t *testing.T) {
+	srv, rev, fake := suggestionServer(t, "h2", openComment)
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h2", acceptNow); code != http.StatusConflict {
+		t.Fatalf("accept: %d %s", code, body)
+	}
+	if w := fake.posted(); len(w) != 0 {
+		t.Fatalf("writes %v", w)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugOpen {
+		t.Fatalf("item %+v", it)
+	}
+}
+
+func TestAcceptTwice409(t *testing.T) {
+	srv, _, fake := suggestionServer(t, "h1", openComment)
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusNoContent {
+		t.Fatalf("first accept: %d", code)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusConflict {
+		t.Fatalf("second accept: %d", code)
+	}
+	if w := fake.posted(); len(w) != 1 {
+		t.Fatalf("writes %v", w)
+	}
+}
+
+func TestAcceptFailureLeavesOpen(t *testing.T) {
+	srv, rev, fake := suggestionServer(t, "h1", openComment)
+	fake.fail = true
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusUnprocessableEntity {
+		t.Fatalf("accept: %d %s", code, body)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugOpen || it.GitHubID != "" {
+		t.Fatalf("item %+v", it)
+	}
+}
+
+func inReview(id, githubID string) review.Suggestion {
+	return review.Suggestion{ID: id, Run: "r1", Head: "h1", Kind: "comment", Path: "docs/a.md", Body: "x", Status: review.SugReview, GitHubID: githubID}
+}
+
+func TestReconcileSubmitted(t *testing.T) {
+	srv, _, fake := suggestionServer(t, "h1", inReview("r1-c0", "C1"), inReview("r1-c1", "C2"), inReview("r1-c2", ""))
+	fake.threads = `[{"id":"T1","path":"docs/a.md","comments":{"nodes":[{"id":"C1","state":"SUBMITTED"}]}},
+		{"id":"T2","path":"docs/a.md","comments":{"nodes":[{"id":"C2","state":"PENDING"}]}}]`
+	s := sugGet(t, srv)
+	got := []string{s.Items[0].Status, s.Items[1].Status, s.Items[2].Status}
+	if !slices.Equal(got, []string{review.SugPosted, review.SugReview, review.SugReview}) {
+		t.Fatalf("statuses %v", got)
+	}
+}
+
+func TestReconcileDiscarded(t *testing.T) {
+	srv, rev, _ := suggestionServer(t, "h1", inReview("r1-c0", "C1"))
+	if s := sugGet(t, srv); s.Items[0].Status != review.SugOpen {
+		t.Fatalf("got %+v", s.Items)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugOpen {
+		t.Fatalf("stored %+v", it)
+	}
+}
+
+func TestDismissNoHeadCheck(t *testing.T) {
+	srv, rev, _ := suggestionServer(t, "h2", openComment, inReview("r1-c1", "C1"))
+	if code, body := sugPost(t, srv.URL+sugBase+"/r1-c0/status", "", `{"status":"dismissed"}`); code != http.StatusNoContent {
+		t.Fatalf("dismiss: %d %s", code, body)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugDismissed {
+		t.Fatalf("item %+v", it)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c0/status", "", `{"status":"open"}`); code != http.StatusNoContent {
+		t.Fatalf("undo: %d", code)
+	}
+	if it := sugItem(t, rev, "r1-c0"); it.Status != review.SugOpen {
+		t.Fatalf("item %+v", it)
+	}
+	// Only accept and reconciling take an item out of review: reopening it here would let it be posted twice.
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c1/status", "", `{"status":"open"}`); code != http.StatusConflict {
+		t.Fatalf("reopen from review: %d", code)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c1/status", "", `{"status":"posted"}`); code != http.StatusBadRequest {
+		t.Fatalf("set posted: %d", code)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/nope/status", "", `{"status":"dismissed"}`); code != http.StatusNotFound {
+		t.Fatalf("unknown id: %d", code)
+	}
+}
+
+func TestSuggestionsAfterReset(t *testing.T) {
+	srv, _, _ := suggestionServer(t, "h1", openComment)
+	if code, body := sugPost(t, srv.URL+"/api/prs/ethyca/a/1/reset", "", ""); code != http.StatusNoContent {
+		t.Fatalf("reset: %d %s", code, body)
+	}
+	if code, body := get(t, srv.URL+sugBase); code != 200 || strings.TrimSpace(body) != `{"runs":[],"items":[]}` {
+		t.Fatalf("after reset: %d %s", code, body)
+	}
+	if code, _ := sugPost(t, srv.URL+sugBase+"/r1-c0/accept", "h1", acceptNow); code != http.StatusNotFound {
+		t.Fatalf("accept old id: %d", code)
+	}
+}
+
+func TestCancelAction(t *testing.T) {
+	srv, rev, _ := suggestionServer(t, "h1")
+	if err := rev.Trigger(tracker.Tracked{PRRef: testkit.RefA, HeadSHA: "h1", AnnouncedSHA: "h1"}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := sugPost(t, srv.URL+"/api/prs/ethyca/a/1/cancel", "", ""); code != http.StatusNoContent {
+		t.Fatalf("cancel: %d %s", code, body)
+	}
+	if code, _ := sugPost(t, srv.URL+"/api/prs/ethyca/a/1/cancel", "", ""); code != http.StatusConflict {
+		t.Fatalf("cancel with nothing queued: %d", code)
+	}
+	plain, _, _ := newTestServer(t) // reviews disabled
+	if code, _ := sugPost(t, plain.URL+"/api/prs/ethyca/a/1/cancel", "", ""); code != http.StatusConflict {
+		t.Fatalf("cancel without reviews: %d", code)
 	}
 }
