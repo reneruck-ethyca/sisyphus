@@ -644,3 +644,31 @@ func TestIgnoredSinceScratch(t *testing.T) {
 		t.Errorf("scratch file kept: %v", err)
 	}
 }
+
+// A scratch file that was there before the run and changed is removed, not named
+// (a host build left it, a check rewrote it); a changed non-scratch file is named and kept.
+func TestIgnoredChangesScratch(t *testing.T) {
+	t.Parallel()
+	_, clone := gittest.Setup(t)
+	os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("dist/\n.envrc\n"), 0o644)
+	os.MkdirAll(filepath.Join(clone, "dist"), 0o755)
+	info, envrc := filepath.Join(clone, "dist", "tsconfig.tsbuildinfo"), filepath.Join(clone, ".envrc")
+	os.WriteFile(info, []byte("x"), 0o644)
+	os.WriteFile(envrc, []byte("x"), 0o644)
+	before, err := ignoredFiles(context.Background(), clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(info, []byte("xy"), 0o644)
+	os.WriteFile(envrc, []byte("xy"), 0o644)
+	changed, err := ignoredChanges(context.Background(), clone, before, []string{"**/dist/**"})
+	if err != nil || !slices.Equal(changed, []string{".envrc"}) {
+		t.Errorf("changed = %v, %v", changed, err)
+	}
+	if _, err := os.Stat(info); !os.IsNotExist(err) {
+		t.Errorf("changed scratch file kept: %v", err)
+	}
+	if _, err := os.Stat(envrc); err != nil {
+		t.Errorf("changed non-scratch file removed: %v", err)
+	}
+}

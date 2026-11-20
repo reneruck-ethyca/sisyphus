@@ -105,7 +105,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.retries` | `3` | re-runs of a review that failed before Claude started (setup, stack, container start); `0` = none |
 | `review.retry_backoff` | `2m` | wait before the first retry, doubling after each (2m, 4m, 8m) |
 | `review.stack_from` | `worktree` | where local stacks start: `worktree` (the PR's own stack files, run on the host) or `safe` (each repo's `stack.safe_dir`); see [Local stack](#local-stack) |
-| `review.repos` | `ethyca/fidesplus`, `ethyca/fides-qa`, `ethyca/kairos`, `ethyca/fidesinfra`, `ethyca/terraform-modules`, `ethyca/internal-helm-charts` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `scratch` (gitignored globs TLM agents may create, removed after the run), `prompt_file`, `notes` (repo instructions added to the prompt), `related` (another repo checked out read-only, see [fides-qa](#fides-qa)), `stack`; only these repos are reviewed |
+| `review.repos` | `ethyca/fidesplus`, `ethyca/fides-qa`, `ethyca/kairos`, `ethyca/fidesinfra`, `ethyca/terraform-modules`, `ethyca/internal-helm-charts` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `scratch` (gitignored build-output globs TLM agents may create or change, removed after the run), `prompt_file`, `notes` (repo instructions added to the prompt), `related` (another repo checked out read-only, see [fides-qa](#fides-qa)), `stack`; only these repos are reviewed |
 
 ## Which PRs
 

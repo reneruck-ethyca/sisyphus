@@ -217,9 +217,9 @@ func ignoredFiles(ctx context.Context, dir string, extra ...string) (map[string]
 }
 
 // ignoredChanges removes the ignored files the run created and names every one
-// it created or changed; a changed one can't be put back, so a human looks. New
-// files under the repo's scratch globs (build output a check writes) are removed
-// without being named.
+// it created or changed; a changed one can't be put back, so a human looks.
+// Files under the repo's scratch globs (build output a check writes) it created
+// or changed are removed without being named: a build makes them again.
 func ignoredChanges(ctx context.Context, dir string, before map[string]stamp, scratch []string) ([]string, error) {
 	after, err := ignoredFiles(ctx, dir, slices.Collect(maps.Keys(before))...) // a handoff's untracked files are in before too
 	if err != nil {
@@ -231,13 +231,13 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp, sc
 		if ok && old == st {
 			continue
 		}
-		if !ok {
+		scratched := inScratch(scratch, f)
+		if !ok || scratched {
 			_ = os.Remove(filepath.Join(dir, f))
-			if inScratch(scratch, f) {
-				continue
-			}
 		}
-		changed = append(changed, f)
+		if !scratched {
+			changed = append(changed, f)
+		}
 	}
 	slices.Sort(changed)
 	return changed, nil

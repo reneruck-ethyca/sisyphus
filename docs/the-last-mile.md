@@ -166,8 +166,8 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   no `.pyc`); a cache a repo's env misses still fails the run.
   Where checks write build output into the tree and no env var moves it (turbo's `.turbo/`, Next's `.next/`,
   terraform's `.terraform/` and, in terraform-modules, the gitignored `.terraform.lock.hcl`), the repo lists it
-  under `scratch`: new ignored files under those globs are removed after the run without failing it. A changed
-  pre-existing file there still fails it.
+  under `scratch`: ignored files under those globs that the run created or changed are removed after it without
+  failing it (a build makes them again).
 - **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
   flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
   to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
@@ -703,3 +703,6 @@ None right now.
   `node_modules/.bin` shims. kairos setup now runs `pnpm install --ignore-scripts`. Neither `LEFTHOOK=0` nor `CI`
   stops `lefthook install`, and `pnpm rebuild` runs `prepare` again. The dependencies' scripts aren't needed for
   checks, and a branch can no longer run its own install scripts during setup.
+  Its next run tripped on `apps/kairos/dist/tsconfig.tsbuildinfo`: a host build had left it there and the agent's
+  type check rewrote it. A changed pre-existing scratch file is now removed instead of failing the run, as a new
+  one already was and as a lost run already did (§5). It is build output, so deleting it costs at most a rebuild.
