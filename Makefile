@@ -1,4 +1,4 @@
-.PHONY: help build install test lint run backend-build backend-test backend-lint web-deps web-build web-test web-dev plist install-agent uninstall-agent reviewer-image reviewer-plugins start stop restart reset shell
+.PHONY: help build install test lint run backend-build backend-test backend-lint web-deps web-build web-test web-dev plist install-agent uninstall-agent reviewer-image reviewer-image-ops reviewer-plugins start stop restart reset shell
 
 LABEL := com.reneruck.sisyphus
 PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -117,6 +117,13 @@ reviewer-image: reviewer-plugins ## build the fidesplus reviewer image
 	docker build --target devcontainer --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
 		-t sisyphus-base:fidesplus $(FIDESPLUS)
 	docker build -t sisyphus-reviewer:fidesplus reviewer
+
+# Review container for the repos without a devcontainer (kairos and the infra repos):
+# reviewer/ops.Dockerfile, plus reviewer/Dockerfile on top.
+reviewer-image-ops: reviewer-plugins ## build the ops reviewer image (kairos, infra repos)
+	docker build --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+		-t sisyphus-base:ops -f reviewer/ops.Dockerfile reviewer
+	docker build --build-arg BASE=sisyphus-base:ops --build-arg RUN_USER=node -t sisyphus-reviewer:ops reviewer
 
 # Plugins for the reviewer image, copied from this machine's Claude Code install
 # (talos is private: no clone needed) into reviewer/staged/. Hooks are left out:

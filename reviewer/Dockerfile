@@ -3,6 +3,8 @@
 # the command, mounts and env at run time.
 ARG BASE=sisyphus-base:fidesplus
 FROM ${BASE}
+# The base's non-root user: fidesuser in the fidesplus devcontainer, node in ops.Dockerfile.
+ARG RUN_USER=fidesuser
 
 # Pinned Claude Code (installed in the base); no background updates or
 # nonessential traffic from inside review containers.
@@ -23,8 +25,8 @@ RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
 COPY plugins/ staged/ /opt/sisyphus/plugins/
 COPY mcp.json /opt/sisyphus/mcp.json
 
-# Claude refuses to skip permission prompts as root; the devcontainer user isn't.
-USER fidesuser
+# Claude refuses to skip permission prompts as root; the base's user isn't.
+USER ${RUN_USER}
 
 # Language servers for plugins/lsp. typescript 5: typescript-language-server
 # drives tsserver, which TypeScript 7 no longer ships.
