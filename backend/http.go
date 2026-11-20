@@ -320,7 +320,7 @@ func newHandler(srv server) http.Handler {
 		writeJSON(w, http.StatusOK, skillsStatus())
 	})
 	mux.HandleFunc("POST /api/handoffs/{id}/merge", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
-		if manualMergeRefused(w, r, lm) {
+		if srv.manualMergeRefused(w, r, lm) {
 			return
 		}
 		h, err := lm.Merge(context.WithoutCancel(r.Context()), r.PathValue("id"))
@@ -338,7 +338,7 @@ func newHandler(srv server) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if (body.Mode == lastmile.MergeAuto || body.Mode == lastmile.MergeApproved) && manualMergeRefused(w, r, lm) {
+		if (body.Mode == lastmile.MergeAuto || body.Mode == lastmile.MergeApproved) && srv.manualMergeRefused(w, r, lm) {
 			return
 		}
 		h, err := lm.SetMerge(r.PathValue("id"), body.Mode)
@@ -749,15 +749,24 @@ func (s server) session() string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// manualMergeRefused answers 403 when a token caller (tlm, an agent) would merge, or
-// turn merging on, for a lastmile.manual_merge repo: only the dashboard's session may.
-func manualMergeRefused(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) bool {
+// manualMergeRefused answers 403 unless the dashboard's session cookie came with a
+// request to merge, or turn merging on, for a lastmile.manual_merge repo: the API
+// token (tlm, agents) may not. A guard rail, not a boundary: a process that can read
+// the token file can derive the cookie, and could merge with gh anyway.
+func (s server) manualMergeRefused(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) bool {
 	h, ok := lm.Get(r.PathValue("id"))
-	if !ok || !lm.ManualMerge(h.Repo) || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-		return false // requireToken let a request without a bearer token in by the session cookie
+	if !ok || !lm.ManualMerge(h.Repo) || s.fromDashboard(r) {
+		return false
 	}
 	http.Error(w, h.Repo+" merges only from the dashboard", http.StatusForbidden)
 	return true
+}
+
+// fromDashboard says r carries a valid session cookie and no bearer token.
+func (s server) fromDashboard(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	return err == nil && s.token != "" && r.Header.Get("Authorization") == "" &&
+		subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.session())) == 1
 }
 
 // requireToken refuses /api calls without the token. Loopback isn't enough: a review

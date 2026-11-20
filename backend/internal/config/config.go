@@ -377,9 +377,10 @@ var terraformEnv = map[string]string{"TF_PLUGIN_CACHE_DIR": "/sisyphus/cache/ter
 var fidesinfra = RepoReview{
 	Image:   opsImage,
 	Workdir: "/fidesinfra",
-	Env:     merged(terraformEnv, map[string]string{"UV_CACHE_DIR": "/sisyphus/cache/uv", "UV_LINK_MODE": "copy", "PYTHONDONTWRITEBYTECODE": "1"}),
+	Env: merged(terraformEnv, map[string]string{"UV_CACHE_DIR": "/sisyphus/cache/uv", "UV_LINK_MODE": "copy", "PYTHONDONTWRITEBYTECODE": "1",
+		"UV_PROJECT_ENVIRONMENT": "/tmp/venv", "PYTEST_ADDOPTS": "-p no:cacheprovider"}),
 	Cache:   []string{"/sisyphus/cache/terraform", "/sisyphus/cache/uv"},
-	Scratch: append(slices.Clone(terraformScratch), "**/.venv/**", "**/__pycache__/**", "**/.pytest_cache/**"),
+	Scratch: terraformScratch,
 	Notes: `This repo deploys Ethyca's environments; a merge to main runs cd.yml. Keep changes to what the PR is about.
 The checks CI runs are in .github/workflows/ci.yml: terraform fmt -check -recursive, tflint, and the uv-run
 tenant schema and stack tests. Run them for the stacks you touch; terraform init -backend=false and

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -259,7 +261,8 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 
 // ignoredSince names the gitignored files whose ctime is past r's start, less what
 // setup wrote under node_modules before r.SetupDone (see runAgent). Unknown setup
-// end = nothing is setup's. Files under the scratch globs aren't named either.
+// end = nothing is setup's. Files under the scratch globs are removed, not named:
+// build output, and whatever was planted there goes with it.
 func ignoredSince(ctx context.Context, dir string, r RunMark, extra, scratch []string) ([]string, error) {
 	files, err := ignoredFiles(ctx, dir, extra...)
 	if err != nil {
@@ -269,7 +272,11 @@ func ignoredSince(ctx context.Context, dir string, r RunMark, extra, scratch []s
 	var changed []string
 	for f, st := range files {
 		setup := !r.SetupDone.IsZero() && st.ctime <= r.SetupDone.UnixNano() && slices.Contains(strings.Split(f, "/"), "node_modules")
-		if st.ctime > since && !setup && !inScratch(scratch, f) {
+		switch {
+		case st.ctime <= since || setup:
+		case inScratch(scratch, f):
+			_ = os.Remove(filepath.Join(dir, f))
+		default:
 			changed = append(changed, f)
 		}
 	}

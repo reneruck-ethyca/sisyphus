@@ -694,3 +694,7 @@ None right now.
   `lastmile.manual_merge` (§7.1): the three infra repos merge only from the dashboard, since a merge to main
   deploys (fidesinfra `cd.yml`) or publishes a release; kairos may auto-merge. `risky_paths` stays global: it
   already blocks `merge=auto` for `*.tf`, Dockerfiles and `.github/`.
+  Security review follow-ups: the manual-merge gate allow-lists a valid session cookie rather than
+  deny-listing the bearer token (still a guard rail: a process that reads the token file can derive the
+  cookie, and has `gh` anyway), and a lost run removes new scratch files instead of skipping them;
+  fidesinfra's uv venv moved out of the tree (`UV_PROJECT_ENVIRONMENT`) rather than into `scratch`.

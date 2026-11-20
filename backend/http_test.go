@@ -932,6 +932,12 @@ func TestHTTPManualMergeDashboardOnly(t *testing.T) {
 			t.Errorf("token %s %s = %d %s", c.path, c.body, code, body)
 		}
 	}
+	both, _ := http.NewRequest("POST", srv.URL+"/api/handoffs/"+h.ID+"/merge", nil)
+	both.Header.Set("Authorization", "Bearer "+apiTokenForTests)
+	both.AddCookie(&http.Cookie{Name: sessionCookie, Value: server{token: apiTokenForTests}.session()})
+	if resp, err := raw.Do(both); err != nil || resp.StatusCode != http.StatusForbidden {
+		t.Errorf("token with a cookie = %v %v", resp.StatusCode, err)
+	}
 	if code, body := do("PUT", "/merge-mode", `{"mode": "shadow"}`, false); code != 200 {
 		t.Errorf("token shadow = %d %s", code, body)
 	}

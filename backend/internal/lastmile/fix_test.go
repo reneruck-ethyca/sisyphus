@@ -626,3 +626,21 @@ func TestWorktreeLockSpansManagers(t *testing.T) {
 	}
 	u()
 }
+
+// A lost run's scratch output is removed, not named; anything else is named and kept.
+func TestIgnoredSinceScratch(t *testing.T) {
+	t.Parallel()
+	_, clone := gittest.Setup(t)
+	os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte(".turbo/\n.envrc\n"), 0o644)
+	r := RunMark{Started: time.Now().Add(-time.Minute)}
+	os.MkdirAll(filepath.Join(clone, ".turbo"), 0o755)
+	os.WriteFile(filepath.Join(clone, ".turbo", "x.log"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(clone, ".envrc"), []byte("x"), 0o644)
+	changed, err := ignoredSince(context.Background(), clone, r, nil, []string{"**/.turbo/**"})
+	if err != nil || !slices.Equal(changed, []string{".envrc"}) {
+		t.Errorf("changed = %v, %v", changed, err)
+	}
+	if _, err := os.Stat(filepath.Join(clone, ".turbo", "x.log")); !os.IsNotExist(err) {
+		t.Errorf("scratch file kept: %v", err)
+	}
+}
