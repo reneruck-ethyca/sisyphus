@@ -265,6 +265,15 @@ func TestFixAgentOutcomes(t *testing.T) {
 				write(fmt.Sprintf("node_modules/f%02d.js", i), "x")(dir)
 			}
 		}}, nil, "node_modules/f19.js and 5 more", true},
+		{"scratch output", &fakeTasks{result: okFix, edit: func(dir string) {
+			os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".turbo/\n"), 0o644)
+			write(".turbo/turbo-build.log", "x")(dir)
+			write("a.txt", "fixed")(dir)
+		}}, func(m *Manager) {
+			r := m.cfg.Review.Repos["ethyca/fidesplus"]
+			r.Scratch = []string{"**/.turbo/**"}
+			m.cfg.Review.Repos["ethyca/fidesplus"] = r
+		}, "", false},
 		{"hook config", &fakeTasks{result: okFix, edit: write(".husky/pre-commit", "x")}, nil, "protected path: .husky/pre-commit", true},
 		{"allowed path", &fakeTasks{result: okFix, edit: write("go.sum", "x")}, func(m *Manager) { m.cfg.LastMile.AllowPaths = []string{"go.sum"} }, "", false},
 		{"bad json", &fakeTasks{result: `nope`}, nil, "result.json is not valid", false},

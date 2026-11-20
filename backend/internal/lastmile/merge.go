@@ -92,6 +92,10 @@ func mergeRefusal(h Handoff) string {
 	return ""
 }
 
+// ManualMerge says repo is in lastmile.manual_merge: its PRs merge only from the
+// dashboard, by the merge button or a merge mode set there.
+func (m *Manager) ManualMerge(repo string) bool { return m.cfg.LastMile.Manual(repo) }
+
 // SetMerge changes a handoff's merge mode (Merge*).
 func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 	if !slices.Contains(mergeModes, mode) {

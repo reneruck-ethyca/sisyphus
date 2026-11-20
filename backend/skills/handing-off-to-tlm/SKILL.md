@@ -1,6 +1,6 @@
 ---
 name: handing-off-to-tlm
-description: Use when a finished branch in ethyca/fidesplus or ethyca/fides-qa should become a PR ("ship it", a PR stack to land), or when a TLM handoff comes back with needs-human, merged or closed.
+description: Use when a finished branch in ethyca/fidesplus, fides-qa, kairos, fidesinfra, terraform-modules or internal-helm-charts should become a PR ("ship it", a PR stack to land), or when a TLM handoff comes back with needs-human, merged or closed.
 ---
 
 # Handing off to TLM
@@ -15,7 +15,8 @@ handoff ends.
 | Situation | Do |
 |---|---|
 | Finished, committed, tests pass since the last change | `tlm handoff` |
-| Repo isn't ethyca/fidesplus or ethyca/fides-qa | Normal PR flow; TLM refuses other repos |
+| Repo isn't one of those in the description | Normal PR flow; TLM refuses other repos |
+| ethyca/fidesinfra, terraform-modules or internal-helm-charts | Hand off with `merge=off` (or `shadow`): only the user merges these, from the dashboard; TLM refuses `merge=auto`/`approved` |
 | Unfinished, or the user wants to read the diff first | Normal flow; hand off once finished or approved |
 | A PR for the branch already exists | Hand off anyway: TLM adopts the open PR |
 | Touches migrations, lockfiles or `.github/workflows` | Hand off anyway; TLM's agents can't edit those, so a fix there comes back as needs-human |
@@ -29,6 +30,7 @@ tlm handoff --worktree ~/Dev/.worktrees/fidesplus/ENG-1234 --base dev \
   --notify 'orca orchestration send --to orchestrator --message "TLM $TLM_EVENT $TLM_ID $TLM_PRURL $TLM_REASON"'
 ```
 
+- `--base` is `dev` for fidesplus, `main` for the others.
 - `--autonomy` takes only `fix-ci`, `address-reviews` and one of `merge=off` (default), `merge=shadow`,
   `merge=auto` (merge once the merge policy is satisfied), `merge=approved` (merge once approved). A left-out
   token stays with a human; merge only when the user asked for it.

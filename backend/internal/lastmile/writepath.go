@@ -217,8 +217,10 @@ func ignoredFiles(ctx context.Context, dir string, extra ...string) (map[string]
 }
 
 // ignoredChanges removes the ignored files the run created and names every one
-// it created or changed; a changed one can't be put back, so a human looks.
-func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([]string, error) {
+// it created or changed; a changed one can't be put back, so a human looks. New
+// files under the repo's scratch globs (build output a check writes) are removed
+// without being named.
+func ignoredChanges(ctx context.Context, dir string, before map[string]stamp, scratch []string) ([]string, error) {
 	after, err := ignoredFiles(ctx, dir, slices.Collect(maps.Keys(before))...) // a handoff's untracked files are in before too
 	if err != nil {
 		return nil, err
@@ -229,14 +231,25 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp) ([
 		if ok && old == st {
 			continue
 		}
-		changed = append(changed, f)
 		if !ok {
 			_ = os.Remove(filepath.Join(dir, f))
+			if inScratch(scratch, f) {
+				continue
+			}
 		}
+		changed = append(changed, f)
 	}
 	slices.Sort(changed)
 	return changed, nil
 }
+
+// inScratch says f is under one of a repo's scratch globs.
+func inScratch(scratch []string, f string) bool {
+	return slices.ContainsFunc(scratch, func(g string) bool { return globMatch(g, f) })
+}
+
+// scratch is the repo's scratch globs (config.RepoReview.Scratch).
+func (m *Manager) scratch(repo string) []string { return m.cfg.Review.Repos[repo].Scratch }
 
 // maxListed is how many paths a reason names; a reason ends up in lastmile.json,
 // the dashboard and the notify hook's argv, so a run that touched node_modules
@@ -295,7 +308,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 	reject := func(format string, a ...any) (string, error) {
 		return fmt.Sprintf(format, a...), reset(ctx, h, head)
 	}
-	ignored, err := ignoredChanges(ctx, h.Worktree, ignoredBefore)
+	ignored, err := ignoredChanges(ctx, h.Worktree, ignoredBefore, m.scratch(h.Repo))
 	if err != nil {
 		return "", err
 	}

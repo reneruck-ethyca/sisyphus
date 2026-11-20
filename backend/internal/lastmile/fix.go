@@ -226,7 +226,7 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 	if err != nil {
 		return // the mark stays: the next tick tries again
 	}
-	changed, ierr := ignoredSince(ctx, h.Worktree, r, h.Untracked)
+	changed, ierr := ignoredSince(ctx, h.Worktree, r, h.Untracked, m.scratch(h.Repo))
 	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == r.Head {
 		if err := reset(ctx, *h, head); err != nil {
 			slog.Warn("lastmile lost run: reset", "id", h.ID, "err", err)
@@ -259,8 +259,8 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 
 // ignoredSince names the gitignored files whose ctime is past r's start, less what
 // setup wrote under node_modules before r.SetupDone (see runAgent). Unknown setup
-// end = nothing is setup's.
-func ignoredSince(ctx context.Context, dir string, r RunMark, extra []string) ([]string, error) {
+// end = nothing is setup's. Files under the scratch globs aren't named either.
+func ignoredSince(ctx context.Context, dir string, r RunMark, extra, scratch []string) ([]string, error) {
 	files, err := ignoredFiles(ctx, dir, extra...)
 	if err != nil {
 		return nil, err
@@ -269,7 +269,7 @@ func ignoredSince(ctx context.Context, dir string, r RunMark, extra []string) ([
 	var changed []string
 	for f, st := range files {
 		setup := !r.SetupDone.IsZero() && st.ctime <= r.SetupDone.UnixNano() && slices.Contains(strings.Split(f, "/"), "node_modules")
-		if st.ctime > since && !setup {
+		if st.ctime > since && !setup && !inScratch(scratch, f) {
 			changed = append(changed, f)
 		}
 	}
@@ -398,7 +398,7 @@ func (m *Manager) runAgent(ctx context.Context, h Handoff, j agentJob, apply fun
 func (m *Manager) cleanup(ctx context.Context, h Handoff, start string, before map[string]stamp, reason string) string {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
-	changed, err := ignoredChanges(ctx, h.Worktree, before)
+	changed, err := ignoredChanges(ctx, h.Worktree, before, m.scratch(h.Repo))
 	if err != nil {
 		slog.Warn("lastmile cleanup: ignored files", "id", h.ID, "err", err)
 	}

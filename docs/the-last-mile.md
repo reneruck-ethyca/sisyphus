@@ -164,6 +164,10 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   The agent is asked to run the repo's checks, so a repo's `env` sends the checks' caches out of the worktree
   (fidesplus: `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, `COVERAGE_FILE` under `/tmp`, pytest's cache plugin off,
   no `.pyc`); a cache a repo's env misses still fails the run.
+  Where checks write build output into the tree and no env var moves it (turbo's `.turbo/`, Next's `.next/`,
+  terraform's `.terraform/` and, in terraform-modules, the gitignored `.terraform.lock.hcl`), the repo lists it
+  under `scratch`: new ignored files under those globs are removed after the run without failing it. A changed
+  pre-existing file there still fails it.
 - **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
   flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
   to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
@@ -324,6 +328,12 @@ button and turns off GitHub auto-merge that TLM turned on; auto-merge a person s
 left alone. TLM also turns its own auto-merge off when it escalates to needs-human or the handoff is
 cancelled: when TLM lets go, nothing it armed keeps going.
 
+**Manual-merge repos** (`lastmile.manual_merge`; by default fidesinfra, terraform-modules and
+internal-helm-charts, where a merge to main deploys or publishes a release) merge only on a person's
+say-so in the dashboard. A handoff can't ask for `merge=auto` or `merge=approved` there, and the merge
+button and those two modes refuse the API token (`tlm`, agents) with 403: only the dashboard's session
+cookie can press the button or turn merging on. `off` and `shadow` stay open to the token.
+
 Whatever starts it, a merge squashes. If the base branch uses a merge queue, merging means adding
 the PR to the queue (`enqueuePullRequest`), and the handoff goes to a new state, **`queued`**. TLM
 keeps ticking until GitHub reports the PR merged.
@@ -417,7 +427,8 @@ CI, on the PR and in the merge queue, run only the migration checks.
 3. **Bot reviewers: reply, capped at 3 replies per thread, and be critical** about what deserves a
    reply (§5).
 4. **PR body: TLM may update it** when its changes warrant it (§5).
-5. **Repos: fidesplus and fides-qa only.** Infra repos come later, with their own setup.
+5. **Repos: fidesplus and fides-qa, then kairos, fidesinfra, terraform-modules and internal-helm-charts**
+   (2026-11-20). The infra repos merge only from the dashboard (`lastmile.manual_merge`, §7.1).
 
 6. **Roster selection: round-robin.**
 7. **Roster scope: global, with optional per-repo overrides.**
@@ -674,3 +685,12 @@ None right now.
   that finds the fix on the base escalates exactly there (fidesplus#6532: the Semgrep config only exists on dev,
   828 commits ahead). Pressing Rebase on a needs-human handoff now resumes it as `tlm resume` does and asks for
   the rebase; it stays refused while the worktree has uncommitted changes or an agent runs.
+- **2026-11-20:** More repos: kairos, fidesinfra, terraform-modules and internal-helm-charts are in the default
+  `review.repos`, so they are both reviewed and handed off. None has a devcontainer, so they share one image,
+  `sisyphus-reviewer:ops` (`make reviewer-image-ops`: node 26 + pnpm, terraform 1.14.5, tflint, helm, yq, just,
+  hadolint, shellcheck, uv, at the repos' CI versions); `reviewer/Dockerfile` takes the base's user as `RUN_USER`.
+  Their notes keep agents to local checks (no plan/apply, no cluster or registry). New per-repo `scratch` globs
+  (§5) for build output checks leave in the tree, which otherwise failed every agent run on these repos. New
+  `lastmile.manual_merge` (§7.1): the three infra repos merge only from the dashboard, since a merge to main
+  deploys (fidesinfra `cd.yml`) or publishes a release; kairos may auto-merge. `risky_paths` stays global: it
+  already blocks `merge=auto` for `*.tf`, Dockerfiles and `.github/`.

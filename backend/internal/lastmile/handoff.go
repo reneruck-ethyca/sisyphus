@@ -194,6 +194,9 @@ func (m *Manager) inspect(ctx context.Context, h *Handoff, stackParent string) e
 	if _, ok := m.cfg.Review.Repos[h.Repo]; !ok {
 		return invalid("%s isn't in review.repos, so it has no image or setup", h.Repo)
 	}
+	if m.ManualMerge(h.Repo) && (h.Autonomy.Merge == MergeAuto || h.Autonomy.Merge == MergeApproved) {
+		return invalid("%s merges only from the dashboard: hand off with merge=off or merge=shadow", h.Repo)
+	}
 	parent, err := m.resolveParent(h, stackParent)
 	if err != nil {
 		return err

@@ -366,7 +366,7 @@ func (m *Manager) resolveStop(ctx context.Context, h Handoff, r restackSpec, rb,
 			if why := decode("conflict agent", raw, &out); why != "" {
 				return why
 			}
-			if why := m.checkResolution(ctx, dir, files, h.Untracked, out, before); why != "" {
+			if why := m.checkResolution(ctx, dir, files, h.Untracked, m.scratch(h.Repo), out, before); why != "" {
 				return why
 			}
 			add := append([]string{"--literal-pathspecs", "add", "--"}, files...)
@@ -387,8 +387,8 @@ var markers = regexp.MustCompile(`(?m)^(<<<<<<<|>>>>>>>|=======\r?$)`)
 // checkResolution holds the agent's edits to the write path's rules (design §5): it
 // edited only the files in conflict, none is protected, nested or a link, and no
 // conflict marker is left. A non-empty result is why the resolution is refused.
-func (m *Manager) checkResolution(ctx context.Context, dir string, files, untracked []string, res AgentResult, before map[string]stamp) string {
-	ignored, err := ignoredChanges(ctx, dir, before)
+func (m *Manager) checkResolution(ctx context.Context, dir string, files, untracked, scratch []string, res AgentResult, before map[string]stamp) string {
+	ignored, err := ignoredChanges(ctx, dir, before, scratch)
 	if err != nil {
 		return "listing ignored files: " + err.Error()
 	}

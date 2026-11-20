@@ -536,7 +536,7 @@ func TestStampCatchesForgedTimes(t *testing.T) {
 			os.Rename(p+".tmp", p) // a new inode
 		}
 		os.Chtimes(p, fi.ModTime(), fi.ModTime()) // what utimes can do
-		changed, err := ignoredChanges(ctx, clone, before)
+		changed, err := ignoredChanges(ctx, clone, before, nil)
 		if err != nil || !slices.Contains(changed, how+".bin") {
 			t.Errorf("%s: changed = %v, %v", how, changed, err)
 		}

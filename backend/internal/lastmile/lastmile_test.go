@@ -147,6 +147,13 @@ func TestHandoffRejects(t *testing.T) {
 	invalidWith(t, err, "no branch")
 	gittest.Git(t, clone, "checkout", "-q", "feature/x")
 
+	m.cfg.LastMile.ManualMerge = []string{"ethyca/fidesplus"}
+	for _, mode := range []string{MergeAuto, MergeApproved} {
+		_, err = m.Handoff(ctx, with(func(r *Request) { r.Autonomy = "fix-ci,merge=" + mode }))
+		invalidWith(t, err, "merges only from the dashboard")
+	}
+	m.cfg.LastMile.ManualMerge = nil
+
 	gittest.Git(t, clone, "remote", "set-url", "origin", "https://github.com/ethyca/other.git")
 	_, err = m.Handoff(ctx, ok)
 	invalidWith(t, err, "isn't in review.repos")

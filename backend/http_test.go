@@ -533,13 +533,16 @@ func TestHTTPOpen(t *testing.T) {
 }
 
 // handoffServer serves an app whose last mile can take a handoff of the returned clone (feature/x, one commit ahead of main).
-func handoffServer(t *testing.T) (*httptest.Server, string) {
+func handoffServer(t *testing.T, opts ...func(*config.Config)) (*httptest.Server, string) {
 	t.Helper()
 	upstream, clone := gittest.Setup(t)
 	gittest.Git(t, clone, "config", "url."+upstream+".insteadOf", "https://github.com/ethyca/fidesplus.git")
 	gittest.Git(t, clone, "remote", "set-url", "origin", "https://github.com/ethyca/fidesplus.git")
 	cfg, tr := testkit.Tracker(t, &github.Fake{})
 	cfg.Review.Repos = map[string]config.RepoReview{"ethyca/fidesplus": {Image: "i"}}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	hs := newServer(cfg, tr, nil, app.NewLogBuffer(10))
 	svc := hs.svc
 	var err error
@@ -895,6 +898,49 @@ func TestMain(m *testing.M) {
 	loadAPIToken = func(string) (string, error) { return testToken, nil }
 	http.DefaultTransport = bearerTransport{http.DefaultTransport}
 	os.Exit(m.Run())
+}
+
+// A manual_merge repo's PR merges only from the dashboard: tlm's token can't press
+// merge or turn a merge mode on, the session cookie can.
+func TestHTTPManualMergeDashboardOnly(t *testing.T) {
+	srv, clone := handoffServer(t, func(c *config.Config) { c.LastMile.ManualMerge = []string{"ethyca/fidesplus"} })
+	_, body := post(t, srv.URL+"/api/handoffs", `{"worktree": `+strconv.Quote(clone)+`, "base": "main"}`)
+	var h lastmile.Handoff
+	if err := json.Unmarshal([]byte(body), &h); err != nil {
+		t.Fatal(err)
+	}
+	raw := &http.Client{Transport: http.DefaultTransport.(bearerTransport).next}
+	do := func(method, path, body string, cookie bool) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+"/api/handoffs/"+h.ID+path, strings.NewReader(body))
+		if cookie {
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server{token: apiTokenForTests}.session()})
+		} else {
+			req.Header.Set("Authorization", "Bearer "+apiTokenForTests)
+		}
+		resp, err := raw.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	for _, c := range []struct{ method, path, body string }{{"PUT", "/merge-mode", `{"mode": "auto"}`},
+		{"PUT", "/merge-mode", `{"mode": "approved"}`}, {"POST", "/merge", ""}} {
+		if code, body := do(c.method, c.path, c.body, false); code != http.StatusForbidden || !strings.Contains(body, "only from the dashboard") {
+			t.Errorf("token %s %s = %d %s", c.path, c.body, code, body)
+		}
+	}
+	if code, body := do("PUT", "/merge-mode", `{"mode": "shadow"}`, false); code != 200 {
+		t.Errorf("token shadow = %d %s", code, body)
+	}
+	if code, body := do("PUT", "/merge-mode", `{"mode": "approved"}`, true); code != 200 || !strings.Contains(body, `"merge":"approved"`) {
+		t.Errorf("dashboard approved = %d %s", code, body)
+	}
+	if code, body := do("POST", "/merge", "", true); code != 400 || !strings.Contains(body, "not approved") {
+		t.Errorf("dashboard merge reaches the merge rules = %d %s", code, body)
+	}
 }
 
 // Every /api call needs the token, as a Bearer token or the session cookie the page gets

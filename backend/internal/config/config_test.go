@@ -208,6 +208,9 @@ func TestLoadConfigLastMile(t *testing.T) {
 	if l.Interval.Duration != 30*time.Second || l.BotReviewer != "ethycabot" || l.MaxFixRounds != 3 {
 		t.Errorf("lastmile = %+v (unset keys keep their defaults)", l)
 	}
+	if !l.Manual("ethyca/fidesinfra") || l.Manual("ethyca/kairos") || l.Manual("ethyca/fidesplus") {
+		t.Errorf("manual_merge = %v", l.ManualMerge)
+	}
 	if r := l.ReviewersFor("ethyca/fidesplus"); len(r.Roster) != 2 || r.Count != 1 {
 		t.Errorf("global roster = %+v", r)
 	}
@@ -226,6 +229,7 @@ func TestLoadConfigLastMile(t *testing.T) {
 		`{"lastmile": {"reviewers": {"roster": [""]}}}`,
 		`{"lastmile": {"reviewers": {"count": -1}}}`,
 		`{"lastmile": {"repo_reviewers": {"fidesplus": {"roster": ["a"]}}}}`,
+		`{"lastmile": {"manual_merge": ["fidesinfra"]}}`,
 	} {
 		os.WriteFile(p, []byte(bad), 0o644)
 		if _, err := Load(p); err == nil {

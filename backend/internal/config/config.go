@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -74,7 +75,11 @@ type LastMile struct {
 	MigrationPaths  []string             `json:"migration_paths"`   // globs: a PR touching one must be up to date with its base to merge
 	DownrevLabels   map[string]string    `json:"downrev_labels"`    // per "owner/name": the label for a PR whose only change since green is a down_revision bump
 	MergeFreeze     []FreezeWindow       `json:"merge_freeze"`      // windows in which TLM would not merge
+	ManualMerge     []string             `json:"manual_merge"`      // "owner/name": merges only from the dashboard (button or merge mode), never from a handoff or tlm
 }
+
+// Manual says repo's PRs merge only from the dashboard.
+func (l LastMile) Manual(repo string) bool { return slices.Contains(l.ManualMerge, repo) }
 
 // FreezeWindow is a daily (or weekly, with Weekday) span in TZ in which nothing merges.
 // It does not cross midnight: write two windows.
@@ -179,8 +184,13 @@ func (l LastMile) check() error {
 	if err := check("reviewers", l.Reviewers); err != nil {
 		return err
 	}
+	for _, repo := range l.ManualMerge {
+		if !ownerName(repo) {
+			return fmt.Errorf("manual_merge entry %q must be owner/name", repo)
+		}
+	}
 	for repo, r := range l.RepoReviewers {
-		if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		if !ownerName(repo) {
 			return fmt.Errorf("repo_reviewers key %q must be owner/name", repo)
 		}
 		if err := check(fmt.Sprintf("repo_reviewers[%q]", repo), r); err != nil {
@@ -188,6 +198,11 @@ func (l LastMile) check() error {
 		}
 	}
 	return nil
+}
+
+func ownerName(repo string) bool {
+	owner, name, ok := strings.Cut(repo, "/")
+	return ok && owner != "" && name != "" && !strings.Contains(name, "/")
 }
 
 // Agent selects the CLI and its model settings for one review.
@@ -239,8 +254,9 @@ type RepoReview struct {
 	Workdir    string            `json:"workdir"` // container path for the worktree; "" = its host path
 	EnvFile    string            `json:"env_file"`
 	Env        map[string]string `json:"env"`
-	Setup      string            `json:"setup"` // shell, run in workdir before Claude starts; each line is a logged, timed step
-	Cache      []string          `json:"cache"` // dirs kept in per-repo volumes: workdir-relative, or absolute container paths
+	Setup      string            `json:"setup"`   // shell, run in workdir before Claude starts; each line is a logged, timed step
+	Cache      []string          `json:"cache"`   // dirs kept in per-repo volumes: workdir-relative, or absolute container paths
+	Scratch    []string          `json:"scratch"` // gitignored globs TLM agents may create (build output); removed after the run, not held against it
 	PromptFile string            `json:"prompt_file"`
 	Notes      string            `json:"notes"`             // repo-specific instructions, added to the prompt
 	Related    *Related          `json:"related,omitempty"` // another repo the reviewer reads; nil = none
@@ -325,6 +341,82 @@ whether the new and changed tests verify what their ticket asks for:
 - Check the selectors, routes and API calls the tests rely on against /fidesplus (clients/admin-ui,
   clients/privacy-center, src/).
 - Run ` + "`npm run lint`, `npm run typecheck` and `npm run format:check`" + ` in cardea/.`,
+}
+
+// opsImage is reviewer/ops.Dockerfile (make reviewer-image-ops): node, pnpm, terraform,
+// tflint, helm, yq, just, hadolint, shellcheck, uv. Its user is node.
+const opsImage = "sisyphus-reviewer:ops"
+
+// noCloud is the part of every infra repo's notes that keeps agents to local checks.
+const noCloud = `No cloud credentials reach this container: never run terraform plan/apply, helm install/upgrade,
+kubectl, aws or anything else that talks to AWS, Kubernetes or a registry. Checks are local only.`
+
+// kairos is a pnpm/turbo monorepo (Next.js UI, API) with Helm charts; its CLAUDE.md has the conventions.
+var kairos = RepoReview{
+	Image:   opsImage,
+	Workdir: "/kairos",
+	Env: map[string]string{"npm_config_store_dir": "/sisyphus/cache/pnpm", "npm_config_cache": "/sisyphus/cache/npm",
+		"TURBO_TELEMETRY_DISABLED": "1", "NEXT_TELEMETRY_DISABLED": "1"},
+	Setup:   "pnpm install --frozen-lockfile",
+	Cache:   []string{"node_modules", "/sisyphus/cache/pnpm", "/sisyphus/cache/npm"},
+	Scratch: []string{"**/.turbo/**", "**/dist/**", "**/.next/**", "**/out/**", "**/coverage/**", "**/*.tsbuildinfo", "**/next-env.d.ts", "**/*.log"},
+	Notes: `Read CLAUDE.md first. The checks CI runs are in the justfile: ` + "`just lint-check`" + ` (types, versions, helm, docker,
+shell) and the tests next to the code you change. No database or other service runs here, so tests that need
+one can't run: say so rather than skipping them silently.
+` + noCloud,
+}
+
+// terraformScratch is what terraform init and validate leave in a module dir.
+var terraformScratch = []string{"**/.terraform/**", "**/.terraform.lock.hcl"}
+
+var terraformEnv = map[string]string{"TF_PLUGIN_CACHE_DIR": "/sisyphus/cache/terraform", "TF_IN_AUTOMATION": "1",
+	"CHECKPOINT_DISABLE": "1", "TF_INPUT": "0"}
+
+// fidesinfra is Ethyca's deployments: terraform stacks per environment, helm values, tenant config.
+// A merge to main deploys (cd.yml), so it is in lastmile.manual_merge.
+var fidesinfra = RepoReview{
+	Image:   opsImage,
+	Workdir: "/fidesinfra",
+	Env:     merged(terraformEnv, map[string]string{"UV_CACHE_DIR": "/sisyphus/cache/uv", "UV_LINK_MODE": "copy", "PYTHONDONTWRITEBYTECODE": "1"}),
+	Cache:   []string{"/sisyphus/cache/terraform", "/sisyphus/cache/uv"},
+	Scratch: append(slices.Clone(terraformScratch), "**/.venv/**", "**/__pycache__/**", "**/.pytest_cache/**"),
+	Notes: `This repo deploys Ethyca's environments; a merge to main runs cd.yml. Keep changes to what the PR is about.
+The checks CI runs are in .github/workflows/ci.yml: terraform fmt -check -recursive, tflint, and the uv-run
+tenant schema and stack tests. Run them for the stacks you touch; terraform init -backend=false and
+validate are fine, plan is not.
+` + noCloud,
+}
+
+// terraformModules is Ethyca's shared terraform modules; each module is versioned in its version.json
+// and a merge to main releases changed ones.
+var terraformModules = RepoReview{
+	Image:   opsImage,
+	Workdir: "/terraform-modules",
+	Env:     terraformEnv,
+	Cache:   []string{"/sisyphus/cache/terraform"},
+	Scratch: terraformScratch,
+	Notes: `Read CONTRIBUTING.md. Checks are in .justfile: ` + "`just fmt-check`, `just validate-module <dir>`, `just lint-module <dir>`" + `
+for the modules you touch. A changed module needs its version.json bumped (` + "`just bump-module <dir>`" + `); a merge to main
+releases it.
+` + noCloud,
+}
+
+// internalHelmCharts is Ethyca's internal Helm charts; a merge to main publishes changed charts to ECR.
+var internalHelmCharts = RepoReview{
+	Image:   opsImage,
+	Workdir: "/internal-helm-charts",
+	Scratch: []string{"**/charts/*.tgz"},
+	Notes: `Read CONTRIBUTING.md. Checks are in .justfile: ` + "`just check-locks`" + `, and ` + "`helm lint <chart>`" + ` for the charts you
+change (` + "`just lint`" + ` lints every chart, and some already fail on main). A changed chart needs its
+version bumped (` + "`just bump-charts`" + `); a merge to main publishes it. web-service is a frozen library chart.
+` + noCloud,
+}
+
+// merged is a and b in a new map, b winning.
+func merged(a, b map[string]string) map[string]string {
+	m := maps.Clone(a)
+	maps.Copy(m, b)
+	return m
 }
 
 func DefaultPath() string {
@@ -426,7 +518,8 @@ func defaults() Config {
 			StepTimeout:   Duration{20 * time.Minute},
 			Retries:       3,
 			RetryBackoff:  Duration{2 * time.Minute},
-			Repos:         map[string]RepoReview{"ethyca/fidesplus": fidesplus, "ethyca/fides-qa": fidesQA},
+			Repos: map[string]RepoReview{"ethyca/fidesplus": fidesplus, "ethyca/fides-qa": fidesQA, "ethyca/kairos": kairos,
+				"ethyca/fidesinfra": fidesinfra, "ethyca/terraform-modules": terraformModules, "ethyca/internal-helm-charts": internalHelmCharts},
 		},
 		LastMile: LastMile{
 			Interval:        Duration{2 * time.Minute},
@@ -439,7 +532,9 @@ func defaults() Config {
 			MigrationPaths:  []string{"**/migrations/**", "**/alembic/versions/**"},
 			DownrevLabels:   map[string]string{"ethyca/fidesplus": "downrev-only"},
 			RiskyPaths:      []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"},
-			BotLogins:       []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
+			// A merge to main deploys (fidesinfra) or publishes a release (the others).
+			ManualMerge: []string{"ethyca/fidesinfra", "ethyca/terraform-modules", "ethyca/internal-helm-charts"},
+			BotLogins:   []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},
 	}
 }

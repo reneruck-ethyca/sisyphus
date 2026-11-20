@@ -54,6 +54,7 @@ make reset                     # stop, wipe all state (see below), start again
 make reset PR='ethyca/fidesplus#123'   # …just that PR
 make shell PR='ethyca/fidesplus#123'   # a shell in that PR's review container (see below)
 make reviewer-image            # rebuild the fidesplus review image
+make reviewer-image-ops        # rebuild the image for kairos and the infra repos
 make uninstall-agent
 ```
 
@@ -104,7 +105,7 @@ place (same PID, so the LaunchAgent is happy; review containers are re-attached)
 | `review.retries` | `3` | re-runs of a review that failed before Claude started (setup, stack, container start); `0` = none |
 | `review.retry_backoff` | `2m` | wait before the first retry, doubling after each (2m, 4m, 8m) |
 | `review.stack_from` | `worktree` | where local stacks start: `worktree` (the PR's own stack files, run on the host) or `safe` (each repo's `stack.safe_dir`); see [Local stack](#local-stack) |
-| `review.repos` | `ethyca/fidesplus`, `ethyca/fides-qa` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `prompt_file`, `notes` (repo instructions added to the prompt), `related` (another repo checked out read-only, see [fides-qa](#fides-qa)), `stack`; only these repos are reviewed |
+| `review.repos` | `ethyca/fidesplus`, `ethyca/fides-qa`, `ethyca/kairos`, `ethyca/fidesinfra`, `ethyca/terraform-modules`, `ethyca/internal-helm-charts` | per repo: `image`, `workdir`, `env_file`, `env`, `setup`, `cache`, `scratch` (gitignored globs TLM agents may create, removed after the run), `prompt_file`, `notes` (repo instructions added to the prompt), `related` (another repo checked out read-only, see [fides-qa](#fides-qa)), `stack`; only these repos are reviewed |
 
 ## Which PRs
 
@@ -517,6 +518,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.risky_paths` | migrations, auth, `.github/**`, Dockerfiles, `infra/**`, `*.tf` | globs: touching one blocks a would-merge verdict |
 | `lastmile.migration_paths` | migrations, alembic versions | globs: a PR touching one must be up to date with its base for a would-merge verdict |
 | `lastmile.downrev_labels` | `{"ethyca/fidesplus":"downrev-only"}` | per `owner/name`: the label for a PR whose only change since green CI is TLM's `down_revision` bump |
+| `lastmile.manual_merge` | fidesinfra, terraform-modules, internal-helm-charts | `owner/name`s that merge only from the dashboard: handoffs can't ask for `merge=auto`/`approved`, and the API token can't press merge or turn it on |
 | `lastmile.merge_freeze` | `[]` | windows `{weekday?, start, end, tz}` in which a PR would not be merged |
 
 ## `on_conflict` hook

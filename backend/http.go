@@ -320,6 +320,9 @@ func newHandler(srv server) http.Handler {
 		writeJSON(w, http.StatusOK, skillsStatus())
 	})
 	mux.HandleFunc("POST /api/handoffs/{id}/merge", withLastMile(svc, func(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) {
+		if manualMergeRefused(w, r, lm) {
+			return
+		}
 		h, err := lm.Merge(context.WithoutCancel(r.Context()), r.PathValue("id"))
 		writeLastMile(w, r, http.StatusOK, h, err)
 	}))
@@ -333,6 +336,9 @@ func newHandler(srv server) http.Handler {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if (body.Mode == lastmile.MergeAuto || body.Mode == lastmile.MergeApproved) && manualMergeRefused(w, r, lm) {
 			return
 		}
 		h, err := lm.SetMerge(r.PathValue("id"), body.Mode)
@@ -741,6 +747,17 @@ func (s server) session() string {
 	m := hmac.New(sha256.New, []byte(s.token))
 	m.Write([]byte("sisyphus dashboard session"))
 	return hex.EncodeToString(m.Sum(nil))
+}
+
+// manualMergeRefused answers 403 when a token caller (tlm, an agent) would merge, or
+// turn merging on, for a lastmile.manual_merge repo: only the dashboard's session may.
+func manualMergeRefused(w http.ResponseWriter, r *http.Request, lm *lastmile.Manager) bool {
+	h, ok := lm.Get(r.PathValue("id"))
+	if !ok || !lm.ManualMerge(h.Repo) || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		return false // requireToken let a request without a bearer token in by the session cookie
+	}
+	http.Error(w, h.Repo+" merges only from the dashboard", http.StatusForbidden)
+	return true
 }
 
 // requireToken refuses /api calls without the token. Loopback isn't enough: a review
