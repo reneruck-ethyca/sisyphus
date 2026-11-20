@@ -357,7 +357,9 @@ var kairos = RepoReview{
 	Workdir: "/kairos",
 	Env: map[string]string{"npm_config_store_dir": "/sisyphus/cache/pnpm", "npm_config_cache": "/sisyphus/cache/npm",
 		"TURBO_TELEMETRY_DISABLED": "1", "NEXT_TELEMETRY_DISABLED": "1"},
-	Setup:   "pnpm install --frozen-lockfile",
+	// No install scripts: the root prepare (lefthook install) fails on the read-only main .git, and
+	// the deps' ones (protobufjs, msgpackr-extract, @pulumi/kubernetes) aren't needed for checks.
+	Setup:   "pnpm install --frozen-lockfile --ignore-scripts",
 	Cache:   []string{"node_modules", "/sisyphus/cache/pnpm", "/sisyphus/cache/npm"},
 	Scratch: []string{"**/.turbo/**", "**/dist/**", "**/.next/**", "**/out/**", "**/coverage/**", "**/*.tsbuildinfo", "**/next-env.d.ts", "**/*.log"},
 	Notes: `Read CLAUDE.md first. The checks CI runs are in the justfile: ` + "`just lint-check`" + ` (types, versions, helm, docker,

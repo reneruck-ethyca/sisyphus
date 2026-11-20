@@ -698,3 +698,8 @@ None right now.
   deny-listing the bearer token (still a guard rail: a process that reads the token file can derive the
   cookie, and has `gh` anyway), and a lost run removes new scratch files instead of skipping them;
   fidesinfra's uv venv moved out of the tree (`UV_PROJECT_ENVIRONMENT`) rather than into `scratch`.
+  First kairos run: setup failed, as the root `prepare` script (`lefthook install`) can't write hooks into the
+  read-only main `.git`. So node_modules never joined the baseline and the run went to needs-human over rewritten
+  `node_modules/.bin` shims. kairos setup now runs `pnpm install --ignore-scripts`. Neither `LEFTHOOK=0` nor `CI`
+  stops `lefthook install`, and `pnpm rebuild` runs `prepare` again. The dependencies' scripts aren't needed for
+  checks, and a branch can no longer run its own install scripts during setup.
