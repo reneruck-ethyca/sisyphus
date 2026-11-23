@@ -25,8 +25,9 @@ RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
 # uses the playwright the MCP package pins, so the MCP finds the build it expects.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN npm install -g @playwright/mcp@0.0.86 \
-    && node "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" install --with-deps chromium \
+    && node "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" install --no-shell --with-deps chromium \
     && chmod -R a+rX /opt/ms-playwright \
+    && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
 # sisyphus loads every plugin under /opt/sisyphus/plugins and the MCP servers in
