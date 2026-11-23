@@ -20,6 +20,15 @@ RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
     sh -c 'uv tool install semgrep==1.182.1 && uv tool install mcp-atlassian==0.23.1' \
     && npm install -g @openai/codex
 
+# Headless Chromium for UI review, driven by the Playwright MCP server (mcp.json).
+# Browsers live outside any home dir so the run user can read them; the install
+# uses the playwright the MCP package pins, so the MCP finds the build it expects.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g @playwright/mcp@0.0.86 \
+    && node "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" install --with-deps chromium \
+    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 # sisyphus loads every plugin under /opt/sisyphus/plugins and the MCP servers in
 # /opt/sisyphus/mcp.json (see claudeScript). staged/ is `make reviewer-plugins`.
 COPY plugins/ staged/ /opt/sisyphus/plugins/

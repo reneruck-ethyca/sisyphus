@@ -11,6 +11,15 @@
         "CONFLUENCE_USERNAME": "${JIRA_USERNAME:-}",
         "CONFLUENCE_API_TOKEN": "${JIRA_API_TOKEN:-}"
       }
+    },
+    "playwright": {
+      "command": "playwright-mcp",
+      "args": [
+        "--headless", "--isolated", "--browser", "chromium",
+        "--allowed-origins", "http://localhost:*;http://127.0.0.1:*",
+        "--output-dir", "/out/ui",
+        "--viewport-size", "1280,800"
+      ]
     }
   }
 }
