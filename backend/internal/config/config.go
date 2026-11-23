@@ -322,7 +322,10 @@ each port. The webserver needs the stack, runs migrations on startup, and no wor
 script writes an .env.local pointing at 0.0.0.0, which the browser can't open, and leaves a stray file.
 Log in as the root user, with the local-dev credentials under [security] in .fides/fides.toml
 (root_username, root_password). If root login is refused (the file sets allow_username_password_login = false),
-restart the webserver with FIDES__SECURITY__ALLOW_USERNAME_PASSWORD_LOGIN=true. Pages that MSW fully mocks can skip the API: set NEXT_PUBLIC_MOCK_API=1.`,
+restart the webserver with FIDES__SECURITY__ALLOW_USERNAME_PASSWORD_LOGIN=true. Pages that MSW fully mocks can skip the API: set NEXT_PUBLIC_MOCK_API=1.
+
+Astralis (clients/astralis) is a separate Next.js app: ` + "`npm run dev:mock`" + ` there serves it on port 3002 against its
+mock API, with no webserver needed. Use the real API only for pages the mocks don't cover.`,
 }
 
 // fides-qa is fidesplus' QA automation; reviews cover cardea/, its Playwright suite. Nothing runs the
