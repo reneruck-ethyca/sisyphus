@@ -341,17 +341,22 @@ func TestFeedbackWithAddressReviewsOff(t *testing.T) {
 	}
 }
 
-func TestRedCIBeforeFeedback(t *testing.T) {
+func TestFeedbackBeforeRedCI(t *testing.T) {
 	t.Parallel()
-	tasks := &fakeTasks{result: result()}
+	tasks := &fakeTasks{result: result(ReviewAction{ThreadID: "T1", Action: "reply", Reply: "ok"})}
 	in := github.Inbox{Threads: []github.ReviewThread{th("T1", cm(1, "alice", "a"))}}
-	m, gh, id := reviewFixture(t, "address-reviews", tasks, in)
+	m, gh, id := reviewFixture(t, "fix-ci,address-reviews", tasks, in)
 	s := gh.Snapshots[prRef.Key()]
 	s.Checks = []github.Check{failCheck("unit", "22")}
 	gh.Snapshots[prRef.Key()] = s
 	m.tickWait(t)
-	if h := m.must(t, id); h.State != StateNeedsHuman || tasks.n() != 0 { // fix-ci is off: red is a human's
-		t.Errorf("handoff %+v", h)
+	if h := m.must(t, id); h.State != StateFeedback || tasks.n() != 1 || tasks.calls[0].Context["feedback.json"] == "" || h.FixRounds["ci"] != 0 {
+		t.Fatalf("red CI with new feedback: %+v", h)
+	}
+	m.tick(context.Background()) // applies the review round
+	m.tickWait(t)                // nothing new to answer: now the red run gets the fix agent
+	if h := m.must(t, id); h.State != StateCIRed || h.Reason != "fix agent running" || h.FixRounds["ci"] != 1 {
+		t.Fatalf("red CI after the review round: %+v", h)
 	}
 }
 

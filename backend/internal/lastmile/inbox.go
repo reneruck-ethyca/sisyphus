@@ -18,10 +18,16 @@ type Cursor struct {
 	Comments int64            `json:"comments,omitempty"` // last conversation comment id handed over
 }
 
-// cursorAtEnd is a cursor past everything in in.
-func cursorAtEnd(in github.Inbox) Cursor {
+// adoptCursor is where an adopted PR's inbox starts: past everything already there
+// except the threads still waiting on an answer from me (unresolved, not outdated,
+// last comment someone else's). Review bodies and conversation comments have no
+// resolved state, so they all count as answered.
+func adoptCursor(in github.Inbox, me string) Cursor {
 	var c Cursor
 	for _, t := range in.Threads {
+		if n := len(t.Comments); n > 0 && !t.Resolved && !t.Outdated && !strings.EqualFold(t.Comments[n-1].Author, me) {
+			continue
+		}
 		for _, x := range t.Comments {
 			if c.Threads == nil {
 				c.Threads = map[string]int64{}

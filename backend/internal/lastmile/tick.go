@@ -141,12 +141,11 @@ func (m *Manager) openPR(ctx context.Context, h *Handoff) error {
 		}
 		h.LastBodyWritten = body
 	} else {
-		// An adopted PR's past discussion was had before the handoff: only what comes after is feedback.
 		in, err := m.GH.Inbox(ctx, ref)
 		if err != nil {
 			return err
 		}
-		h.Cursor = cursorAtEnd(in)
+		h.Cursor = adoptCursor(in, m.cfg.User)
 	}
 	h.PRNumber, h.PROpened = ref.Number, m.now()
 	h.PRURL = fmt.Sprintf("https://github.com/%s/pull/%d", ref.Repo, ref.Number)
@@ -220,8 +219,17 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	state, reason := nextState(*h, s)
 	if s.CI == CIRed {
 		s.Failures = m.failures(ctx, *h, s.Checks)
+	}
+	// Review feedback goes first, whatever CI says: answering it pushes and restarts CI
+	// anyway, so a red run is only handled once there's nothing new to answer.
+	fstate, freason, err := m.feedback(ctx, h, p, &s, state, reason)
+	if err != nil {
+		return err
+	}
+	if fstate != state || freason != reason {
+		state, reason = fstate, freason
+	} else if s.CI == CIRed {
 		if h.Autonomy.FixCI {
-			var err error
 			if state, reason, err = m.redState(ctx, h, s); err != nil {
 				return err
 			}
@@ -230,11 +238,8 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 		} else if rerun {
 			state, reason = StateCIRunning, ""
 		}
-	}
-	if s.CI != CIRed && state != StateNeedsHuman {
-		var err error
-		if state, reason, err = m.feedback(ctx, h, p, &s, state, reason); err != nil {
-			return err
+		if state == StateNeedsHuman {
+			h.EscalatedBy = TriggerCI
 		}
 	}
 	if s.Draft {
@@ -254,9 +259,6 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 		}
 	}
 	if state == StateNeedsHuman {
-		if s.CI == CIRed {
-			h.EscalatedBy = TriggerCI
-		}
 		m.escalate(ctx, h, reason)
 		return nil
 	}

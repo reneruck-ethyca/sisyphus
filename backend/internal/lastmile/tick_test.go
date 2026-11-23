@@ -95,17 +95,22 @@ func TestOpenPR(t *testing.T) {
 	m.handoffs[0].PRNumber, m.handoffs[0].State = 0, StateHandedOff
 	m.mu.Unlock()
 	gh.Existing = github.PRRef{Repo: "ethyca/fidesplus", Number: 9}
-	gh.InboxData = github.Inbox{Threads: []github.ReviewThread{{ID: "T1", Comments: []github.InboxComment{cm(3, "alice", "a"), cm(8, "me", "b")}}},
-		Reviews: []github.InboxComment{cm(4, "bob", "c")}, Issue: []github.InboxComment{cm(2, "carol", "d"), cm(6, "carol", "e")}}
+	m.cfg.User = "Me"
+	gh.InboxData = github.Inbox{Threads: []github.ReviewThread{
+		{ID: "T1", Comments: []github.InboxComment{cm(3, "alice", "a"), cm(8, "me", "b")}},
+		{ID: "T2", Comments: []github.InboxComment{cm(9, "me", "f"), cm(10, "alice", "g")}},
+		{ID: "T3", Resolved: true, Comments: []github.InboxComment{cm(11, "alice", "h")}},
+		{ID: "T4", Outdated: true, Comments: []github.InboxComment{cm(12, "alice", "i")}},
+	}, Reviews: []github.InboxComment{cm(4, "bob", "c")}, Issue: []github.InboxComment{cm(2, "carol", "d"), cm(6, "carol", "e")}}
 	m.tick(context.Background())
 	if got = m.must(t, h.ID); len(gh.Created) != 1 || got.PRNumber != 9 || got.State != StatePROpen {
 		t.Errorf("after restart: created %d, handoff = %+v", len(gh.Created), got)
 	}
-	// What was said before the adoption isn't feedback.
-	if want := (Cursor{Threads: map[string]int64{"T1": 8}, Reviews: 4, Comments: 6}); !reflect.DeepEqual(got.Cursor, want) {
+	// Of what was said before the adoption, only an open, current thread waiting on me is feedback.
+	if want := (Cursor{Threads: map[string]int64{"T1": 8, "T3": 11, "T4": 12}, Reviews: 4, Comments: 6}); !reflect.DeepEqual(got.Cursor, want) {
 		t.Errorf("cursor = %+v, want %+v", got.Cursor, want)
 	}
-	if box := buildInbox(gh.InboxData, got, nil, ""); len(box.New) != 0 {
+	if box := buildInbox(gh.InboxData, got, nil, ""); len(box.New) != 1 || box.New[0].ID != "T2" {
 		t.Errorf("new after adoption = %+v", box.New)
 	}
 }

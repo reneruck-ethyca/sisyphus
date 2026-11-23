@@ -103,8 +103,8 @@ One per handoff:
 ```
 handed-off → pr-open → ci-running ─┬→ ci-red ──[fix agent]──→ ci-running
                                     └→ ci-green → awaiting-review
-awaiting-review ─┬→ feedback ──[review-response agent]──→ ci-running
-                 ├→ approved ──[merge mode / button]──→ (queued →) merged ✔ ──→ cleanup, history
+any open state ──(new review feedback)──→ feedback ──[review-response agent]──→ ci-running
+awaiting-review ─┬→ approved ──[merge mode / button]──→ (queued →) merged ✔ ──→ cleanup, history
 queued ──(kicked out)──→ flake: re-queue │ CI red: fix │ conflict: rebase │ else: queue agent
                  └→ conflict ──[rebase; agent only on conflict]──→ ci-running
 any state ──(budget/rounds exhausted, repeated failure, policy)──→ needs-human ⏸
@@ -121,6 +121,16 @@ closed by a human ──→ closed ✖
   conflict agent with fix-ci, else to a human)
 - moves a draft PR to ready once the bot has reviewed it and CI is green (§6)
 - requests reviewers (once, see §6) and re-requests after addressing their feedback
+
+**Review feedback comes before CI.** New feedback starts the review agent whatever CI says, pending or
+red: its push restarts CI anyway, so fixing a red run first would only cost another CI run. A red run gets
+the fix agent (or a flake rerun, or a human) on the first tick with nothing new to answer; `ci-running` is
+where a handoff waits once everything is answered.
+
+**Adopting a PR.** When the branch already has an open PR, the review cursor starts past what's on it, except
+for the review threads still waiting on the user: unresolved, not outdated, last comment by someone other than
+the user (`user` in the config). Those are feedback on the first tick. Review bodies and conversation comments
+have no resolved state, so all of them count as answered.
 
 **An agent starts only in these cases:**
 
@@ -530,7 +540,7 @@ None right now.
   result up on their next load. The marker is re-read after each action.
 - **2026-11-06:** Handing off a branch that already has an open PR: the PR is adopted as before, and
   now (a) its existing reviews, comments and threads are history, not feedback: the review cursor
-  starts past them, and (b) humans already requested or with a standing review count toward the
+  starts past them (threads waiting on the user: superseded 2026-11-23, see below), and (b) humans already requested or with a standing review count toward the
   roster count. Adopting still marks a draft PR ready unless the handoff asked for `--draft` (kept
   on purpose; superseded 2026-11-19, see below). Title, body and labels of an adopted PR are left as they are.
 - **2026-11-06:** Gitignored-file check moved after container setup. A review round on fidesplus#7136
@@ -706,3 +716,13 @@ None right now.
   Its next run tripped on `apps/kairos/dist/tsconfig.tsbuildinfo`: a host build had left it there and the agent's
   type check rewrote it. A changed pre-existing scratch file is now removed instead of failing the run, as a new
   one already was and as a lost run already did (§5). It is build output, so deleting it costs at most a rebuild.
+- **2026-11-23:** §4: review feedback now goes before red CI. Before, a red PR sent new comments to the back:
+  the fix agent ran, pushed, and only the tick after that handed the comments to the review agent, whose push
+  then started yet another CI run. Feedback was already handled while CI was pending; now it is on red too, and
+  the red run is handled once nothing new is left to answer. A needs-human from red CI is still marked as CI's
+  (so it resumes on green), but one from feedback on a red PR is now the review's.
+- **2026-11-23:** §4: an adopted PR's unresolved, current threads whose last comment isn't the user's are
+  feedback, no longer history. fidesplus#7660 was handed off with 4 open reviewer threads posted minutes earlier;
+  TLM sat in ci-running and never answered them. The usual reason to hand off an existing PR is to have TLM
+  finish it, open threads included. Resolved, outdated and already-answered threads stay history, as do review
+  bodies and conversation comments, which can't be told answered from unanswered.
