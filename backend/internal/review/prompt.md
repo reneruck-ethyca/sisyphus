@@ -9,7 +9,13 @@ There's no Docker or nox in here: the services the tests need (database, cache) 
 and the environment points at them, so run the tests directly.
 {{else -}}
 There's no Docker in here and no local services.
-{{end}}{{with .Related}}
+{{end}}
+If the `playwright` MCP tools are available, a headless browser is there, limited to `localhost`. Use it when
+the diff changes something a user sees: start the UI as the repo notes describe (in the background,
+`nohup ... &`, then wait for the port), open the affected pages, exercise the change and take screenshots;
+they land in /out/ui/. In the review summary, say which findings you saw in the browser and which you only
+reasoned. Skip it for changes with no visible effect.
+{{with .Related}}
 {{.}}
 {{end}}{{with .Notes}}
 {{.}}

@@ -32,7 +32,8 @@ on the host. `make install-agent` bakes your current shell's PATH into the Launc
    fidesplus devcontainer in `$(FIDESPLUS)` (default `~/Dev/fidesplus`), with Claude Code pinned, plus
    the reviewer's tooling: the ethyca-talos and superpowers plugins and `adversarial-review`, copied
    from your Claude Code install without their hooks (`make reviewer-plugins`; rebuild to pick up
-   updates), pyright and typescript-language-server for the LSP tool, semgrep, and `mcp-atlassian`.
+   updates), pyright and typescript-language-server for the LSP tool, semgrep, `mcp-atlassian`, and headless Chromium with the Playwright MCP server (limited to
+   `localhost`; screenshots land in the run's `ui` folder, shown on the run page).
 3. Start it: `make install-agent` (at login, via LaunchAgent) or `make start`. Open the dashboard from
    the menu-bar item (Open window, or Open dashboard for your browser): the API needs a sign-in, which
    those links carry.

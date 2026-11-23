@@ -15,7 +15,7 @@ func TestRenderPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"git diff base1...HEAD", "#1 in ethyca/a", `"Fix it"`, "/fidesplus", "at abc123", "/out/review.json", "/sisyphus/context/", "first review"} {
+	for _, want := range []string{"git diff base1...HEAD", "#1 in ethyca/a", `"Fix it"`, "/fidesplus", "at abc123", "/out/review.json", "/sisyphus/context/", "first review", "`playwright` MCP tools", "/out/ui/"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("default prompt missing %q:\n%s", want, got)
 		}
