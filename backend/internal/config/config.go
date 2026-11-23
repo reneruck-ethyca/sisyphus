@@ -316,11 +316,13 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}"},
 	Notes: `To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for
 each port. The webserver needs the stack, runs migrations on startup, and no workers run: from /fidesplus,
-` + "`fides webserver`" + ` (port 8080). Then, in clients/admin-ui:
+` + "`fidesplus`" + ` (port 8080; not ` + "`fides webserver`" + `, which skips the plus routes); check it with
+` + "`curl localhost:8080/api/v1/plus/health`" + `. Then, in clients/admin-ui:
 ` + "`NEXT_PUBLIC_FIDESCTL_API_SERVER=http://localhost:8080 npx next dev -p 3000`" + `. Don't use ` + "`npm run dev`" + `: its setup
 script writes an .env.local pointing at 0.0.0.0, which the browser can't open, and leaves a stray file.
 Log in as the root user, with the local-dev credentials under [security] in .fides/fides.toml
-(root_username, root_password). Pages that MSW fully mocks can skip the API: set NEXT_PUBLIC_MOCK_API=1.`,
+(root_username, root_password). If root login is refused (the file sets allow_username_password_login = false),
+restart the webserver with FIDES__SECURITY__ALLOW_USERNAME_PASSWORD_LOGIN=true. Pages that MSW fully mocks can skip the API: set NEXT_PUBLIC_MOCK_API=1.`,
 }
 
 // fides-qa is fidesplus' QA automation; reviews cover cardea/, its Playwright suite. Nothing runs the
@@ -376,7 +378,8 @@ one can't run: say so rather than skipping them silently.
 To look at the UI, start kairos-ui on its mock API (no backend needed):
 ` + "`nohup pnpm turbo run dev:mocks --filter=kairos-ui > /tmp/ui.log 2>&1 &`" + `, then wait for port 3000
 (next dev's default). Turbo generates the mock worker and schema fixture first; running the package script
-directly skips that.
+directly skips that. Starting it rewrites the tracked apps/kairos-ui/src/mocks/fixtures/tenantSettingsSchema.json:
+a diff there means the PR's fixture is stale, which is a finding.
 ` + noCloud,
 }
 

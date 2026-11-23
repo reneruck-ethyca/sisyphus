@@ -23,8 +23,10 @@ RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
 # Headless Chromium for UI review, driven by the Playwright MCP server (mcp.json).
 # Browsers live outside any home dir so the run user can read them; the install
 # uses the playwright the MCP package pins, so the MCP finds the build it expects.
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN npm install -g @playwright/mcp@0.0.86 \
+# The path is set here and in mcp.json only, not image-wide, so other Playwright
+# installs in the container (fides-qa's cardea) keep their own.
+RUN export PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    && npm install -g @playwright/mcp@0.0.86 \
     && node "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" install --no-shell --with-deps chromium \
     && chmod -R a+rX /opt/ms-playwright \
     && npm cache clean --force \
