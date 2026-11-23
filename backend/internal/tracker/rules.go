@@ -29,11 +29,8 @@ func latestStates(reviews []github.Review) map[string]string {
 // dropReason says why a PR should not be (or no longer be) tracked; "" = keep.
 // Once I've reviewed it, only merging or closing drops it.
 func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string {
-	if pr.Merged {
-		return "merged"
-	}
-	if pr.State != "open" {
-		return "closed"
+	if r := closedReason(pr); r != "" {
+		return r
 	}
 	if reviewedByMe(pr, me) {
 		return ""
@@ -50,6 +47,17 @@ func dropReason(pr github.PR, me string, isRequested, includeDrafts bool) string
 	}
 	if !isRequested {
 		return "review not requested from you"
+	}
+	return ""
+}
+
+// closedReason is why a PR tracked by hand is dropped: only when it's merged or closed.
+func closedReason(pr github.PR) string {
+	if pr.Merged {
+		return "merged"
+	}
+	if pr.State != "open" {
+		return "closed"
 	}
 	return ""
 }

@@ -486,11 +486,12 @@ func TestUntrackStopsReviewInsteadOfWaiting(t *testing.T) {
 	}
 }
 
-// A PR tracked by hand stays while it no longer asks for my review; one tracked
-// because it asked is dropped then.
+// A PR tracked by hand stays while it no longer asks for my review or someone
+// else approved it; one tracked because it asked is dropped then.
 func TestByHandKeepsUnrequestedPR(t *testing.T) {
 	pr := openPR("a")
 	pr.RequestedReviewers = nil
+	pr.Reviews = []github.Review{{User: "other", State: "APPROVED", SubmittedAt: at(1)}}
 	gh := &github.Fake{PRs: map[string]github.PR{refA.Key(): pr}}
 	wt := t.TempDir()
 	tr := newTestTracker(t, gh, &Tracked{PRRef: refA, HeadSHA: "a", SyncedSHA: "a", Worktree: wt, ByHand: true})

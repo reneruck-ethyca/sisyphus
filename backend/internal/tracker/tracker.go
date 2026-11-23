@@ -127,7 +127,7 @@ func (t *Tracker) discover(ctx context.Context, ref github.PRRef, byHand bool) b
 		return false
 	}
 	// Picked up only on a request; reviewedByMe keeps PRs already tracked, not new ones.
-	if !byHand && !requested(pr, t.cfg.User, t.teams) || dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "" {
+	if closedReason(pr) != "" || !byHand && (!requested(pr, t.cfg.User, t.teams) || dropReason(pr, t.cfg.User, true, t.cfg.IncludeDrafts) != "") {
 		return false
 	}
 	if pr.HeadRepo != pr.Repo {
@@ -196,7 +196,11 @@ func (t *Tracker) update(ctx context.Context, tr *Tracked) {
 		slog.Warn("fetching PR", "pr", key, "err", err)
 		return
 	}
-	if reason := dropReason(pr, t.cfg.User, tr.ByHand || requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts); reason != "" {
+	reason := closedReason(pr)
+	if !tr.ByHand {
+		reason = dropReason(pr, t.cfg.User, requested(pr, t.cfg.User, t.teams), t.cfg.IncludeDrafts)
+	}
+	if reason != "" {
 		unlock, ok := t.lock(tr)
 		if !ok {
 			return // retried next tick, once whatever holds the worktree has let go
