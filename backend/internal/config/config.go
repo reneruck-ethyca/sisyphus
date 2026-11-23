@@ -515,7 +515,7 @@ func defaults() Config {
 			EnvFile:       "~/.config/sisyphus/review.env",
 			PluginsVolume: "sisyphus-claude-plugins",
 			Timeout:       Duration{60 * time.Minute},
-			MaxConcurrent: 1,
+			MaxConcurrent: 2,
 			Cleanup:       true,
 			StackFrom:     StackFromWorktree,
 			StepTimeout:   Duration{20 * time.Minute},

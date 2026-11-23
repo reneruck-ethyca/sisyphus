@@ -23,6 +23,7 @@ type Spec struct {
 	Mounts   []Mount
 	Workdir  string
 	Network  string // "" = the default bridge
+	ShmSize  string // docker --shm-size; "" = docker default (64m)
 	Labels   map[string]string
 }
 

@@ -126,7 +126,7 @@ func TestTrackedRunsReview(t *testing.T) {
 	}
 	s := f.rt.Started()[0]
 	gitDir, _ := filepath.EvalSymlinks(filepath.Join(f.tr.Worktree, ".git"))
-	if s.Image != "img:1" || s.Workdir != f.tr.Worktree || s.Labels["sisyphus.pr"] != refA.Key() {
+	if s.Image != "img:1" || s.ShmSize != "1g" || s.Workdir != f.tr.Worktree || s.Labels["sisyphus.pr"] != refA.Key() {
 		t.Fatalf("spec = %+v", s)
 	}
 	if s.Env["SISYPHUS_REASON"] != "new" || s.Env["SISYPHUS_HEAD_SHA"] != f.tr.HeadSHA || s.Env["SISYPHUS_OUT"] != "/out" || s.Env["WB_TEST_TOKEN"] != "t0k" {

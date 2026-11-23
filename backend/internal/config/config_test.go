@@ -24,7 +24,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
 	r := cfg.Review
-	if r.Disabled || !r.Post || r.Agent != (Agent{Vendor: "claude", Model: "opus", Effort: "medium"}) || r.MaxTurns != 200 || r.MaxConcurrent != 1 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
+	if r.Disabled || !r.Post || r.Agent != (Agent{Vendor: "claude", Model: "opus", Effort: "medium"}) || r.MaxTurns != 200 || r.MaxConcurrent != 2 || !r.Cleanup || r.Timeout.Duration != 60*time.Minute ||
 		r.EnvFile != home+"/.config/sisyphus/review.env" {
 		t.Errorf("bad review defaults: %+v", r)
 	}
@@ -49,7 +49,7 @@ func TestLoadConfigReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := cfg.Review
-	if r.Agent != (Agent{Vendor: "claude", Model: "sonnet", Effort: "high"}) || r.Cleanup || r.MaxConcurrent != 1 || r.EnvFile != home+"/.sisyphus.env" {
+	if r.Agent != (Agent{Vendor: "claude", Model: "sonnet", Effort: "high"}) || r.Cleanup || r.MaxConcurrent != 2 || r.EnvFile != home+"/.sisyphus.env" {
 		t.Errorf("review = %+v", r)
 	}
 	if r.Repos["ethyca/fides"].PromptFile != home+"/fides.md" || r.Repos["ethyca/fidesplus"].Image == "" {

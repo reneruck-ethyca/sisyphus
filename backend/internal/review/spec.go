@@ -189,7 +189,7 @@ func buildSpec(ctx context.Context, cfg config.Review, q specReq) (container.Spe
 		}
 	}
 	return container.Spec{
-		Network: q.Network, Name: q.Name,
+		Network: q.Network, Name: q.Name, ShmSize: "1g",
 		Image: repo.Image, Command: []string{"bash", "-c", script(cfg, repo, owned, agent, q.Gate, q.BeforeAgent)}, Env: env, EnvFiles: envFiles,
 		Mounts: mounts, Workdir: workdir, Labels: q.Labels,
 	}, nil

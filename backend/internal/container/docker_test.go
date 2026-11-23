@@ -12,7 +12,7 @@ import (
 
 func TestRunArgs(t *testing.T) {
 	args, env, err := runArgs(Spec{
-		Name: "wb-1", Network: "net", Image: "img:1", Command: []string{"sh", "-c", "echo hi"},
+		Name: "wb-1", Network: "net", ShmSize: "1g", Image: "img:1", Command: []string{"sh", "-c", "echo hi"},
 		Env:     map[string]string{"SECRET": "s3cr3t", "A": "1"},
 		Mounts:  []Mount{{Source: "/w", Target: "/w"}, {Source: "/g", Target: "/g", ReadOnly: true}},
 		Workdir: "/w", Labels: map[string]string{"sisyphus": "1"},
@@ -20,7 +20,7 @@ func TestRunArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run", "--detach", "--init", "--name", "wb-1", "--network", "net", "--label", "sisyphus=1",
+	want := []string{"run", "--detach", "--init", "--name", "wb-1", "--network", "net", "--shm-size", "1g", "--label", "sisyphus=1",
 		"--env", "A", "--env", "SECRET", "--volume", "/w:/w", "--volume", "/g:/g:ro",
 		"--workdir", "/w", "--entrypoint", "sh", "img:1", "-c", "echo hi"}
 	if !slices.Equal(args, want) {
