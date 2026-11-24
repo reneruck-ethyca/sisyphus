@@ -73,7 +73,7 @@ export function Settings({ status }: { status?: Status }) {
     else if (f.type === "number") control = <input type="number" step="any" id={id} value={String(v)} onInput={(e) => set(f.key, e.currentTarget.value)} />;
     else control = <><input id={id} value={String(v)} list={opts ? `o-${f.key}` : undefined} onInput={(e) => set(f.key, e.currentTarget.value)} />
       {opts && <datalist id={`o-${f.key}`}>{opts.map((o) => <option key={o} value={o} />)}</datalist>}</>;
-    return <div class={"field" + (v !== base[f.key] ? " dirty" : "")} key={f.key}>
+    return <div class={"field" + (v !== base[f.key] ? " changed" : "")} key={f.key}>
       <label for={id}><b>{f.label}</b><span class="muted">{f.help}</span><small>{f.key}</small></label>
       <span class="control">{control}</span>
     </div>;
