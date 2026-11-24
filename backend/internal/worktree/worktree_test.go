@@ -162,3 +162,16 @@ func TestResetAndCommonDir(t *testing.T) {
 		t.Fatalf("CommonDir = %q, %v; want %q", dir, err, want)
 	}
 }
+
+func TestResetKeepsAMountPoint(t *testing.T) {
+	_, clone := gittest.Setup(t)
+	head := gittest.Commit(t, clone, "b.txt", "x")
+	os.MkdirAll(filepath.Join(clone, "src", "bin"), 0o755) // an empty cache mount point git no longer tracks
+
+	if err := Reset(context.Background(), clone, head, "src/bin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "src", "bin")); err != nil {
+		t.Fatalf("mount point removed: %v", err)
+	}
+}

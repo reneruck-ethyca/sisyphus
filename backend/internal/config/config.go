@@ -264,6 +264,13 @@ type RepoReview struct {
 	Stack      *Stack            `json:"stack,omitempty"`   // nil = no local services
 }
 
+// MountPoints is the workdir-relative Cache dirs: volume mount points in the
+// worktree, which a git clean must leave alone (Docker holds them, and a branch
+// that stops tracking one would otherwise see it removed).
+func (r RepoReview) MountPoints() []string {
+	return slices.DeleteFunc(slices.Clone(r.Cache), filepath.IsAbs)
+}
+
 // Stack is the local services (DB, cache) a review needs. Up runs on the host
 // before the review container starts; the container joins <project>_default.
 type Stack struct {
@@ -314,6 +321,9 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 		// Download caches, so a rebuilt .venv or node_modules doesn't fetch everything again. Not under
 		// $HOME: a volume's missing parent dirs (~/.cache) would be created root-owned.
 		"/sisyphus/cache/uv", "/sisyphus/cache/npm"},
+	// What the agent's checks leave in the worktree despite the env above: bytecode from
+	// subprocesses that drop PYTHONDONTWRITEBYTECODE, openapi-ts' input and jiti's cache.
+	Scratch: []string{"**/__pycache__/**", "**/*.pyc", "**/node_modules/.cache/**", "clients/openapi.json"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/astralis/**", "changelog/**"}},
 	Notes: `To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for

@@ -95,10 +95,11 @@ func status(ctx context.Context, h Handoff) (string, error) {
 	return strings.Join(keep, "\n"), nil
 }
 
-// reset is worktree.Reset sparing the untracked files the handoff came with.
+// reset is worktree.Reset sparing the untracked files the handoff came with and
+// the repo's cache mount points.
 // ponytail: a name ending in a space isn't escaped, so git clean would remove it.
-func reset(ctx context.Context, h Handoff, sha string) error {
-	return worktree.Reset(ctx, h.Worktree, sha, h.Untracked...)
+func (m *Manager) reset(ctx context.Context, h Handoff, sha string) error {
+	return worktree.Reset(ctx, h.Worktree, sha, append(slices.Clone(h.Untracked), m.cfg.Review.Repos[h.Repo].MountPoints()...)...)
 }
 
 // changedLines counts added plus removed lines of the change, untracked files
@@ -282,7 +283,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return "", err
 	}
 	reject := func(format string, a ...any) (string, error) {
-		return fmt.Sprintf(format, a...), reset(ctx, h, head)
+		return fmt.Sprintf(format, a...), m.reset(ctx, h, head)
 	}
 	ignored, err := ignoredChanges(ctx, h.Worktree, ignoredBefore, m.scratch(h.Repo))
 	if err != nil {
@@ -292,7 +293,7 @@ func (m *Manager) commitAgentWork(ctx context.Context, h Handoff, res AgentResul
 		return reject("agent created or changed gitignored files (new ones removed): %s", pathList(ignored))
 	}
 	if res.Escalate {
-		return "agent escalated: " + res.EscalateReason, reset(ctx, h, head)
+		return "agent escalated: " + res.EscalateReason, m.reset(ctx, h, head)
 	}
 	files, err := changedFiles(ctx, h.Worktree, h.Untracked)
 	if err != nil {

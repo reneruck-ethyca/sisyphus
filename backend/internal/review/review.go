@@ -1067,7 +1067,7 @@ func (r *Reviewer) follow(appCtx, runCtx context.Context, run Run, unlock func()
 	r.removeContainer(bg, run.ID, run.Container)
 	var cleanupErr error
 	if r.cfg.Cleanup && run.Job.PR.CreatedWorktree { // reused worktrees may hold the user's own work
-		cleanupErr = worktree.Reset(bg, run.Job.PR.Worktree, run.Job.PR.HeadSHA)
+		cleanupErr = worktree.Reset(bg, run.Job.PR.Worktree, run.Job.PR.HeadSHA, r.cfg.Repos[run.Job.PR.Repo].MountPoints()...)
 	}
 	r.finish(run, status, code, errors.Join(why, cleanupErr), unlock)
 	if errors.Is(why, errReclaimed) {

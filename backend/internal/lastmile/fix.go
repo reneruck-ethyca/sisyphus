@@ -228,7 +228,7 @@ func (m *Manager) lostRun(ctx context.Context, h *Handoff) {
 	}
 	changed, ierr := ignoredSince(ctx, h.Worktree, r, h.Untracked, m.scratch(h.Repo))
 	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == r.Head {
-		if err := reset(ctx, *h, head); err != nil {
+		if err := m.reset(ctx, *h, head); err != nil {
 			slog.Warn("lastmile lost run: reset", "id", h.ID, "err", err)
 		}
 	}
@@ -407,7 +407,7 @@ func (m *Manager) cleanup(ctx context.Context, h Handoff, start string, before m
 		slog.Warn("lastmile cleanup: ignored files", "id", h.ID, "err", err)
 	}
 	if head, err := worktree.HeadSHA(ctx, h.Worktree); err == nil && head == start {
-		if err := reset(ctx, h, start); err != nil {
+		if err := m.reset(ctx, h, start); err != nil {
 			slog.Warn("lastmile cleanup: reset", "id", h.ID, "err", err)
 		}
 	}

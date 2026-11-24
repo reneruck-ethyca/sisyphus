@@ -222,7 +222,7 @@ func (m *Manager) restackRun(ctx context.Context, h Handoff, r restackSpec, fx *
 		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
 		_, _ = proc.Run(c, dir, "git", "rebase", "--abort")
-		if err := reset(c, h, pre); err != nil {
+		if err := m.reset(c, h, pre); err != nil {
 			slog.Warn("lastmile rebase rollback failed", "id", h.ID, "err", err)
 		}
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -276,5 +277,17 @@ func TestConfigIgnoresMaxMergeLines(t *testing.T) {
 	}
 	if _, err := Load(p); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFidesplusScratchAndMountPoints(t *testing.T) {
+	for _, f := range []string{"src/fides/service/pbac/__pycache__/engine.cpython-313.pyc", "clients/openapi.json",
+		"clients/shared/node_modules/.cache/jiti/x.mjs"} {
+		if !slices.ContainsFunc(fidesplus.Scratch, func(g string) bool { return GlobMatch(g, f) }) {
+			t.Errorf("%s not scratch", f)
+		}
+	}
+	if got := fidesplus.MountPoints(); slices.Contains(got, "/sisyphus/cache/uv") || !slices.Contains(got, "src/fides/bin") {
+		t.Errorf("MountPoints = %v", got)
 	}
 }

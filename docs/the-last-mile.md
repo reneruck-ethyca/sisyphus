@@ -177,7 +177,9 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   Where checks write build output into the tree and no env var moves it (turbo's `.turbo/`, Next's `.next/`,
   terraform's `.terraform/` and, in terraform-modules, the gitignored `.terraform.lock.hcl`), the repo lists it
   under `scratch`: ignored files under those globs that the run created or changed are removed after it without
-  failing it (a build makes them again).
+  failing it (a build makes them again). fidesplus lists `__pycache__`/`.pyc` (a subprocess can drop
+  `PYTHONDONTWRITEBYTECODE`), `node_modules/.cache` and `clients/openapi.json` (openapi-ts' input).
+  Putting the worktree back (`git clean`) spares the repo's in-tree `cache` dirs: they are volume mount points.
 - **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
   flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
   to the LaunchAgent) don't run agents in the same worktree at once. On top of that, a second
@@ -726,3 +728,8 @@ None right now.
   TLM sat in ci-running and never answered them. The usual reason to hand off an existing PR is to have TLM
   finish it, open threads included. Resolved, outdated and already-answered threads stay history, as do review
   bodies and conversation comments, which can't be told answered from unanswered.
+- **2026-11-24:** §5: fidesplus gained `scratch` globs and `git clean` spares cache mount points. fidesplus#7692
+  and #7693 went needs-human over `.pyc` files written despite `PYTHONDONTWRITEBYTECODE`, and over openapi-ts'
+  `clients/openapi.json` and jiti cache from the Check-OpenAPI-Types fix: all rebuildable output. #7692's reset also
+  failed because the branch stops tracking `src/fides/bin`, a cache volume mount point, so `git clean -d` tried to
+  remove it while Docker held it.
