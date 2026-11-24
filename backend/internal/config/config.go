@@ -315,7 +315,7 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 		// $HOME: a volume's missing parent dirs (~/.cache) would be created root-owned.
 		"/sisyphus/cache/uv", "/sisyphus/cache/npm"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
-	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/**", "changelog/**"}},
+	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/astralis/**", "changelog/**"}},
 	Notes: `To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for
 each port. The webserver needs the stack, runs migrations on startup, and no workers run: from /fidesplus,
 ` + "`fidesplus`" + ` (port 8080; not ` + "`fides webserver`" + `, which skips the plus routes); check it with
@@ -332,9 +332,9 @@ mock API, with no webserver needed. Use the real API only for pages the mocks do
 Which app to open, by changed path: clients/admin-ui is the admin UI; clients/astralis is Astralis dev:mock;
 clients/shared and clients/fidesui are the app that renders the changed component (admin-ui or Astralis), and
 Storybook for fidesui components; clients/privacy-center is the privacy center (` + "`npx next dev -p 3001`" + ` in it, not
-` + "`npm run dev`" + `, which writes an .env) against the real webserver; clients/fides-js needs
-` + "`npm run build:test`" + ` in it, then load it through the privacy center. When no stack runs (a frontend-only PR),
-use mock mode: the real API isn't available.`,
+` + "`npm run dev`" + `: it writes an .env.local with the host stack's API port, not the webserver's 8080, and leaves a stray file) against the real webserver; clients/fides-js needs
+` + "`npm run build:test`" + ` in it, then load it through the privacy center. When no stack runs (an Astralis-only PR), use
+dev:mock: the real API isn't available.`,
 }
 
 // fides-qa is fidesplus' QA automation; reviews cover cardea/, its Playwright suite. Nothing runs the

@@ -370,6 +370,9 @@ func TestStackSkippedForFilesMatchingSkip(t *testing.T) {
 			if (f.runs()[0].Stack == nil) != tc.wantOff {
 				t.Fatalf("run.Stack = %+v", f.runs()[0].Stack)
 			}
+			if b, _ := os.ReadFile(filepath.Join(f.runs()[0].Dir, "prompt.md")); tc.wantOff && strings.Contains(string(b), "already running") {
+				t.Fatalf("skipped-stack prompt mentions services:\n%s", b)
+			}
 			if tc.wantOff && (len(sh.get()) != 0 || f.rt.Started()[0].Network != "") {
 				t.Fatalf("a skipped stack was touched: %+v, network %q", sh.get(), f.rt.Started()[0].Network)
 			}
