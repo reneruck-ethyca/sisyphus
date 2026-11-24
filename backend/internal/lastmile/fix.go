@@ -295,10 +295,11 @@ func (m *Manager) redState(ctx context.Context, h *Handoff, s Snapshot) (state, 
 	if n := h.FixRounds[TriggerCI]; n >= h.MaxFixRounds {
 		return stop(fmt.Sprintf("CI still failing after %d fix rounds: %s", n, failedChecks(s.Checks)))
 	}
-	for _, f := range s.Failures {
-		if slices.Contains(h.FixedFailures, f.Fingerprint) {
-			return stop("same failure twice: " + f.Name)
-		}
+	// Only when every failure is a repeat: an aggregator job (X-Summary) logs the same
+	// "a job failed" whatever broke, so one repeat next to a new failure says nothing.
+	seen := func(f Failure) bool { return slices.Contains(h.FixedFailures, f.Fingerprint) }
+	if len(s.Failures) > 0 && !slices.ContainsFunc(s.Failures, func(f Failure) bool { return !seen(f) }) {
+		return stop("same failure twice: " + s.Failures[0].Name)
 	}
 	h.FixRounds = bump(h.FixRounds, TriggerCI)
 	m.launch(ctx, h, TriggerCI, func(ctx context.Context, snap Handoff) outcome { return m.fixCI(ctx, snap, s) })

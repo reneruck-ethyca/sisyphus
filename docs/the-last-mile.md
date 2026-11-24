@@ -211,8 +211,9 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   the reviewer, at least at first.
 - **Stopping rules:**
   - `--max-fix-rounds` per trigger type
-  - a failure seen twice with the same fingerprint (job plus error signature) → needs-human; a fingerprint
-    counts once a fix round on it has ended
+  - a red run whose failures were all seen before, by fingerprint (job plus error signature) → needs-human; a
+    fingerprint counts once a fix round on it has ended. A repeat next to a new failure doesn't stop it: an
+    aggregator job (X-Summary) logs the same thing whatever broke
   - a reviewer re-raising a thread TLM already "fixed" → needs-human
 - **Escalation:** a `tlm:needs-human` label, the `needs-human` notify event, and a dashboard banner.
 - **Dirty worktree panel:** while a handoff is needs-human, each tick checks its worktree with `git status
@@ -737,3 +738,6 @@ None right now.
   under in-tree cache mounts. fidesplus#7693's CI agent escalated a fixable Check-Changelog (it had to rename
   `0000-*.yaml` to the PR number and had no way to learn it), and reported `gpp_js_integration/compiled/__init__.py`
   as deleted: the cache volume over `compiled/` hid that tracked file inside the container.
+- **2026-11-24:** §5: "same failure twice" now needs every failure of the run to be a repeat. fidesplus#7692 stopped
+  on Check-OpenAPI-Types-Summary, whose log (and so fingerprint) is the same on every run, although
+  Check-OpenAPI-Types next to it was a new failure: a review round had changed a schema docstring.

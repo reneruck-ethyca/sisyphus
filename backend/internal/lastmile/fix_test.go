@@ -710,3 +710,20 @@ func TestFixPromptNamesThePR(t *testing.T) {
 		t.Fatalf("prompt lacks the PR number: %v\n%s", err, p)
 	}
 }
+
+func TestARepeatNextToANewFailureIsFixed(t *testing.T) {
+	t.Parallel()
+	edit := func(dir string) { os.WriteFile(filepath.Join(dir, "a.txt"), []byte(time.Now().String()), 0o644) }
+	tasks := &fakeTasks{result: okFix, edit: edit}
+	m, gh, id, _ := redFixture(t, tasks)
+	m.tickWait(t)
+	m.tick(context.Background())
+	// "unit" fails as before (like an X-Summary job, whose log never changes) next to a new failure.
+	gh.Logs[24] = "FAILED test_b - KeyError\n"
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, m.must(t, id).Worktree, "rev-parse", "HEAD"), Author: "me", BaseRef: "main",
+		Checks: []github.Check{failCheck("unit", "22"), failCheck("lint", "24")}}
+	m.tickWait(t)
+	if h := m.must(t, id); h.State == StateNeedsHuman || h.FixRounds["ci"] != 2 {
+		t.Fatalf("handoff = %s %q, rounds %v", h.State, h.Reason, h.FixRounds)
+	}
+}
