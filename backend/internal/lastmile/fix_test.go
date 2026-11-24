@@ -703,3 +703,10 @@ func TestIgnoredChangesScratch(t *testing.T) {
 		t.Errorf("changed non-scratch file removed: %v", err)
 	}
 }
+
+func TestFixPromptNamesThePR(t *testing.T) {
+	p, err := render(fixPrompt, fixPromptData{PR: 7693, Branch: "b", Base: "main"})
+	if err != nil || !strings.Contains(p, "PR: #7693") {
+		t.Fatalf("prompt lacks the PR number: %v\n%s", err, p)
+	}
+}

@@ -12,7 +12,8 @@ var fixPrompt = template.Must(template.New("fix").Parse(`You are fixing a failin
 ## The pull request
 
 Title: {{.Title}}
-Branch: {{.Branch}} (base: {{.Base}})
+{{if .PR}}PR: #{{.PR}} (use it where the repo wants the PR number, e.g. a changelog entry)
+{{end}}Branch: {{.Branch}} (base: {{.Base}})
 
 {{.Body}}
 
@@ -56,6 +57,7 @@ Branch: {{.Branch}} (base: {{.Base}})
 `))
 
 type fixPromptData struct {
+	PR                        int
 	Title, Body, Branch, Base string
 	Failures                  []Failure
 	Snapshot                  string
@@ -70,7 +72,8 @@ var reviewPrompt = template.Must(template.New("review").Parse(`You are answering
 ## The pull request
 
 Title: {{.Title}}
-Branch: {{.Branch}} (base: {{.Base}})
+{{if .PR}}PR: #{{.PR}} (use it where the repo wants the PR number, e.g. a changelog entry)
+{{end}}Branch: {{.Branch}} (base: {{.Base}})
 
 Current description:
 
@@ -120,6 +123,7 @@ The same JSON is at /sisyphus/context/feedback.json. Snapshot of the PR (JSON; /
 `))
 
 type reviewPromptData struct {
+	PR                        int
 	Title, Body, Branch, Base string
 	Items, Snapshot           string
 	Diff                      string
@@ -133,7 +137,8 @@ var conflictPrompt = template.Must(template.New("conflict").Parse(`You are resol
 ## The pull request
 
 Title: {{.Title}}
-Branch: {{.Branch}}, being rebased onto {{.Onto}}
+{{if .PR}}PR: #{{.PR}} (use it where the repo wants the PR number, e.g. a changelog entry)
+{{end}}Branch: {{.Branch}}, being rebased onto {{.Onto}}
 
 The rebase stopped while replaying this commit of the branch:
 
@@ -170,6 +175,7 @@ The rebase stopped while replaying this commit of the branch:
 `))
 
 type conflictPromptData struct {
+	PR                  int
 	Title, Branch, Onto string
 	Replayed, Files     string
 	ConflictDiff        string
@@ -184,7 +190,8 @@ var wipPrompt = template.Must(template.New("wip").Parse(`You are finishing work 
 ## The pull request
 
 Title: {{.Title}}
-Branch: {{.Branch}} (base: {{.Base}})
+{{if .PR}}PR: #{{.PR}} (use it where the repo wants the PR number, e.g. a changelog entry)
+{{end}}Branch: {{.Branch}} (base: {{.Base}})
 
 {{.Body}}
 
@@ -222,6 +229,7 @@ Someone left these changes uncommitted. They are now the last commit on the bran
 `))
 
 type wipPromptData struct {
+	PR                        int
 	Title, Body, Branch, Base string
 	WIP, Task                 string
 	Diff                      string
@@ -235,7 +243,8 @@ var queuePrompt = template.Must(template.New("queue").Parse(`You are finding out
 ## The pull request
 
 Title: {{.Title}}
-Branch: {{.Branch}} (base: {{.Base}})
+{{if .PR}}PR: #{{.PR}} (use it where the repo wants the PR number, e.g. a changelog entry)
+{{end}}Branch: {{.Branch}} (base: {{.Base}})
 
 {{.Body}}
 
@@ -269,6 +278,7 @@ The PR has no conflict with the base and no failed merge-queue check. Snapshot o
 `))
 
 type queuePromptData struct {
+	PR                        int
 	Title, Body, Branch, Base string
 	Removal, Snapshot         string
 	Diff                      string

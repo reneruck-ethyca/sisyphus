@@ -500,7 +500,7 @@ func (m *Manager) fixCI(ctx context.Context, h Handoff, s Snapshot) outcome {
 	failJSON, _ := json.MarshalIndent(s.Failures, "", "  ")
 	reason := m.runAgent(ctx, h, agentJob{kind: "fix agent", head: s.Head, base: s.Base,
 		build: func(diff string, truncated bool) (string, map[string]string, error) {
-			prompt, err := render(fixPrompt, fixPromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base, Failures: s.Failures,
+			prompt, err := render(fixPrompt, fixPromptData{PR: h.PRNumber, Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base, Failures: s.Failures,
 				Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
 			return prompt, map[string]string{"snapshot.json": string(snapJSON), "failures.json": string(failJSON)}, err
 		}},
@@ -557,7 +557,7 @@ func (m *Manager) queueAgent(ctx context.Context, h Handoff, s Snapshot, removal
 	snapJSON, _ := json.MarshalIndent(s, "", "  ")
 	reason := m.runAgent(ctx, h, agentJob{kind: "queue agent", head: s.Head, base: s.Base,
 		build: func(diff string, truncated bool) (string, map[string]string, error) {
-			prompt, err := render(queuePrompt, queuePromptData{Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base,
+			prompt, err := render(queuePrompt, queuePromptData{PR: h.PRNumber, Title: h.Title, Body: h.Body, Branch: h.Branch, Base: s.Base,
 				Removal: removal, Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
 			return prompt, map[string]string{"snapshot.json": string(snapJSON)}, err
 		}},

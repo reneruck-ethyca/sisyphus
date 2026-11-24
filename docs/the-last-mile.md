@@ -733,3 +733,7 @@ None right now.
   `clients/openapi.json` and jiti cache from the Check-OpenAPI-Types fix: all rebuildable output. #7692's reset also
   failed because the branch stops tracking `src/fides/bin`, a cache volume mount point, so `git clean -d` tried to
   remove it while Docker held it.
+- **2026-11-24:** §5: agent prompts now name the PR number, and container setup puts HEAD's tracked files back
+  under in-tree cache mounts. fidesplus#7693's CI agent escalated a fixable Check-Changelog (it had to rename
+  `0000-*.yaml` to the PR number and had no way to learn it), and reported `gpp_js_integration/compiled/__init__.py`
+  as deleted: the cache volume over `compiled/` hid that tracked file inside the container.

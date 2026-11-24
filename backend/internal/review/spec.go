@@ -299,6 +299,11 @@ func setupScript(cfg config.Review, repo config.RepoReview, owned []string) stri
 	for _, d := range owned {
 		fmt.Fprintf(&sb, "sudo -n chown \"$(id -u):$(id -g)\" %s 2>/dev/null || true\n", shellQuote(d))
 	}
+	// A cache volume over a dir with tracked files hides them (or shows another
+	// branch's): put HEAD's back, so the agent doesn't see them deleted or changed.
+	for _, d := range repo.MountPoints() {
+		fmt.Fprintf(&sb, "git ls-files -z --deleted --modified -- %s | while IFS= read -r -d '' f; do git show \"HEAD:$f\" > \"$f\"; done\n", shellQuote(d))
+	}
 	// Each step is announced and timed, so the run log shows where it is, and runs
 	// in its own shell under setup_step_timeout, so a hung install can't hold the run.
 	limit := int(cfg.StepTimeout.Seconds())
