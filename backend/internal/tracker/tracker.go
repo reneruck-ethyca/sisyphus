@@ -271,7 +271,7 @@ func (t *Tracker) classify(ctx context.Context, tr *Tracked) {
 		slog.Info("classified PR", "pr", tr.Key(), "design_review", d)
 		tr.DesignReview = d
 	}
-	tr.ClassifiedSHA = tr.HeadSHA
+	tr.Files, tr.ClassifiedSHA = files, tr.HeadSHA
 }
 
 // Refresh re-reads one PR from GitHub and syncs its worktree to a new head, as a

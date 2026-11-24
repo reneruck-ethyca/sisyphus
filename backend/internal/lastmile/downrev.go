@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/github"
 	"github.com/reneruck/sisyphus/internal/proc"
 )
@@ -33,7 +34,7 @@ func bumpDownrev(ctx context.Context, dir, onto string, migrationGlobs []string)
 	}
 	added := map[string][]string{} // by directory
 	for _, f := range strings.Split(out, "\x00") {
-		if strings.HasSuffix(f, ".py") && slices.ContainsFunc(migrationGlobs, func(g string) bool { return globMatch(g, f) }) {
+		if strings.HasSuffix(f, ".py") && slices.ContainsFunc(migrationGlobs, func(g string) bool { return config.GlobMatch(g, f) }) {
 			added[path.Dir(f)] = append(added[path.Dir(f)], f)
 		}
 	}

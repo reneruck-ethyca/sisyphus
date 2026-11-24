@@ -341,3 +341,38 @@ func TestResetReviewsKeepsStack(t *testing.T) {
 	f.r.Ensure([]tracker.Tracked{tr})
 	waitFor(t, "a fresh review", func() bool { return len(f.rt.Started()) == 2 })
 }
+
+func TestStackSkippedForFilesMatchingSkip(t *testing.T) {
+	for name, tc := range map[string]struct {
+		files   []string
+		wantUp  int
+		wantOff bool
+	}{
+		"all match":       {[]string{"clients/astralis/a.ts", "changelog/1-x.yaml"}, 0, true},
+		"one doesn't":     {[]string{"clients/astralis/a.ts", "src/fidesplus/b.py"}, 1, false},
+		"list is unknown": {nil, 1, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, sh := stackFixture(t, func(c *config.Review) {
+				withStack("", config.StackFromWorktree)(c)
+				c.Repos["ethyca/a"].Stack.Skip = []string{"clients/**", "changelog/**"}
+			})
+			f.tr.Files = tc.files
+			f.start(t)
+			f.r.Tracked(f.tr)
+			waitFor(t, "container start", f.started(1))
+			f.succeed(f.containers()[0].ID, "")
+			waitFor(t, "run to finish", f.lastStatus(Succeeded))
+
+			if n := len(sh.ups()); n != tc.wantUp {
+				t.Fatalf("ups = %d, want %d", n, tc.wantUp)
+			}
+			if (f.runs()[0].Stack == nil) != tc.wantOff {
+				t.Fatalf("run.Stack = %+v", f.runs()[0].Stack)
+			}
+			if tc.wantOff && (len(sh.get()) != 0 || f.rt.Started()[0].Network != "") {
+				t.Fatalf("a skipped stack was touched: %+v, network %q", sh.get(), f.rt.Started()[0].Network)
+			}
+		})
+	}
+}

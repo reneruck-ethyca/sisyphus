@@ -33,6 +33,7 @@ type Tracked struct {
 	// A design review is tracked, but reviewed only when the user asks (designReview).
 	DesignReview  bool          `json:"design_review,omitempty"`
 	ClassifiedSHA string        `json:"classified_sha,omitempty"` // head DesignReview was decided for
+	Files         []string      `json:"files,omitempty"`          // what the PR changed at ClassifiedSHA; empty = unknown
 	Design        *DesignState  `json:"design,omitempty"`         // a design review's state; nil for code reviews
 	Agent         *config.Agent `json:"agent,omitempty"`          // nil inherits review.agent
 	ByHand        bool          `json:"by_hand,omitempty"`        // tracked from the API, not because it asked for my review

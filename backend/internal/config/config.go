@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -266,10 +267,11 @@ type RepoReview struct {
 // Stack is the local services (DB, cache) a review needs. Up runs on the host
 // before the review container starts; the container joins <project>_default.
 type Stack struct {
-	From    string `json:"from"`     // "worktree" | "safe"; "" = review.stack_from
-	SafeDir string `json:"safe_dir"` // where "safe" runs Up; "" = the repo's clone under repos_root
-	Up      string `json:"up"`       // shell; gets WORKTREE_ID=pr-<n>, and PORT_OFFSET when retrying a port clash
-	Project string `json:"project"`  // compose project Up creates; "{id}" = WORKTREE_ID
+	From    string   `json:"from"`     // "worktree" | "safe"; "" = review.stack_from
+	SafeDir string   `json:"safe_dir"` // where "safe" runs Up; "" = the repo's clone under repos_root
+	Up      string   `json:"up"`       // shell; gets WORKTREE_ID=pr-<n>, and PORT_OFFSET when retrying a port clash
+	Project string   `json:"project"`  // compose project Up creates; "{id}" = WORKTREE_ID
+	Skip    []string `json:"skip"`     // globs: a PR whose changed files all match one runs without the stack
 }
 
 // Related is another repo checked out read-only next to the review: the open PR
@@ -313,7 +315,7 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 		// $HOME: a volume's missing parent dirs (~/.cache) would be created root-owned.
 		"/sisyphus/cache/uv", "/sisyphus/cache/npm"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
-	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}"},
+	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/**", "changelog/**"}},
 	Notes: `To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for
 each port. The webserver needs the stack, runs migrations on startup, and no workers run: from /fidesplus,
 ` + "`fidesplus`" + ` (port 8080; not ` + "`fides webserver`" + `, which skips the plus routes); check it with
@@ -325,7 +327,14 @@ Log in as the root user, with the local-dev credentials under [security] in .fid
 restart the webserver with FIDES__SECURITY__ALLOW_USERNAME_PASSWORD_LOGIN=true. Pages that MSW fully mocks can skip the API: set NEXT_PUBLIC_MOCK_API=1.
 
 Astralis (clients/astralis) is a separate Next.js app: ` + "`npm run dev:mock`" + ` there serves it on port 3002 against its
-mock API, with no webserver needed. Use the real API only for pages the mocks don't cover.`,
+mock API, with no webserver needed. Use the real API only for pages the mocks don't cover.
+
+Which app to open, by changed path: clients/admin-ui is the admin UI; clients/astralis is Astralis dev:mock;
+clients/shared and clients/fidesui are the app that renders the changed component (admin-ui or Astralis), and
+Storybook for fidesui components; clients/privacy-center is the privacy center (` + "`npx next dev -p 3001`" + ` in it, not
+` + "`npm run dev`" + `, which writes an .env) against the real webserver; clients/fides-js needs
+` + "`npm run build:test`" + ` in it, then load it through the privacy center. When no stack runs (a frontend-only PR),
+use mock mode: the real API isn't available.`,
 }
 
 // fides-qa is fidesplus' QA automation; reviews cover cardea/, its Playwright suite. Nothing runs the
@@ -627,4 +636,41 @@ func ExpandHome(p string) string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, p[1:])
+}
+
+var (
+	globsMu sync.Mutex // handoffs' write paths run concurrently
+	globs   = map[string]*regexp.Regexp{}
+)
+
+// GlobMatch matches a slash-separated path against a glob: * and ? stay within
+// a segment, ** crosses them, and a leading **/ also matches no directory at all.
+func GlobMatch(glob, p string) bool {
+	globsMu.Lock()
+	defer globsMu.Unlock()
+	re, ok := globs[glob]
+	if !ok {
+		var sb strings.Builder
+		sb.WriteString("^")
+		for i := 0; i < len(glob); i++ {
+			switch {
+			case strings.HasPrefix(glob[i:], "**/"):
+				sb.WriteString("(?:.*/)?")
+				i += 2
+			case strings.HasPrefix(glob[i:], "**"):
+				sb.WriteString(".*")
+				i++
+			case glob[i] == '*':
+				sb.WriteString("[^/]*")
+			case glob[i] == '?':
+				sb.WriteString("[^/]")
+			default:
+				sb.WriteString(regexp.QuoteMeta(string(glob[i])))
+			}
+		}
+		sb.WriteString("$")
+		re = regexp.MustCompile(sb.String())
+		globs[glob] = re
+	}
+	return re.MatchString(p)
 }

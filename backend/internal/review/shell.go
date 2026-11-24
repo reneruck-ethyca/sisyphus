@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,9 @@ func (r *Reviewer) prepare(ctx context.Context, job Job, runID, beforeAgent stri
 		}
 	}
 	run = Run{ID: runID, Job: job, Dir: filepath.Join(r.dir, "runs", prPath(tr.Key()), runID)}
-	if st := repo.Stack; st != nil {
+	if st := repo.Stack; st != nil && skipsStack(st, tr.Files) {
+		slog.Info("stack skipped: frontend-only change", "pr", tr.Key())
+	} else if st != nil {
 		sr, err := r.startStack(ctx, run, st)
 		stop = func() { r.stopStack(sr.Project) }
 		if err != nil {

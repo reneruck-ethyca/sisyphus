@@ -9,13 +9,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/reneruck/sisyphus/internal/config"
 	"github.com/reneruck/sisyphus/internal/proc"
 	"github.com/reneruck/sisyphus/internal/worktree"
 )
@@ -29,52 +28,15 @@ var denied = []string{
 	".husky/**", ".pre-commit-config.yaml", ".githooks/**", "lefthook.yml", ".lefthook.yml",
 }
 
-var (
-	globsMu sync.Mutex // handoffs' write paths run concurrently
-	globs   = map[string]*regexp.Regexp{}
-)
-
-// globMatch matches a slash-separated path against a glob: * and ? stay within
-// a segment, ** crosses them, and a leading **/ also matches no directory at all.
-func globMatch(glob, p string) bool {
-	globsMu.Lock()
-	defer globsMu.Unlock()
-	re, ok := globs[glob]
-	if !ok {
-		var sb strings.Builder
-		sb.WriteString("^")
-		for i := 0; i < len(glob); i++ {
-			switch {
-			case strings.HasPrefix(glob[i:], "**/"):
-				sb.WriteString("(?:.*/)?")
-				i += 2
-			case strings.HasPrefix(glob[i:], "**"):
-				sb.WriteString(".*")
-				i++
-			case glob[i] == '*':
-				sb.WriteString("[^/]*")
-			case glob[i] == '?':
-				sb.WriteString("[^/]")
-			default:
-				sb.WriteString(regexp.QuoteMeta(string(glob[i])))
-			}
-		}
-		sb.WriteString("$")
-		re = regexp.MustCompile(sb.String())
-		globs[glob] = re
-	}
-	return re.MatchString(p)
-}
-
 func (m *Manager) protected(p string) bool {
 	p = path.Clean(filepath.ToSlash(p))
 	for _, g := range m.cfg.LastMile.AllowPaths {
-		if globMatch(g, p) {
+		if config.GlobMatch(g, p) {
 			return false
 		}
 	}
 	for _, g := range denied {
-		if globMatch(g, p) || globMatch(g, p+"/") { // a directory entry under a protected path
+		if config.GlobMatch(g, p) || config.GlobMatch(g, p+"/") { // a directory entry under a protected path
 			return true
 		}
 	}
@@ -245,7 +207,7 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp, sc
 
 // inScratch says f is under one of a repo's scratch globs.
 func inScratch(scratch []string, f string) bool {
-	return slices.ContainsFunc(scratch, func(g string) bool { return globMatch(g, f) })
+	return slices.ContainsFunc(scratch, func(g string) bool { return config.GlobMatch(g, f) })
 }
 
 // scratch is the repo's scratch globs (config.RepoReview.Scratch).

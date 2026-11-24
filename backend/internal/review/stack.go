@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,14 @@ func shell(ctx context.Context, dir string, env []string, script string, out io.
 // stackID is the WORKTREE_ID a PR's stack runs under: the same in both stack
 // modes, and free of branch names (which the stack would cut to 20 chars).
 func stackID(tr tracker.Tracked) string { return "pr-" + strconv.Itoa(tr.Number) }
+
+// skipsStack says every file the PR changes matches one of st.Skip. An unknown
+// (empty) file list never skips.
+func skipsStack(st *config.Stack, files []string) bool {
+	return len(files) > 0 && !slices.ContainsFunc(files, func(f string) bool {
+		return !slices.ContainsFunc(st.Skip, func(g string) bool { return config.GlobMatch(g, f) })
+	})
+}
 
 // startStack runs the repo's stack up for the PR, from the worktree or the safe
 // checkout, with its output in the run's stack.log. On a host port clash it

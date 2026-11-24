@@ -41,7 +41,7 @@ func (r *Reviewer) spec(ctx context.Context, run Run, beforeAgent string) (conta
 	}
 	prompt, err := renderPrompt(cmp.Or(repo.PromptFile, r.cfg.PromptFile),
 		PromptData{PR: tr, Reason: run.Job.Reason, PreviousHead: r.previousHead(tr.Key()), Workdir: workdir, Diff: diffCommand(run.Job),
-			Related: related, Notes: repo.Notes, Stack: repo.Stack != nil})
+			Related: related, Notes: repo.Notes, Stack: run.Stack != nil})
 	if err != nil {
 		return container.Spec{}, fmt.Errorf("prompt: %w", err)
 	}

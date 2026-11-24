@@ -52,7 +52,7 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 		sig.FixRounds[k] = v
 	}
 	for _, f := range s.Files {
-		if slices.ContainsFunc(cfg.RiskyPaths, func(g string) bool { return globMatch(g, f) }) {
+		if slices.ContainsFunc(cfg.RiskyPaths, func(g string) bool { return config.GlobMatch(g, f) }) {
 			sig.RiskyPaths = append(sig.RiskyPaths, f)
 		}
 	}
@@ -95,7 +95,7 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 	case s.MergeState == "DIRTY":
 		b = append(b, "conflicts with base")
 	case (s.Behind > 0 || s.MergeState == "BEHIND") && slices.ContainsFunc(s.Files, func(f string) bool {
-		return slices.ContainsFunc(cfg.MigrationPaths, func(g string) bool { return globMatch(g, f) })
+		return slices.ContainsFunc(cfg.MigrationPaths, func(g string) bool { return config.GlobMatch(g, f) })
 	}):
 		b = append(b, "base not up to date (PR has migrations)")
 	}

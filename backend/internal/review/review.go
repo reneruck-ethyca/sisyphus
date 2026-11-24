@@ -809,7 +809,9 @@ func (r *Reviewer) execute(appCtx, runCtx context.Context, run Run) {
 		fail(fmt.Errorf("worktree is at %.12s, not the announced head %.12s", head, tr.HeadSHA))
 		return
 	}
-	if st := r.cfg.Repos[tr.Repo].Stack; st != nil {
+	if st := r.cfg.Repos[tr.Repo].Stack; st != nil && skipsStack(st, tr.Files) {
+		slog.Info("stack skipped: frontend-only change", "pr", id)
+	} else if st != nil {
 		sr, err := r.startStack(runCtx, run, st)
 		run.Stack = sr // finish stops it, whatever happens from here
 		r.record(id, run.ID, func(x *Run) { x.Stack = sr })
