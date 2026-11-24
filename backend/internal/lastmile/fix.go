@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -274,8 +272,7 @@ func ignoredSince(ctx context.Context, dir string, r RunMark, extra, scratch []s
 		setup := !r.SetupDone.IsZero() && st.ctime <= r.SetupDone.UnixNano() && slices.Contains(strings.Split(f, "/"), "node_modules")
 		switch {
 		case st.ctime <= since || setup:
-		case inScratch(scratch, f):
-			_ = os.Remove(filepath.Join(dir, f))
+		case inScratch(scratch, f) && removeIn(dir, f):
 		default:
 			changed = append(changed, f)
 		}

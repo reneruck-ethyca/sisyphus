@@ -3,7 +3,9 @@ package lastmile
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -194,8 +196,8 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp, sc
 			continue
 		}
 		scratched := inScratch(scratch, f)
-		if !ok || scratched {
-			_ = os.Remove(filepath.Join(dir, f))
+		if (!ok || scratched) && !removeIn(dir, f) {
+			scratched = false
 		}
 		if !scratched {
 			changed = append(changed, f)
@@ -203,6 +205,18 @@ func ignoredChanges(ctx context.Context, dir string, before map[string]stamp, sc
 	}
 	slices.Sort(changed)
 	return changed, nil
+}
+
+// removeIn removes f inside dir without following a symlink out of it (an agent
+// can swap a parent dir for one). False when f is still there, so a human looks.
+func removeIn(dir, f string) bool {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	err = root.Remove(f)
+	return err == nil || errors.Is(err, fs.ErrNotExist)
 }
 
 // inScratch says f is under one of a repo's scratch globs.

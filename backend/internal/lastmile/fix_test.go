@@ -645,6 +645,37 @@ func TestIgnoredSinceScratch(t *testing.T) {
 	}
 }
 
+// A scratch path whose parent the run swapped for a symlink out of the worktree
+// isn't removed through it: the file outside stays, and the path is named.
+func TestScratchRemovalStaysInWorktree(t *testing.T) {
+	t.Parallel()
+	_, clone := gittest.Setup(t)
+	os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("dist/\n"), 0o644)
+	os.MkdirAll(filepath.Join(clone, "dist"), 0o755)
+	os.WriteFile(filepath.Join(clone, "dist", "x.js"), []byte("x"), 0o644)
+	before, err := ignoredFiles(context.Background(), clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "x.js")
+	os.WriteFile(victim, []byte("keep me"), 0o644)
+	os.RemoveAll(filepath.Join(clone, "dist"))
+	os.Symlink(outside, filepath.Join(clone, "dist"))
+
+	changed, err := ignoredChanges(context.Background(), clone, before, []string{"**/dist/**"})
+	if err != nil || !slices.Equal(changed, []string{"dist/x.js"}) {
+		t.Errorf("ignoredChanges = %v, %v", changed, err)
+	}
+	changed, err = ignoredSince(context.Background(), clone, RunMark{Started: time.Now().Add(-time.Minute)}, []string{"dist/x.js"}, []string{"**/dist/**"})
+	if err != nil || !slices.Equal(changed, []string{"dist/x.js"}) {
+		t.Errorf("ignoredSince = %v, %v", changed, err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Errorf("file outside the worktree removed: %v", err)
+	}
+}
+
 // A scratch file that was there before the run and changed is removed, not named
 // (a host build left it, a check rewrote it); a changed non-scratch file is named and kept.
 func TestIgnoredChangesScratch(t *testing.T) {
