@@ -86,7 +86,7 @@ func (m *Manager) reviewAgent(ctx context.Context, h Handoff, s Snapshot, items 
 	snapJSON, _ := json.MarshalIndent(s, "", "  ")
 	reason := m.runAgent(ctx, h, agentJob{kind: "review agent", head: s.Head, base: s.Base,
 		build: func(diff string, truncated bool) (string, map[string]string, error) {
-			prompt, err := render(reviewPrompt, reviewPromptData{PR: h.PRNumber, Title: h.Title, Body: body, Branch: h.Branch, Base: s.Base,
+			prompt, err := render(reviewPrompt, reviewPromptData{PR: h.PRNumber, Notes: m.cfg.Review.Repos[h.Repo].Notes, Title: h.Title, Body: body, Branch: h.Branch, Base: s.Base,
 				Items: string(itemsJSON), Snapshot: string(snapJSON), Diff: diff, DiffTruncated: truncated})
 			return prompt, map[string]string{"snapshot.json": string(snapJSON), "feedback.json": string(itemsJSON)}, err
 		}},

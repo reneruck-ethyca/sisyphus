@@ -357,7 +357,7 @@ func (m *Manager) resolveStop(ctx context.Context, h Handoff, r restackSpec, rb,
 	ctxFiles["conflict.json"] = string(snapJSON)
 	return m.runAgent(ctx, h, agentJob{kind: "conflict agent", held: true, base: r.onto,
 		build: func(patch string, truncated bool) (string, map[string]string, error) {
-			prompt, err := render(conflictPrompt, conflictPromptData{PR: h.PRNumber, Title: h.Title, Branch: h.Branch, Onto: "origin/" + r.onto, Replayed: replayed,
+			prompt, err := render(conflictPrompt, conflictPromptData{PR: h.PRNumber, Notes: m.cfg.Review.Repos[h.Repo].Notes, Title: h.Title, Branch: h.Branch, Onto: "origin/" + r.onto, Replayed: replayed,
 				Files: list.String(), ConflictDiff: diff, Diff: patch, DiffTruncated: truncated})
 			return prompt, ctxFiles, err
 		}},

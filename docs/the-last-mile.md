@@ -741,3 +741,6 @@ None right now.
 - **2026-11-24:** §5: "same failure twice" now needs every failure of the run to be a repeat. fidesplus#7692 stopped
   on Check-OpenAPI-Types-Summary, whose log (and so fingerprint) is the same on every run, although
   Check-OpenAPI-Types next to it was a new failure: a review round had changed a schema docstring.
+- **2026-11-24:** §5: TLM agents (fix, review, conflict, WIP, queue) now get the repo's `review.repos` notes, as the
+  reviewer does, and fidesplus' notes say to run `./scripts/generate_types.sh` after a schema change. A review round on
+  fidesplus#7692 changed a schema docstring without regenerating the types and cost a red CI round.

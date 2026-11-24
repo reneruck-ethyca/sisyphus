@@ -36,7 +36,11 @@ Title: {{.Title}}
 {{.Diff}}
 ` + "```" + `
 
-## Rules
+{{with .Notes}}## About this repo
+
+{{.}}
+
+{{end}}## Rules
 
 - Edit files in the working directory only. Do not run git. Do not run gh or call GitHub. Do not commit, push or stage.
 - Fix the cause of the failure with the smallest change that does it. Do not touch CI workflows, migrations or lockfiles.
@@ -57,6 +61,7 @@ Title: {{.Title}}
 `))
 
 type fixPromptData struct {
+	Notes                     string // the repo's review.repos notes
 	PR                        int
 	Title, Body, Branch, Base string
 	Failures                  []Failure
@@ -99,7 +104,11 @@ The same JSON is at /sisyphus/context/feedback.json. Snapshot of the PR (JSON; /
 {{.Diff}}
 ` + "```" + `
 
-## Rules
+{{with .Notes}}## About this repo
+
+{{.}}
+
+{{end}}## Rules
 
 - Edit files in the working directory only. Do not run git. Do not run gh or call GitHub. Do not commit, push or stage.
 - Be critical. Judge each item on its merits. A nitpick, a restatement of what the code already does, a style preference or a suggestion you disagree with on weak grounds gets "skip" and a reason: no reply is posted for it. Only a real problem you fixed, or a real disagreement worth stating, gets a reply. Do not thank people, do not acknowledge for the sake of it.
@@ -123,6 +132,7 @@ The same JSON is at /sisyphus/context/feedback.json. Snapshot of the PR (JSON; /
 `))
 
 type reviewPromptData struct {
+	Notes                     string // the repo's review.repos notes
 	PR                        int
 	Title, Body, Branch, Base string
 	Items, Snapshot           string
@@ -159,7 +169,11 @@ The rebase stopped while replaying this commit of the branch:
 {{.Diff}}
 ` + "```" + `
 
-## Rules
+{{with .Notes}}## About this repo
+
+{{.}}
+
+{{end}}## Rules
 
 - Edit the files in conflict, and only those, so each keeps both sides' intent: the base's changes and the replayed commit's. Leave no conflict markers (<<<<<<<, =======, >>>>>>>) in any of them.
 - Do not run git. Do not run gh or call GitHub. Do not commit, stage or continue the rebase: the host does that.
@@ -175,6 +189,7 @@ The rebase stopped while replaying this commit of the branch:
 `))
 
 type conflictPromptData struct {
+	Notes               string // the repo's review.repos notes
 	PR                  int
 	Title, Branch, Onto string
 	Replayed, Files     string
@@ -213,7 +228,11 @@ Someone left these changes uncommitted. They are now the last commit on the bran
 
 {{.Task}}
 
-## Rules
+{{with .Notes}}## About this repo
+
+{{.}}
+
+{{end}}## Rules
 
 - Edit files in the working directory only. Do not run git. Do not run gh or call GitHub. Do not commit, push or stage.
 - Build on the work in progress; don't undo it unless the task says so. Do not touch CI workflows, migrations or lockfiles.
@@ -229,6 +248,7 @@ Someone left these changes uncommitted. They are now the last commit on the bran
 `))
 
 type wipPromptData struct {
+	Notes                     string // the repo's review.repos notes
 	PR                        int
 	Title, Body, Branch, Base string
 	WIP, Task                 string
@@ -264,7 +284,11 @@ The PR has no conflict with the base and no failed merge-queue check. Snapshot o
 {{.Diff}}
 ` + "```" + `
 
-## Rules
+{{with .Notes}}## About this repo
+
+{{.}}
+
+{{end}}## Rules
 
 - If the removal looks transient (a timeout, the queue being reset, a cancelled run), change nothing and answer "requeue".
 - If something in the change caused it and you can fix it, edit files in the working directory and answer "requeue". Do not run git. Do not run gh or call GitHub. Do not commit, push or stage. Do not touch CI workflows, migrations or lockfiles.
@@ -278,6 +302,7 @@ The PR has no conflict with the base and no failed merge-queue check. Snapshot o
 `))
 
 type queuePromptData struct {
+	Notes                     string // the repo's review.repos notes
 	PR                        int
 	Title, Body, Branch, Base string
 	Removal, Snapshot         string

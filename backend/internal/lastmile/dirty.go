@@ -346,7 +346,7 @@ func (m *Manager) dirtyAgent(ctx context.Context, h Handoff, wip, task string) o
 		build: func(diff string, truncated bool) (string, map[string]string, error) {
 			show, _ := proc.Run(ctx, h.Worktree, "git", "show", "--format=", wip)
 			show = clip(show, maxDiffPrompt, "\n… cut short")
-			prompt, err := render(wipPrompt, wipPromptData{PR: h.PRNumber, Title: h.Title, Body: h.Body, Branch: h.Branch, Base: h.Base,
+			prompt, err := render(wipPrompt, wipPromptData{PR: h.PRNumber, Notes: m.cfg.Review.Repos[h.Repo].Notes, Title: h.Title, Body: h.Body, Branch: h.Branch, Base: h.Base,
 				WIP: show, Task: task, Diff: diff, DiffTruncated: truncated})
 			return prompt, nil, err
 		}},

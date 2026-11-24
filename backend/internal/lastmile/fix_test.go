@@ -704,9 +704,9 @@ func TestIgnoredChangesScratch(t *testing.T) {
 	}
 }
 
-func TestFixPromptNamesThePR(t *testing.T) {
-	p, err := render(fixPrompt, fixPromptData{PR: 7693, Branch: "b", Base: "main"})
-	if err != nil || !strings.Contains(p, "PR: #7693") {
+func TestFixPromptNamesThePRAndTheRepoNotes(t *testing.T) {
+	p, err := render(fixPrompt, fixPromptData{PR: 7693, Notes: "run generate_types.sh", Branch: "b", Base: "main"})
+	if err != nil || !strings.Contains(p, "PR: #7693") || !strings.Contains(p, "## About this repo\n\nrun generate_types.sh") {
 		t.Fatalf("prompt lacks the PR number: %v\n%s", err, p)
 	}
 }

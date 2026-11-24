@@ -326,7 +326,11 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 	Scratch: []string{"**/__pycache__/**", "**/*.pyc", "**/node_modules/.cache/**", "clients/openapi.json"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/astralis/**", "changelog/**"}},
-	Notes: `To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for
+	Notes: `Generated API types: the TypeScript types under clients/ are generated from the API's OpenAPI schema, so a
+change to a Pydantic schema or an endpoint (fields, types, docstrings, descriptions) changes them. After one, run
+` + "`./scripts/generate_types.sh`" + ` from /fidesplus and keep what it changes; CI's Check-OpenAPI-Types fails on any drift.
+
+To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for
 each port. The webserver needs the stack, runs migrations on startup, and no workers run: from /fidesplus,
 ` + "`fidesplus`" + ` (port 8080; not ` + "`fides webserver`" + `, which skips the plus routes); check it with
 ` + "`curl localhost:8080/api/v1/plus/health`" + `. Then, in clients/admin-ui:
