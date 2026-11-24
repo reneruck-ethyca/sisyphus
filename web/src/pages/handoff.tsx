@@ -169,9 +169,10 @@ function DirtyPanel({ v, d }: { v: HandoffView; d: Dirty }) {
     {!open && <div class="dirty-banner"><span>⏸ {plural(d.files.length, "uncommitted file")} block{d.files.length === 1 && "s"} TLM</span>
       <button class="btn quiet small" type="button" onClick={() => setOpen(true)}>Review</button><DirtyLinks v={v} /></div>}
     <div class="card dirty" hidden={!open}>
-      <div class="dirty-h"><Chip tone="bad">needs-human</Chip><b>Uncommitted changes block TLM</b>{v.worktree && <code class="muted">{v.worktree}</code>}</div>
+      <div class="dirty-h"><b>Uncommitted changes block TLM</b>{v.worktree && <code class="muted">{v.worktree}</code>}</div>
       <div class="dirty-cols">
         <table>
+          <colgroup><col class="chk" /><col class="code" /><col /><col class="num" /></colgroup>
           <thead><tr><th><input type="checkbox" aria-label="All files" checked={n === d.files.length} ref={(el) => { if (el) el.indeterminate = n > 0 && n < d.files.length; }}
             onChange={(e) => update({ unticked: e.currentTarget.checked ? [] : d.files.map((f) => f.path) })} /></th>
             <th colSpan={2}>{plural(d.files.length, "file")}</th><th /></tr></thead>

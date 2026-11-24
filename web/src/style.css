@@ -294,10 +294,11 @@ main.wide { max-width: 1220px; width: 100%; margin: 0 auto; }
 .dirty-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .dirty-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 760px) { .dirty-cols { grid-template-columns: 1fr; } }
-.dirty table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* fixed layout: an open diff scrolls inside its column instead of widening the table over the side panel */
+.dirty table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.dirty col.chk { width: 28px; } .dirty col.code { width: 40px; } .dirty col.num { width: 84px; }
 .dirty th, .dirty td { padding: 4px 6px; border-bottom: 1px solid var(--line2); text-align: left; vertical-align: baseline; }
 .dirty th { color: var(--muted); font-weight: 600; }
-.dirty td:first-child, .dirty th:first-child { width: 1%; }
 .dirty td.num { text-align: right; white-space: nowrap; font: 12px ui-monospace, monospace; }
 .dirty-path { padding: 0; border: 0; background: none; color: var(--fg); text-align: left; font: 12.5px ui-monospace, monospace; overflow-wrap: anywhere; }
 .dirty-path:hover { color: var(--accent); text-decoration: underline; }
@@ -306,7 +307,7 @@ main.wide { max-width: 1220px; width: 100%; margin: 0 auto; }
 .badge.a { background: var(--ok-bg); color: var(--ok); }
 .badge.d { background: var(--bad-bg); color: var(--bad); }
 .dirty .diffrow td { padding: 0 0 8px; }
-.dirty pre.diff { margin: 0; max-height: 420px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--code); font: 12px/1.45 ui-monospace, monospace; white-space: pre; }
+.dirty pre.diff { margin: 0; max-height: 420px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--code); font: 12px/1.45 ui-monospace, monospace; white-space: pre; tab-size: 4; }
 .diff .add { color: var(--ok); } .diff .del { color: var(--bad); }
 .dirty-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .dirty textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); font: 13px ui-monospace, monospace; resize: vertical; }
