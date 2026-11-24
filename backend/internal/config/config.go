@@ -386,12 +386,6 @@ var kairos = RepoReview{
 	Notes: `Read CLAUDE.md first. The checks CI runs are in the justfile: ` + "`just lint-check`" + ` (types, versions, helm, docker,
 shell) and the tests next to the code you change. No database or other service runs here, so tests that need
 one can't run: say so rather than skipping them silently.
-
-To look at the UI, start kairos-ui on its mock API (no backend needed):
-` + "`nohup pnpm turbo run dev:mocks --filter=kairos-ui > /tmp/ui.log 2>&1 &`" + `, then wait for port 3000
-(next dev's default). Turbo generates the mock worker and schema fixture first; running the package script
-directly skips that. Starting it rewrites the tracked apps/kairos-ui/src/mocks/fixtures/tenantSettingsSchema.json:
-a diff there means the PR's fixture is stale, which is a finding.
 ` + noCloud,
 }
 

@@ -33,8 +33,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 		fp.EnvFile != home+"/Dev/fidesplus/.devcontainer/devcontainer.env" {
 		t.Errorf("bad fidesplus defaults: %+v", fp)
 	}
-	if fp, k := r.Repos["ethyca/fidesplus"].Notes, r.Repos["ethyca/kairos"].Notes; !strings.Contains(fp, "next dev -p 3000") || !strings.Contains(k, "dev:mocks") {
-		t.Errorf("UI start notes missing: fidesplus %q, kairos %q", fp, k)
+	if fp := r.Repos["ethyca/fidesplus"].Notes; !strings.Contains(fp, "next dev -p 3000") {
+		t.Errorf("UI start notes missing: fidesplus %q", fp)
 	}
 	if qa := r.Repos["ethyca/fides-qa"]; qa.Workdir != "/fides-qa" || qa.Stack != nil || qa.Notes == "" ||
 		qa.Related == nil || qa.Related.Clone != home+"/Dev/fidesplus" || qa.Related.Target != "/fidesplus" {
