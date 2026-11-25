@@ -354,9 +354,6 @@ func TestDownrevApprovalCarriesOver(t *testing.T) {
 	if h := m.must(t, id); len(gh.Merged) != 0 || h.DownrevHead != "" {
 		t.Errorf("new head: merged %v, handoff %+v", gh.Merged, h)
 	}
-	if _, err := m.Merge(ctx, id); err == nil {
-		t.Error("merge button allowed on a stale approval")
-	}
 }
 
 func TestDownrevLabelFailurePushesWithout(t *testing.T) {

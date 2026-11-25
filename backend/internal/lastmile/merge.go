@@ -76,14 +76,16 @@ func (m *Manager) Rebase(ctx context.Context, id string) (Handoff, error) {
 	return h, nil
 }
 
-// mergeRefusal says why the merge button can't be pressed for h, or "".
+// mergeRefusal says why the merge button can't be pressed for h, or "". Like
+// GitHub's own button it takes GitHub's review decision: an approval of an older
+// head counts when the repo keeps stale approvals. The merge modes stay stricter.
 func mergeRefusal(h Handoff) string {
 	s := h.Snapshot
 	switch {
 	case Terminal(h.State) || h.State == StateNeedsHuman:
 		return "it is " + h.State
-	case s == nil || !humanApproved(h, *s):
-		return "the PR is not approved by a human on its current head"
+	case s == nil || !s.Approved():
+		return "the PR is not approved"
 	case s.CI != CIGreen:
 		return "checks are not green (" + s.CI + ")"
 	case s.InQueue:
@@ -121,7 +123,7 @@ func (m *Manager) SetMerge(id, mode string) (Handoff, error) {
 }
 
 // humanApproved says the PR is approved and a human approved its current head:
-// what any TLM merge needs, whatever the mode. An approval of the head before a
+// what a merge mode needs to merge (the button takes GitHub's decision alone). An approval of the head before a
 // labelled downrev bump, or a chain of them, counts for the bumped head (design §7.4).
 func humanApproved(h Handoff, s Snapshot) bool {
 	carried := func(a Approval) bool {
@@ -177,7 +179,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		}
 		return state, reason, nil
 	}
-	if native || state != StateApproved || s.CI != CIGreen || !humanApproved(*h, s) {
+	if native || state != StateApproved || s.CI != CIGreen || !(h.MergeRequested || humanApproved(*h, s)) {
 		return state, reason, nil
 	}
 	if !h.MergeRequested && (frozen(m.cfg.LastMile, m.now()) || mode == MergeOff || mode == MergeShadow ||

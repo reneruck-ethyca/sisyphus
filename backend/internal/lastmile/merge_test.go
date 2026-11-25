@@ -197,7 +197,9 @@ func TestMergeOffDisablesOwnAutoMerge(t *testing.T) {
 	}
 }
 
-func TestMergeNeedsFreshHumanApproval(t *testing.T) {
+// The merge mode wants a human's approval of the current head; the button, like
+// GitHub's, takes GitHub's review decision.
+func TestMergeModeNeedsFreshHumanApprovalButtonDoesNot(t *testing.T) {
 	t.Parallel()
 	for name, r := range map[string]github.SnapReview{
 		"stale": {User: "carol", State: "APPROVED", CommitSHA: "old"},
@@ -213,8 +215,13 @@ func TestMergeNeedsFreshHumanApproval(t *testing.T) {
 			if h := m.must(t, id); len(gh.Merged) != 0 || h.State != StateApproved {
 				t.Fatalf("merged %v, handoff %s", gh.Merged, h.State)
 			}
-			_, err := m.Merge(context.Background(), id)
-			invalidWith(t, err, "not approved")
+			if _, err := m.Merge(context.Background(), id); err != nil {
+				t.Fatal(err)
+			}
+			m.tick(context.Background())
+			if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
+				t.Errorf("button: merged %v", gh.Merged)
+			}
 		})
 	}
 }

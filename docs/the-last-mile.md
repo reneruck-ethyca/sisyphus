@@ -335,8 +335,10 @@ There is no diff-size rule (dropped 2026-11-18).
   also turn auto-merge on or off for a handoff (`off`, `when checks pass`, `when approved`; just
   on/off where GitHub auto-merge is used).
 
-Every merge TLM makes itself (button, `approved`, `auto`) needs a current human approval: one
-that isn't stale and isn't a bot's. The merge is pinned to that head. A merge freeze holds
+The button mirrors GitHub's: it needs GitHub's review decision to be approved and the required
+checks green, so an approval of an older head counts when the repo keeps stale approvals. A merge
+mode (`approved`, `auto`) is stricter: it needs a current human approval, one that isn't stale and
+isn't a bot's. Every TLM merge is pinned to the head it saw. A merge freeze holds
 `approved` and `auto`, not the button, and not GitHub's own auto-merge, whose timing is GitHub's.
 A PR GitHub reports as already mergeable can't get auto-merge, so TLM merges it itself. Turning the mode to `off` (or `shadow`) withdraws a pressed
 button and turns off GitHub auto-merge that TLM turned on; auto-merge a person set on GitHub is
@@ -757,3 +759,6 @@ None right now.
 - **2026-11-25:** §5: fidesplus' `scratch` adds fides-js' build output (`clients/*/dist`, `clients/*/public/lib`,
   `bundle-size-stats`) and the clients' other gitignored outputs (storybook, coverage, `.eslintcache`, Cypress
   artifacts). fidesplus#7730's review round built fides-js to load a UI and went needs-human over 43 such files.
+- **2026-11-25:** §7: the merge button takes GitHub's review decision, as GitHub's own button does, instead of
+  requiring a fresh human approval of the current head. fidesplus#7693 was approved on an earlier head: GitHub
+  would merge it, the dashboard hid the button. The merge modes keep the fresh-human-approval rule.
