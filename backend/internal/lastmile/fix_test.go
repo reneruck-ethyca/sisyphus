@@ -135,7 +135,7 @@ func failCheck(name, job string) github.Check {
 // redFixture is a handoff with fix-ci on, PR open, whose PR shows a failing check "unit" (job 22).
 func redFixture(t *testing.T, tasks *fakeTasks) (*Manager, *FakeGitHub, string, string) {
 	t.Helper()
-	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
+	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci", MaxFixRounds: 3})
 	m.Tasks = tasks
 	h := m.must(t, id)
 	head := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
@@ -567,7 +567,7 @@ func TestLostRunFlagsNodeModulesAfterSetup(t *testing.T) {
 
 func TestAgentsNeedReviews(t *testing.T) {
 	t.Parallel()
-	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci"})
+	m, gh, _, id := opened(t, Request{Autonomy: "fix-ci", MaxFixRounds: 3})
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: "h", Author: "me", Checks: []github.Check{failCheck("unit", "22")}}
 	m.tick(context.Background())
 	if h := m.must(t, id); h.State != StateNeedsHuman || h.Reason != "agents need reviews enabled" {

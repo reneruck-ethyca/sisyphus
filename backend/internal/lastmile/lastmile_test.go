@@ -70,7 +70,7 @@ func TestHandoffAccepts(t *testing.T) {
 		t.Errorf("id = %q", h.ID)
 	}
 	if h.Repo != "ethyca/fidesplus" || h.Branch != "feature/x" || h.State != StateHandedOff || h.Title != "two" ||
-		h.MaxFixRounds != 3 || !h.Autonomy.FixCI || h.Autonomy.AddressReviews || h.Autonomy.Merge != MergeShadow ||
+		h.MaxFixRounds != 5 || !h.Autonomy.FixCI || h.Autonomy.AddressReviews || h.Autonomy.Merge != MergeShadow ||
 		h.Agent.Vendor != "codex" || h.Agent.Effort != "high" || len(h.Labels) != 1 || h.Labels[0] != "a" ||
 		strings.Join(h.NotifyOn, ",") != "merged,needs-human,closed" || h.Created.IsZero() {
 		t.Errorf("handoff = %+v", h)

@@ -465,7 +465,7 @@ tlm handoff --worktree <dir> --base dev --title "…" --body-file pr.md --jira E
   --labels a,b --reviewers alice,bob \
   --autonomy fix-ci,address-reviews,merge=off|shadow|auto|approved \
   --notify '<command template>' --notify-on merged,needs-human,closed \
-  --agent claude:opus:medium --max-fix-rounds 3 --stack-parent <id|branch> --requester <who>
+  --agent claude:opus:medium --max-fix-rounds 5 --stack-parent <id|branch> --requester <who>
 tlm status <id> [--json]
 tlm wait <id> [--until merged|needs-human|closed|<state>[,…]]
 tlm resume <id>
@@ -509,7 +509,7 @@ handoffs on its Last mile page (`/lastmile`). Handoffs are kept in `lastmile.jso
 | `lastmile.bot_reviewer` | `ethycabot` | requested on every PR once it's ready |
 | `lastmile.reviewers` | `{"roster":[],"count":1}` | human reviewers when a handoff names none |
 | `lastmile.repo_reviewers` | `{}` | per `owner/name`: replaces `reviewers` for that repo |
-| `lastmile.max_fix_rounds` | `3` | default of `--max-fix-rounds` |
+| `lastmile.max_fix_rounds` | `5` | default of `--max-fix-rounds` |
 | `lastmile.needs_human_label` | `tlm:needs-human` | label of a PR that waits for a human |
 | `lastmile.flakes` | `[]` | regexes: a failed job whose log tail matches is rerun, not fixed |
 | `lastmile.flake_reruns` | `2` | flake reruns per head SHA |

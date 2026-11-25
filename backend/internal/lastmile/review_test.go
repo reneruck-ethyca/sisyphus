@@ -290,7 +290,7 @@ func TestReviewRoundCapAndResume(t *testing.T) {
 	m.set(t, id, func(h *Handoff) { h.FixRounds = map[string]int{"review": h.MaxFixRounds, "ci": 1} })
 	m.tickWait(t)
 	h := m.must(t, id)
-	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "after 3 rounds") || tasks.n() != 0 || h.Cursor.Threads["T1"] != 0 {
+	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "after 5 rounds") || tasks.n() != 0 || h.Cursor.Threads["T1"] != 0 {
 		t.Fatalf("handoff %+v", h)
 	}
 	got, err := m.Resume(context.Background(), id)

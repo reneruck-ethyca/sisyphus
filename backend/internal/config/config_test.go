@@ -199,7 +199,7 @@ func TestLoadConfigLastMile(t *testing.T) {
 	}
 	l := cfg.LastMile
 	if l.Disabled || l.Interval.Duration != 2*time.Minute || l.BotReviewer != "ethycabot" || l.Reviewers.Count != 1 ||
-		l.MaxFixRounds != 3 || l.NeedsHumanLabel != "tlm:needs-human" || l.FlakeReruns != 2 || l.MaxDiffLines != 400 || len(l.Flakes) != 0 ||
+		l.MaxFixRounds != 5 || l.NeedsHumanLabel != "tlm:needs-human" || l.FlakeReruns != 2 || l.MaxDiffLines != 400 || len(l.Flakes) != 0 ||
 		len(l.BotLogins) != 1 || l.BotLogins[0] != "ethycabot" {
 		t.Errorf("bad lastmile defaults: %+v", l)
 	}
@@ -210,7 +210,7 @@ func TestLoadConfigLastMile(t *testing.T) {
 		t.Fatal(err)
 	}
 	l = cfg.LastMile
-	if l.Interval.Duration != 30*time.Second || l.BotReviewer != "ethycabot" || l.MaxFixRounds != 3 {
+	if l.Interval.Duration != 30*time.Second || l.BotReviewer != "ethycabot" || l.MaxFixRounds != 5 {
 		t.Errorf("lastmile = %+v (unset keys keep their defaults)", l)
 	}
 	if !l.Manual("ethyca/fidesinfra") || l.Manual("ethyca/kairos") || l.Manual("ethyca/fidesplus") {

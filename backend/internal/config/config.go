@@ -563,7 +563,7 @@ func defaults() Config {
 			Interval:        Duration{2 * time.Minute},
 			BotReviewer:     "ethycabot",
 			Reviewers:       Reviewers{Count: 1},
-			MaxFixRounds:    3,
+			MaxFixRounds:    5,
 			NeedsHumanLabel: "tlm:needs-human",
 			FlakeReruns:     2,
 			MaxDiffLines:    400,

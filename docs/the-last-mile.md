@@ -747,3 +747,5 @@ None right now.
 - **2026-11-25:** §4: a failure's log is now its tail led by the key lines above it (pytest's `FAILED`/`E   `
   lines, `##[error]`, at most 40). fidesplus#7693's CI agent escalated a Temporal timeout as "log cut off": nox's
   teardown filled the 150-line tail and pushed the failing test and its traceback out.
+- **2026-11-25:** `max_fix_rounds` default 3 → 5 (CI and review rounds each), at the user's call. fidesplus#7692 used
+  three review rounds on one reviewer's comments, and its approval came with four new ones.
