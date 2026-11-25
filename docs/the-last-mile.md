@@ -179,7 +179,8 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   under `scratch`: ignored files under those globs that the run created or changed are removed after it without
   failing it (a build makes them again). fidesplus lists `__pycache__`/`.pyc` (a subprocess can drop
   `PYTHONDONTWRITEBYTECODE`), `node_modules/.cache` and `clients/openapi.json` (openapi-ts' input), and what starting its UIs leaves (`.next`,
-  `.turbo`, `next-env.d.ts`, `*.tsbuildinfo`, `*.log`).
+  `.turbo`, `next-env.d.ts`, `*.tsbuildinfo`, `*.log`) and building fides-js leaves (`clients/*/dist`, `clients/*/public/lib`, bundle stats,
+  storybook, coverage, Cypress screenshots/videos).
   Putting the worktree back (`git clean`) spares the repo's in-tree `cache` dirs: they are volume mount points.
 - **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
   flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
@@ -753,3 +754,6 @@ None right now.
 - **2026-11-25:** §5: fidesplus' `scratch` adds what starting its UIs leaves (`.next`, `.turbo`, `next-env.d.ts`,
   `*.tsbuildinfo`, `*.log`), and its notes send background servers' output to `/tmp`: a `nohup.out` isn't ignored
   and would be committed. A review round on fidesplus#7730 ran Astralis' dev server and went needs-human over `.next/`.
+- **2026-11-25:** §5: fidesplus' `scratch` adds fides-js' build output (`clients/*/dist`, `clients/*/public/lib`,
+  `bundle-size-stats`) and the clients' other gitignored outputs (storybook, coverage, `.eslintcache`, Cypress
+  artifacts). fidesplus#7730's review round built fides-js to load a UI and went needs-human over 43 such files.

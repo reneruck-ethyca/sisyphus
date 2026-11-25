@@ -323,9 +323,13 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 		"/sisyphus/cache/uv", "/sisyphus/cache/npm"},
 	// What the agent's checks leave in the worktree despite the env above: bytecode from
 	// subprocesses that drop PYTHONDONTWRITEBYTECODE, openapi-ts' input and jiti's cache, and what
-	// starting the UIs (as the notes say) leaves: Next's build dirs, turbo, tsbuildinfo, logs.
+	// starting the UIs (as the notes say) leaves.
 	Scratch: []string{"**/__pycache__/**", "**/*.pyc", "**/node_modules/.cache/**", "clients/openapi.json",
-		"**/.next/**", "**/next-env.d.ts", "**/*.tsbuildinfo", "**/.turbo/**", "**/*.log"},
+		"**/.next/**", "**/next-env.d.ts", "**/*.tsbuildinfo", "**/.turbo/**", "**/*.log",
+		// Building fides-js (the UIs load it): its dist and stats, copied into each app's public/lib.
+		"clients/*/dist/**", "clients/*/public/lib/**", "clients/fides-js/bundle-size-stats/**",
+		"clients/**/storybook-static/**", "clients/**/coverage/**", "clients/**/.eslintcache",
+		"clients/**/cypress/screenshots/**", "clients/**/cypress/videos/**"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/astralis/**", "changelog/**"}},
 	Notes: `Generated API types: the TypeScript types under clients/ are generated from the API's OpenAPI schema, so a
