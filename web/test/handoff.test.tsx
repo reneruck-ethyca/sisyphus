@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { expect, it, vi } from "vitest";
 import type { HandoffView, Status } from "../src/api";
-import { Handoff } from "../src/pages/handoff";
+import { LastMile } from "../src/pages/lastmile";
 
 vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
 
@@ -16,13 +16,13 @@ const status = (v: HandoffView) => ({ handoffs: [v], needs_human: [v] }) as unkn
 // A new worktree status is a new panel: a draft for the old files must not be committed against the new ones.
 it("starts the dirty panel over when the worktree changes", () => {
   const el = document.createElement("div");
-  render(<Handoff status={status(view("A", "a.go"))} id="h1" />, el);
+  render(<LastMile status={status(view("A", "a.go"))} id="h1" />, el);
   const msg = el.querySelector<HTMLTextAreaElement>("#dirty-msg")!;
   msg.value = "my draft for A";
   msg.dispatchEvent(new Event("input", { bubbles: true }));
   el.querySelector<HTMLInputElement>('input[aria-label="Commit a.go"]')!.click();
 
-  render(<Handoff status={status(view("B", "b.go"))} id="h1" />, el);
+  render(<LastMile status={status(view("B", "b.go"))} id="h1" />, el);
   expect(el.querySelector<HTMLTextAreaElement>("#dirty-msg")!.value).toBe("Suggested");
   expect(el.querySelector<HTMLInputElement>('input[aria-label="Commit b.go"]')!.checked).toBe(true);
 });

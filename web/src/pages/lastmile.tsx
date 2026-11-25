@@ -1,47 +1,55 @@
-// Last mile: every handoff, newest first with stacks together.
+// Last mile: every handoff on the left (newest first, stacks together); the overview or one handoff on the right.
 import { useState } from "preact/hooks";
 import { post, put, type HandoffView, type Status } from "../api";
 import { Ago, Chip, Ext, Loading, Page } from "../components";
 import { approval, base, handoffTone, plural, reviewerChips } from "../format";
+import { HandoffMain } from "./handoff";
 
-export function LastMile({ status: s }: { status?: Status }) {
-  if (!s) return <Page title="Last mile" page="lastmile"><Loading /></Page>;
+export function LastMile({ status: s, id }: { status?: Status; id?: string }) {
+  if (!s) return <Page title={id ?? "Last mile"} page="lastmile"><Loading /></Page>;
   const hs = s.handoffs ?? [];
-  const open = hs.filter((v) => !v.over).map((v) => v.waiting_on ? v : { ...v, depth: 0 });
-  const done = hs.filter((v) => v.over).sort((a, b) => b.updated.localeCompare(a.updated));
-  return <Page title="Last mile" status={s} page="lastmile">
-    <main class="lastmile">
-      <div class="pagehead"><h1>Last mile</h1><div class="meta-line"><span>{plural(hs.length, "handoff")}</span></div></div>
-      {!s.handoffs && <p class="notice quiet">The last mile is off (<code>lastmile.disabled</code>).</p>}
-      {(s.needs_human ?? []).map((v) => <p class="notice" role="alert" key={v.id}><b>Needs you: <a href={`/lastmile/${v.id}`}>{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}</a></b>
-        {" "}{v.title}{v.prev_state && ` (was ${v.prev_state})`}: {v.reason}{" "}<ApprovalNote v={v} />
-        {v.pr_url && <><Ext href={v.pr_url}>Open PR ↗</Ext>{" "}</>}<a href={`/lastmile/${v.id}`}>Open handoff →</a></p>)}
-      <div class="card">
-        <div class="card-h"><span class="muted">Newest first, stacks together</span><a class="end" href="/lastmile/shadow"><b>Shadow-merge report →</b></a></div>
-        {open.length ? <>
-          <ol class="lm"><Head />{open.map(Row)}</ol>
-          <div class="card-f legend"><span><span class="rv">alice</span> requested by TLM</span><span><span class="rv human">+carol</span> added by a human</span>
-            <span><span class="rv gone">bob</span> removed by a human, never re-added</span></div>
-        </> : <p class="card-b muted">{hs.length ? "No open handoffs." : <>No handoffs. An agent hands a branch over with <code>tlm handoff</code>.</>}</p>}
-      </div>
-      {!!done.length && <><h2>History</h2><div class="card"><ol class="lm"><Head />{done.map(Row)}</ol></div></>}
-    </main>
+  const v = id ? hs.find((h) => h.id === id) : undefined;
+  return <Page title={id ?? "Last mile"} status={s} page="lastmile">
+    <div class="cols">
+      <aside aria-label="Handoffs"><HandoffList hs={hs} sel={id} /></aside>
+      {id ? v ? <HandoffMain key={v.id} v={v} />
+        : <main><div class="pagehead"><h1>No such handoff</h1><p class="muted">It may have been cleaned up.</p></div></main>
+        : <Overview s={s} />}
+    </div>
   </Page>;
 }
 
-const Head = () => <li class="hd"><span>State</span><span>Handoff</span><span>Fix rounds</span><span>Reviewers</span><span>Updated</span><span /></li>;
+function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
+  const open = hs.filter((v) => !v.over).map((v) => v.waiting_on ? v : { ...v, depth: 0 });
+  const done = hs.filter((v) => v.over).sort((a, b) => b.updated.localeCompare(a.updated));
+  const item = (v: HandoffView) => <a key={v.id} class={"pr" + (v.depth ? ` depth${Math.min(v.depth, 3)}` : "")} href={`/lastmile/${v.id}`}
+    aria-current={v.id === sel ? "page" : undefined}>
+    <span class="row"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Ago t={v.updated} /></span>
+    <span class="title">{v.title}</span>
+    <span class="meta">{v.pr_number ? `${base(v.repo)} #${v.pr_number}` : v.id}{v.waiting_on && ` · waiting on ${v.waiting_on}`}{approval(v) && " · ✓ approved"}</span>
+  </a>;
+  return <>
+    <h2><span>Open</span><span>{open.length}</span></h2>
+    {open.length ? open.map(item) : <p class="empty">{hs.length ? "No open handoffs." : "No handoffs yet."}</p>}
+    {!!done.length && <><h2><span>History</span><span>{done.length}</span></h2>{done.map(item)}</>}
+  </>;
+}
 
-const Row = (v: HandoffView) => <li key={v.id} class={v.depth ? `depth${v.depth}` : undefined}>
-  <Chip tone={handoffTone(v.state)}>{v.state}</Chip>
-  <span class="grow"><a class="ttl" href={`/lastmile/${v.id}`}>{v.title}</a><Approved v={v} />
-    <span class="facts"><span class="id">{v.id}</span>{v.pr_url && <> · <Ext href={v.pr_url}>{base(v.repo)} #{v.pr_number}</Ext></>}
-      {v.waiting_on && ` · waiting on ${v.waiting_on}`}{v.reason && ` · ${v.reason}`}{v.prev_state && ` · was ${v.prev_state}`}</span>
-    {v.error && <span class="err">{v.error}</span>}{v.warning && <span class="facts">{v.warning}</span>}
-    {!v.over && <span class="merge"><MergeControls v={v} /></span>}</span>
-  <span class="rounds"><Rounds v={v} /></span>
-  <span class="rvs"><Reviewers v={v} /></span>
-  <span class="t"><Ago t={v.updated} /></span>
-  <span class="acts"><Actions v={v} merge={false} /></span></li>;
+function Overview({ s }: { s: Status }) {
+  const hs = s.handoffs ?? [], needs = s.needs_human ?? [];
+  return <main>
+    <div class="pagehead"><h1>Last mile</h1><div class="meta-line"><span>{plural(hs.length, "handoff")}</span>
+      <a href="/lastmile/shadow">Shadow-merge report →</a></div></div>
+    {!s.handoffs && <p class="notice quiet">The last mile is off (<code>lastmile.disabled</code>).</p>}
+    <section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
+      {needs.length ? needs.map((v) => <p class="notice" role="alert" key={v.id}><b><a href={`/lastmile/${v.id}`}>{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}</a></b>
+        {" "}{v.title}{v.prev_state && ` (was ${v.prev_state})`}: {v.reason}{" "}<ApprovalNote v={v} />
+        {v.pr_url && <><Ext href={v.pr_url}>Open PR ↗</Ext>{" "}</>}<a href={`/lastmile/${v.id}`}>Open handoff →</a></p>)
+        : <div class="card empty"><div><b>Nothing needs you right now</b>
+          <div class="muted">{hs.length ? "Pick a handoff on the left to see its state, merge policy and timeline." : <>An agent hands a branch over with <code>tlm handoff</code>.</>}</div></div></div>}
+    </section>
+  </main>;
+}
 
 // Approved is the PR's approval as a chip, with "mergeable" when GitHub would merge it now.
 export function Approved({ v }: { v: HandoffView }) {

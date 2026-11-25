@@ -3,7 +3,6 @@ import "./style.css";
 import { Page } from "./components";
 import { useLocation, useStatus } from "./live";
 import { Design } from "./pages/design";
-import { Handoff } from "./pages/handoff";
 import { Home } from "./pages/home";
 import { LastMile } from "./pages/lastmile";
 import { Logs } from "./pages/logs";
@@ -40,7 +39,7 @@ function App() {
   if ((m = route("/history/:owner/:repo/:n/runs/:run", path))) return <Reviews status={status} error={error} archive pr={pr(m)} run={m.run} />;
   if (path === "/lastmile") return <LastMile status={status} />;
   if (path === "/lastmile/shadow") return <Shadow status={status} query={url.searchParams} />;
-  if ((m = route("/lastmile/:id", path))) return <Handoff key={m.id} status={status} id={m.id} />;
+  if ((m = route("/lastmile/:id", path))) return <LastMile status={status} id={m.id} />;
   if (path === "/logs") return <Logs status={status} />;
   if (path === "/settings") return <Settings status={status} />;
   return <Page title="Not found" status={status}><main><h1>Not found</h1><p class="muted">Nothing lives at <code>{path}</code>. <a href="/">Home</a></p></main></Page>;

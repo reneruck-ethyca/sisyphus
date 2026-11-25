@@ -1,23 +1,18 @@
-// One handoff: its state, the dirty-worktree panel, merge policy, reviewers, the PR, fix rounds and the timeline.
+// One handoff (the right pane of the last mile): its state, the dirty-worktree panel, merge policy, reviewers, the PR, fix rounds and the timeline.
 import { Fragment } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { HTTPError, post, put, session, type Dirty, type HandoffView, type Status } from "../api";
-import { Ago, Chip, Ext, Loading, Page } from "../components";
+import { HTTPError, post, put, session, type Dirty, type HandoffView } from "../api";
+import { Ago, Chip, Ext } from "../components";
 import { full, handoffIcon, handoffTone, plural, short, splitState, stamp } from "../format";
 import { loadSession, saveSession } from "../live";
 import { Actions, ApprovalNote, Approved, Reviewers, Rounds, useAct } from "./lastmile";
 
-export function Handoff({ status: s, id }: { status?: Status; id: string }) {
-  if (!s) return <Page title={id} page="lastmile"><Loading /></Page>;
-  const v = s.handoffs?.find((h) => h.id === id);
-  if (!v) return <Page title={id} status={s} page="lastmile"><main class="lastmile"><h1>No such handoff</h1>
-    <p class="muted"><a href="/lastmile">Back to the last mile</a></p></main></Page>;
+export function HandoffMain({ v }: { v: HandoffView }) {
   const dirty = v.state === "needs-human" && v.dirty && !v.agent_running ? v.dirty : undefined;
   const events = [...(v.events ?? [])].reverse(); // newest first
-  return <Page title={v.id} status={s} page="lastmile">
-    <main class="lastmile wide">
+  return <main class="wide">
       <div class="pagehead">
-        <nav class="meta-line" aria-label="Breadcrumb"><a href="/lastmile">Last mile</a><span>›</span><span>{v.id}</span></nav>
+        <div class="meta-line"><span class="muted">{v.id}</span></div>
         <h1>{v.title}</h1>
         <div class="meta-line"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Approved v={v} />{v.prev_state && <span>was {v.prev_state}</span>}
           <span>{v.repo}{v.pr_url && <> <Ext href={v.pr_url}>#{v.pr_number} ↗</Ext></>}</span>
@@ -62,8 +57,7 @@ export function Handoff({ status: s, id }: { status?: Status; id: string }) {
           </section>
         </div>
       </div>
-    </main>
-  </Page>;
+    </main>;
 }
 
 function ReviewersCard({ v }: { v: HandoffView }) {
@@ -82,6 +76,8 @@ function ReviewersCard({ v }: { v: HandoffView }) {
   return <section><h2>Reviewers</h2>
     <div class="card card-b">
       <p class="rvs"><Reviewers v={v} /></p>
+      <p class="legend muted"><span><span class="rv">alice</span> requested by TLM</span><span><span class="rv human">+carol</span> added by a human</span>
+        <span><span class="rv gone">bob</span> removed by a human, never re-added</span></p>
       <p class="muted">{v.reviewers_set ? "Explicit: the humans you named." : "Round-robin picks from the roster."}{v.reviewers_pending && " An edit waits for the next tick."}</p>
       <form class="inline" onSubmit={save}>
         <label class="muted" for="logins">Human reviewers, comma separated</label>
