@@ -110,7 +110,7 @@ export function MergeControls({ v }: { v: HandoffView }) {
   const merge = `/api/handoffs/${encodeURIComponent(v.id)}/merge`;
   return <>
     {v.merge_requested && !v.over && <><span class="muted">merge pending</span>{" "}</>}
-    {v.can_merge && !v.merge_requested && v.state !== "queued" && <><button class="btn small" disabled={!!busy}
+    {v.can_merge && !v.merge_requested && v.state !== "queued" && <><button class="btn small merge" disabled={!!busy}
       onClick={() => confirm(`Squash and merge ${v.repo}#${v.pr_number}?`) && act(merge)}>Squash and merge</button>{" "}</>}
     {!v.over && <MergeMode v={v} busy={busy} act={act} />}
   </>;
