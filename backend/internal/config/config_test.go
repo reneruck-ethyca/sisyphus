@@ -282,7 +282,8 @@ func TestConfigIgnoresMaxMergeLines(t *testing.T) {
 
 func TestFidesplusScratchAndMountPoints(t *testing.T) {
 	for _, f := range []string{"src/fides/service/pbac/__pycache__/engine.cpython-313.pyc", "clients/openapi.json",
-		"clients/shared/node_modules/.cache/jiti/x.mjs"} {
+		"clients/shared/node_modules/.cache/jiti/x.mjs",
+		"clients/astralis/.next/dev/build/chunks/a.js", "clients/astralis/next-env.d.ts"} {
 		if !slices.ContainsFunc(fidesplus.Scratch, func(g string) bool { return GlobMatch(g, f) }) {
 			t.Errorf("%s not scratch", f)
 		}

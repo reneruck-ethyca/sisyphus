@@ -178,7 +178,8 @@ Keep sisyphus's model (the container never touches `.git`) and add a controlled 
   terraform's `.terraform/` and, in terraform-modules, the gitignored `.terraform.lock.hcl`), the repo lists it
   under `scratch`: ignored files under those globs that the run created or changed are removed after it without
   failing it (a build makes them again). fidesplus lists `__pycache__`/`.pyc` (a subprocess can drop
-  `PYTHONDONTWRITEBYTECODE`), `node_modules/.cache` and `clients/openapi.json` (openapi-ts' input).
+  `PYTHONDONTWRITEBYTECODE`), `node_modules/.cache` and `clients/openapi.json` (openapi-ts' input), and what starting its UIs leaves (`.next`,
+  `.turbo`, `next-env.d.ts`, `*.tsbuildinfo`, `*.log`).
   Putting the worktree back (`git clean`) spares the repo's in-tree `cache` dirs: they are volume mount points.
 - **One writer per worktree, across processes.** The worktree lock is an in-process lock plus an
   flock under the state dir, so two sisyphus processes on the same state (a smoke-test binary next
@@ -749,3 +750,6 @@ None right now.
   teardown filled the 150-line tail and pushed the failing test and its traceback out.
 - **2026-11-25:** `max_fix_rounds` default 3 → 5 (CI and review rounds each), at the user's call. fidesplus#7692 used
   three review rounds on one reviewer's comments, and its approval came with four new ones.
+- **2026-11-25:** §5: fidesplus' `scratch` adds what starting its UIs leaves (`.next`, `.turbo`, `next-env.d.ts`,
+  `*.tsbuildinfo`, `*.log`), and its notes send background servers' output to `/tmp`: a `nohup.out` isn't ignored
+  and would be committed. A review round on fidesplus#7730 ran Astralis' dev server and went needs-human over `.next/`.

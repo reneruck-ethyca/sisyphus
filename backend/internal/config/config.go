@@ -322,15 +322,18 @@ cp -f /usr/local/share/fides/libpbac.so src/fides/bin/libpbac.so
 		// $HOME: a volume's missing parent dirs (~/.cache) would be created root-owned.
 		"/sisyphus/cache/uv", "/sisyphus/cache/npm"},
 	// What the agent's checks leave in the worktree despite the env above: bytecode from
-	// subprocesses that drop PYTHONDONTWRITEBYTECODE, openapi-ts' input and jiti's cache.
-	Scratch: []string{"**/__pycache__/**", "**/*.pyc", "**/node_modules/.cache/**", "clients/openapi.json"},
+	// subprocesses that drop PYTHONDONTWRITEBYTECODE, openapi-ts' input and jiti's cache, and what
+	// starting the UIs (as the notes say) leaves: Next's build dirs, turbo, tsbuildinfo, logs.
+	Scratch: []string{"**/__pycache__/**", "**/*.pyc", "**/node_modules/.cache/**", "clients/openapi.json",
+		"**/.next/**", "**/next-env.d.ts", "**/*.tsbuildinfo", "**/.turbo/**", "**/*.log"},
 	// The worktree's own Postgres/Redis, via fidesplus' per-worktree nox stacks.
 	Stack: &Stack{Up: "uv run nox -s dev_datastores", Project: "fidesplus-{id}", Skip: []string{"clients/astralis/**", "changelog/**"}},
 	Notes: `Generated API types: the TypeScript types under clients/ are generated from the API's OpenAPI schema, so a
 change to a Pydantic schema or an endpoint (fields, types, docstrings, descriptions) changes them. After one, run
 ` + "`./scripts/generate_types.sh`" + ` from /fidesplus and keep what it changes; CI's Check-OpenAPI-Types fails on any drift.
 
-To look at the admin UI, start the webserver and the UI in the background (nohup ... &) and wait for
+To look at the admin UI, start the webserver and the UI in the background (nohup ... > /tmp/<name>.log 2>&1 &, never into the
+worktree) and wait for
 each port. The webserver needs the stack, runs migrations on startup, and no workers run: from /fidesplus,
 ` + "`fidesplus`" + ` (port 8080; not ` + "`fides webserver`" + `, which skips the plus routes); check it with
 ` + "`curl localhost:8080/api/v1/plus/health`" + `. Then, in clients/admin-ui:
