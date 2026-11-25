@@ -40,6 +40,19 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
   const [hover, setHover] = useState<HTMLElement | null>(null);
   const [sel, setSel] = useState<(Composer & { top: number; left: number }) | null>(null);
   const [layout, setLayout] = useState(0); // bumped to re-measure gutter positions
+  const [panelW, setPanelW] = useState(() => { try { return +localStorage.getItem("dr-panel-w")! || 340; } catch { return 340; } });
+  const dragPanel = (e: PointerEvent) => {
+    const h = e.currentTarget as HTMLElement;
+    h.setPointerCapture(e.pointerId);
+    const x0 = e.clientX, w0 = panelW;
+    let w = w0;
+    const move = (m: PointerEvent) => { w = Math.min(Math.max(w0 + x0 - m.clientX, 260), innerWidth * 0.6); setPanelW(w); };
+    h.addEventListener("pointermove", move);
+    h.addEventListener("lostpointercapture", () => {
+      h.removeEventListener("pointermove", move);
+      try { localStorage.setItem("dr-panel-w", String(Math.round(w))); } catch { /* width just isn't remembered */ }
+    }, { once: true });
+  };
   const mainRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<HTMLElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -375,7 +388,7 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
       <button class="btn quiet small" type="button" disabled={acting} onClick={() => act("cancel")}>Cancel run</button>
     </div>}
     {banner && <p class="notice dr-banner">{banner} <button class="linkbtn" onClick={() => location.reload()}>Reload</button></p>}
-    <div class="dr">
+    <div class="dr" style={{ "--panel-w": `${panelW}px` }}>
       <nav class="dr-tree" aria-label="Docs in this PR">
         <h2>Docs in this PR</h2>
         {pr && <Tree docs={pr.docs} path={path} onSelect={setPath}
@@ -415,6 +428,13 @@ export function Design({ status, pr: ref }: { status?: Status; pr: { repo: strin
             onDone={() => { setComposer(null); reload(); }} onCancel={() => setComposer(null)} />
         )}
       </div>
+      <div class="dr-resize" role="separator" aria-orientation="vertical" aria-label="Resize comments" tabIndex={0}
+        aria-valuenow={Math.round(panelW)} aria-valuemin={260}
+        onPointerDown={dragPanel} onDblClick={() => { setPanelW(340); try { localStorage.removeItem("dr-panel-w"); } catch { /* ignore */ } }}
+        onKeyDown={(e) => {
+          const d = e.key === "ArrowLeft" ? 20 : e.key === "ArrowRight" ? -20 : 0;
+          if (d) { e.preventDefault(); setPanelW((w) => Math.min(Math.max(w + d, 260), innerWidth * 0.6)); }
+        }} />
       <aside class="dr-panel" aria-label="Comments">
         {file && view === "ai" && latest && <section>
           <h3>AI review</h3>
