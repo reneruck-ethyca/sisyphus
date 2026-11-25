@@ -243,15 +243,15 @@ func TestMergeTreePrediction(t *testing.T) {
 	dir := m.must(t, id).Worktree
 	ctx := context.Background()
 	gittest.Git(t, dir, "fetch", "-q", "origin")
-	if files, err := mergeTree(ctx, dir, "main"); err != nil || len(files) != 0 {
+	if files, err := mergeTree(ctx, dir, "main", ""); err != nil || len(files) != 0 {
 		t.Errorf("clean: %v %v", files, err)
 	}
 	advanceMain(t, dir, "a.txt", "three")
 	gittest.Git(t, dir, "fetch", "-q", "origin")
-	if files, err := mergeTree(ctx, dir, "main"); err != nil || !slices.Equal(files, []string{"a.txt"}) {
+	if files, err := mergeTree(ctx, dir, "main", ""); err != nil || !slices.Equal(files, []string{"a.txt"}) {
 		t.Errorf("conflict: %v %v", files, err)
 	}
-	if _, err := mergeTree(ctx, dir, "nope"); err == nil {
+	if _, err := mergeTree(ctx, dir, "nope", ""); err == nil {
 		t.Error("a missing base is an error, not a conflict")
 	}
 }
@@ -459,6 +459,10 @@ func TestStaleRebaseIsAborted(t *testing.T) {
 	}
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: pre, BaseRef: "main", Author: "me"}
 	m.set(t, id, func(h *Handoff) { h.Run = &RunMark{Trigger: TriggerConflict} }) // a conflict run a restart lost
+	lock := gittest.Git(t, h.Worktree, "rev-parse", "--path-format=absolute", "--git-path", "index.lock")
+	os.WriteFile(lock, nil, 0o644) // the killed git's
+	old := started.Add(-time.Minute)
+	os.Chtimes(lock, old, old)
 	m.tick(context.Background())
 	if rebaseInProgress(context.Background(), h.Worktree) || gittest.Git(t, h.Worktree, "rev-parse", "HEAD") != pre {
 		t.Error("the rebase was left in progress")
@@ -587,5 +591,27 @@ func TestFixAgentAsksForRebase(t *testing.T) {
 	m.tick(ctx)
 	if h = m.must(t, id); h.RebaseAsked != "" || gittest.Git(t, h.Worktree, "rev-parse", "HEAD") == head {
 		t.Errorf("not rebased: %+v", h)
+	}
+}
+
+func TestStackChildRebasesOnlyItsOwnCommitsAfterParentRewrite(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, parent, child, _ := stackFixture(t, Request{})
+	// The parent rewrites its one commit's change (a rebase after its own parent's squash merge).
+	f := gittest.Git(t, parent.Worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+	os.WriteFile(filepath.Join(parent.Worktree, f), []byte("rewritten"), 0o644)
+	gittest.Git(t, parent.Worktree, "commit", "-q", "-a", "--amend", "-m", "rewritten")
+	gittest.Git(t, parent.Worktree, "push", "-q", "-f", "origin", "feature/x")
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, parent.Worktree, "rev-parse", "HEAD"), BaseRef: "main"}
+	gh.Snapshots[childRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, child.Worktree, "rev-parse", "HEAD"), BaseRef: "feature/x", MergeState: "DIRTY"}
+	m.tick(ctx)
+	m.Wait()
+	h := m.must(t, child.ID)
+	if h.State == StateNeedsHuman || h.StackParent != parent.ID {
+		t.Fatalf("child = %s %q, parent %q", h.State, h.Reason, h.StackParent)
+	}
+	if got := gittest.Git(t, h.Worktree, "log", "--format=%s", "origin/feature/x..HEAD"); got != "child" {
+		t.Errorf("commits on top of the parent: %q", got) // the parent's old commit is dropped, not replayed
 	}
 }

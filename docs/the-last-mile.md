@@ -91,7 +91,9 @@ The orchestrator should not block or poll.
 - **Pull.** `tlm status <id> --json` and `tlm wait <id> --until merged|needs-human`, for scripts that
   really want to block.
 - **Stacks.** With `--stack-parent` (a handoff id, or a branch), TLM retargets and rebases children itself when the parent
-  merges (`git rebase --onto origin/<new base> <parent's last head>`, so a squash merge is fine). The orchestrator hands off the whole stack once and never manages bases again.
+  merges (`git rebase --onto origin/<new base> <parent's last head>`, so a squash merge is fine). A child whose open
+  parent rewrote its history (rebased after its own parent's squash merge) is rebased the same way when its base
+  moves: onto the parent's new head, from the parent head it forked off. The orchestrator hands off the whole stack once and never manages bases again.
 
 What the orchestrator gets back is a terminal outcome (merged, or needs-human with a reason and a
 link), not a stream of CI noise.
@@ -764,3 +766,8 @@ None right now.
   requiring a fresh human approval of the current head. fidesplus#7693 was approved on an earlier head: GitHub
   would merge it, the dashboard hid the button. The merge modes keep the fresh-human-approval rule. A press now records its head and is dropped if the
   head moves before the merge, since GitHub may keep the approval across a push the person never saw.
+- **2026-11-25:** §3, §4: a base-moved rebase of a stack child now replays only its own commits (`--onto`, from
+  `ParentHead`), and its conflict prediction uses that merge base. fidesplus#7692 squash-merged and #7729 was rebased
+  onto pbac2; #7730's plain rebase onto the new #7729 replayed #7692's old commits and ran out of conflict rounds on
+  files it never touched. Also: a stale-rebase abort after a restart now removes the killed git's `index.lock`
+  first (older than the process), which had left #7728 mid-rebase.

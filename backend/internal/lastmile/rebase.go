@@ -26,6 +26,7 @@ type restackSpec struct {
 	upstream string // the old base point for `rebase --onto`; "" = a plain rebase onto origin/<onto>
 	head     string // the head the PR shows; the worktree must be at it
 	green    bool   // CI was green on head: a clean rebase plus a bump is then downrev-only
+	unstack  bool   // the parent merged: once rebased, the child is a plain handoff
 }
 
 // rebaseInProgress says dir has a rebase stopped in it.
@@ -42,6 +43,25 @@ func rebaseInProgress(ctx context.Context, dir string) bool {
 	return false
 }
 
+// started is when this process started; a git lock older than that belongs to a
+// git the last sisyphus ran and was killed with it.
+var started = time.Now()
+
+// clearStaleIndexLock removes dir's index.lock when it predates this process: a
+// git killed mid-rebase leaves it, and every later git command fails on it. The
+// caller holds the worktree lock.
+func clearStaleIndexLock(ctx context.Context, dir string) {
+	p, err := proc.Run(ctx, dir, "git", "rev-parse", "--path-format=absolute", "--git-path", "index.lock")
+	if err != nil {
+		return
+	}
+	if fi, err := os.Stat(p); err == nil && fi.ModTime().Before(started) {
+		if err := os.Remove(p); err == nil {
+			slog.Info("lastmile removed a stale index.lock", "path", p)
+		}
+	}
+}
+
 // abortStaleRebase backs out a rebase a conflict run lost to a restart left in the
 // worktree (see lostRun): it would wedge every later git command. Only then: a rebase
 // with no such run behind it is a human's (resolving a needs-human conflict) and stays.
@@ -54,6 +74,7 @@ func (m *Manager) abortStaleRebase(ctx context.Context, h *Handoff) {
 	if !rebaseInProgress(ctx, h.Worktree) {
 		return
 	}
+	clearStaleIndexLock(ctx, h.Worktree)
 	if _, err := proc.Run(ctx, h.Worktree, "git", "rebase", "--abort"); err != nil {
 		slog.Warn("lastmile aborting a stale rebase failed", "id", h.ID, "err", err)
 		return
@@ -63,12 +84,17 @@ func (m *Manager) abortStaleRebase(ctx context.Context, h *Handoff) {
 
 var treeID = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 
-// mergeTree predicts a rebase onto origin/<base>: the files `git merge-tree` reports in
-// conflict, none when it merges cleanly. It writes objects, never the worktree.
-func mergeTree(ctx context.Context, dir, base string) ([]string, error) {
+// mergeTree predicts a rebase onto origin/<base>, of upstream..HEAD when upstream is
+// set: the files `git merge-tree` reports in conflict, none when it merges cleanly. It
+// writes objects, never the worktree.
+func mergeTree(ctx context.Context, dir, base, upstream string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, proc.Timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "merge-tree", "--write-tree", "--name-only", "-z", "origin/"+base, "HEAD")
+	args := []string{"merge-tree", "--write-tree", "--name-only", "-z"}
+	if upstream != "" {
+		args = append(args, "--merge-base="+upstream)
+	}
+	cmd := exec.CommandContext(ctx, "git", append(args, "origin/"+base, "HEAD")...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	var ee *exec.ExitError
@@ -112,7 +138,15 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 	if head, err := m.lockedGit(ctx, *h, "rev-parse", "HEAD"); err != nil || head != s.Head {
 		return false, err // the PR isn't what the worktree has: leave it to the agents' own checks
 	}
-	conflicts, err := mergeTree(ctx, h.Worktree, base)
+	// A stack child whose open parent rewrote its history (a rebase after its own
+	// parent's squash merge) still holds the parent's old commits: replay only its own.
+	var upstream string
+	if h.StackParent != "" && h.ParentHead != "" {
+		if _, err := m.lockedGit(ctx, *h, "merge-base", "--is-ancestor", h.ParentHead, "HEAD"); err == nil {
+			upstream = h.ParentHead
+		}
+	}
+	conflicts, err := mergeTree(ctx, h.Worktree, base, upstream)
 	if err != nil {
 		return false, err
 	}
@@ -122,7 +156,7 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 		m.escalate(ctx, h, "rebase conflict: "+files)
 		return true, nil
 	}
-	spec := restackSpec{onto: base, head: s.Head, green: s.CI == CIGreen}
+	spec := restackSpec{onto: base, upstream: upstream, head: s.Head, green: s.CI == CIGreen}
 	if !m.launch(ctx, h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
 		return true, nil
 	}
@@ -187,7 +221,7 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		m.escalate(ctx, h, "stack parent merged, but its last head is unknown, so the rebase has no old base point")
 		return true, nil
 	}
-	spec := restackSpec{onto: newBase, upstream: upstream, head: s.Head}
+	spec := restackSpec{onto: newBase, upstream: upstream, head: s.Head, unstack: true}
 	if m.launch(ctx, h, TriggerConflict, func(ctx context.Context, snap Handoff) outcome { return m.restack(ctx, snap, spec) }) {
 		m.setState(h, StateCIRunning, "rebasing onto "+newBase)
 	}
@@ -199,7 +233,7 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 func (m *Manager) restack(ctx context.Context, h Handoff, r restackSpec) outcome {
 	var fx effects
 	reason := m.restackRun(ctx, h, r, &fx)
-	fx.unstack = reason == "" && r.upstream != ""
+	fx.unstack = reason == "" && r.unstack
 	return outcome{reason: reason, fx: fx}
 }
 
