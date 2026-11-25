@@ -254,3 +254,16 @@ func TestActionsNotifyOnceWithoutTheLock(t *testing.T) {
 	}
 	expect("cancel", 4)
 }
+
+func TestExcerptKeepsTheFailingTestAboveTheTail(t *testing.T) {
+	log := "2026-11-24T16:37:43Z E   TimeoutError\n2026-11-24T16:37:44Z FAILED tests/t.py::test_x\n" +
+		strings.Repeat("nox teardown\n", logTailLines)
+	got := excerpt(log)
+	if !strings.Contains(got, "FAILED tests/t.py::test_x") || !strings.Contains(got, "E   TimeoutError") ||
+		strings.Count(got, "nox teardown") != logTailLines {
+		t.Fatalf("excerpt:\n%s", got)
+	}
+	if short := "FAILED tests/t.py::test_x\n"; excerpt(short) != strings.TrimRight(short, "\n") {
+		t.Fatalf("a short log changed: %q", excerpt(short))
+	}
+}

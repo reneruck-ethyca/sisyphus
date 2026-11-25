@@ -25,7 +25,7 @@ type Failure struct {
 	Flake       bool   `json:"flake,omitempty"` // the log matches lastmile.flakes
 	RunID       int64  `json:"run_id,omitempty"`
 	JobID       int64  `json:"job_id,omitempty"`
-	Log         string `json:"log,omitempty"` // the last logTailLines lines of the failed steps
+	Log         string `json:"log,omitempty"` // excerpt of the failed steps
 }
 
 var checkURL = regexp.MustCompile(`/actions/runs/(\d+)/job/(\d+)`)
@@ -40,6 +40,31 @@ func parseCheckURL(u string) (runID, jobID int64, ok bool) {
 	run, err1 := strconv.ParseInt(m[1], 10, 64)
 	job, err2 := strconv.ParseInt(m[2], 10, 64)
 	return run, job, err1 == nil && err2 == nil
+}
+
+// maxKeyLines caps the earlier lines excerpt keeps ahead of the tail.
+const maxKeyLines = 40
+
+// reKeyLine is a line that names what failed: pytest's FAILED/ERROR summary and
+// its "E   " lines, and Actions' ##[error] annotations.
+var reKeyLine = regexp.MustCompile(`\b(?:FAILED|ERROR) \S+::\S+|\sE {2,}\S|##\[error\]`)
+
+// excerpt is the last logTailLines lines of log, led by the key lines above them:
+// a teardown after pytest can push the failing test out of the tail.
+func excerpt(log string) string {
+	lines := strings.Split(strings.TrimRight(log, "\n"), "\n")
+	cut := max(len(lines)-logTailLines, 0)
+	var key []string
+	for _, l := range lines[:cut] {
+		if reKeyLine.MatchString(l) && len(key) < maxKeyLines {
+			key = append(key, l)
+		}
+	}
+	t := strings.Join(lines[cut:], "\n")
+	if len(key) == 0 {
+		return t
+	}
+	return "Key lines from earlier in the log:\n" + strings.Join(key, "\n") + "\n…\n" + t
 }
 
 // tail keeps the last n lines of s.
@@ -117,7 +142,7 @@ func (m *Manager) failures(ctx context.Context, h Handoff, checks []github.Check
 			if err != nil {
 				slog.Warn("lastmile job log failed", "id", h.ID, "check", c.Name, "err", err)
 			}
-			f.Log = tail(log, logTailLines)
+			f.Log = excerpt(log)
 			f.Fingerprint = fingerprint(c.Name, f.Log)
 		}
 		if f.Fingerprint == "" {

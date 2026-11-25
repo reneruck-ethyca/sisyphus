@@ -151,7 +151,7 @@ The one read model everything uses, built by the harness and given to agents as 
   TLM's reply count per bot thread
 - PR body, and whether a human edited it since TLM last wrote it
 - requested reviewers: who TLM requested, who's currently requested, who was removed
-- check runs, plus the log tail of each failed job, with a failure fingerprint
+- check runs, plus the log tail of each failed job (led by the key lines above it: pytest's FAILED/E lines, `##[error]`), with a failure fingerprint
 - base branch, how far behind it is, stack parent and children
 
 ## 5. Write safety
@@ -744,3 +744,6 @@ None right now.
 - **2026-11-24:** §5: TLM agents (fix, review, conflict, WIP, queue) now get the repo's `review.repos` notes, as the
   reviewer does, and fidesplus' notes say to run `./scripts/generate_types.sh` after a schema change. A review round on
   fidesplus#7692 changed a schema docstring without regenerating the types and cost a red CI round.
+- **2026-11-25:** §4: a failure's log is now its tail led by the key lines above it (pytest's `FAILED`/`E   `
+  lines, `##[error]`, at most 40). fidesplus#7693's CI agent escalated a Temporal timeout as "log cut off": nox's
+  teardown filled the 150-line tail and pushed the failing test and its traceback out.
