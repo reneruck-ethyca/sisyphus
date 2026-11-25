@@ -338,7 +338,8 @@ There is no diff-size rule (dropped 2026-11-18).
 The button mirrors GitHub's: it needs GitHub's review decision to be approved and the required
 checks green, so an approval of an older head counts when the repo keeps stale approvals. A merge
 mode (`approved`, `auto`) is stricter: it needs a current human approval, one that isn't stale and
-isn't a bot's. Every TLM merge is pinned to the head it saw. A merge freeze holds
+isn't a bot's. Every TLM merge is pinned to the head it saw, and a button press to the head it was
+pressed on: if the head moves first, the press is dropped and has to be made again. A merge freeze holds
 `approved` and `auto`, not the button, and not GitHub's own auto-merge, whose timing is GitHub's.
 A PR GitHub reports as already mergeable can't get auto-merge, so TLM merges it itself. Turning the mode to `off` (or `shadow`) withdraws a pressed
 button and turns off GitHub auto-merge that TLM turned on; auto-merge a person set on GitHub is
@@ -761,4 +762,5 @@ None right now.
   artifacts). fidesplus#7730's review round built fides-js to load a UI and went needs-human over 43 such files.
 - **2026-11-25:** §7: the merge button takes GitHub's review decision, as GitHub's own button does, instead of
   requiring a fresh human approval of the current head. fidesplus#7693 was approved on an earlier head: GitHub
-  would merge it, the dashboard hid the button. The merge modes keep the fresh-human-approval rule.
+  would merge it, the dashboard hid the button. The merge modes keep the fresh-human-approval rule. A press now records its head and is dropped if the
+  head moves before the merge, since GitHub may keep the approval across a push the person never saw.

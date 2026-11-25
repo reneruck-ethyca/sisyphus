@@ -25,7 +25,7 @@ func (m *Manager) Merge(_ context.Context, id string) (Handoff, error) {
 		if why := mergeRefusal(*h); why != "" {
 			return invalid("handoff %s can't merge: %s", id, why)
 		}
-		h.MergeRequested = true
+		h.MergeRequested, h.MergeRequestedHead = true, h.Snapshot.Head
 		logEvent(h, m.now(), "merge", "merge requested from the dashboard")
 		return nil
 	})
@@ -142,6 +142,11 @@ var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, State
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
 	mode := h.Autonomy.Merge
 	s.AutoMerge = m.autoMergeOn(*h, s)
+	// A press merges the head the person saw: GitHub may keep the approval across a push they didn't see.
+	if h.MergeRequested && s.Head != h.MergeRequestedHead {
+		h.MergeRequested, h.MergeRequestedHead = false, ""
+		logEvent(h, m.now(), "merge", "the head moved after merge was pressed; press it again to merge the new head")
+	}
 	// GitHub may clear the auto-merge request as it moves the PR into the queue.
 	if h.AutoMergeSet && (mode == MergeAuto || mode == MergeApproved) && !s.AutoMerge && !s.InQueue &&
 		s.Head == h.AutoMergeHead && h.QueueKicks == h.AutoMergeKicks {

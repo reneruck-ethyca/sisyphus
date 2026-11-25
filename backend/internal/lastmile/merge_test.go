@@ -977,3 +977,28 @@ func TestMergeAndModeAreLogged(t *testing.T) {
 		t.Errorf("merge events %q, want %q", got, want)
 	}
 }
+
+// GitHub may keep an approval across a push; the press still covers only the head it was made on.
+func TestMergeButtonPinnedToPressedHead(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{})
+	p := mergeable()
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if _, err := m.Merge(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	p.HeadSHA = "h2"
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); len(gh.Merged) != 0 || h.MergeRequested {
+		t.Fatalf("merged %v, requested %v", gh.Merged, h.MergeRequested)
+	}
+	if _, err := m.Merge(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	m.tick(context.Background())
+	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
+		t.Errorf("second press: merged %v", gh.Merged)
+	}
+}
