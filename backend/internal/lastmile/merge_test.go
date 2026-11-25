@@ -1002,3 +1002,23 @@ func TestMergeButtonPinnedToPressedHead(t *testing.T) {
 		t.Errorf("second press: merged %v", gh.Merged)
 	}
 }
+
+func TestSquashMergeKicksNextTick(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{})
+	gh.Snapshots[prRef.Key()] = mergeable()
+	m.tick(context.Background())
+	if _, err := m.Merge(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	select { // the press kicks too
+	case <-m.kick:
+	default:
+	}
+	m.tick(context.Background())
+	select {
+	case <-m.kick:
+	default:
+		t.Errorf("merged %v without a kick", gh.Merged)
+	}
+}

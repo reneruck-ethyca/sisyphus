@@ -207,6 +207,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		return m.refused(ctx, h, err, state, reason)
 	}
 	logEvent(h, m.now(), "merge", "squash-merged "+s.Head[:min(len(s.Head), 12)])
+	m.Kick() // the next tick reads the PR as merged and finishes the handoff, instead of a full interval later
 	return state, reason, nil
 }
 
