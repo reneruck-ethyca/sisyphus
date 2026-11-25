@@ -80,21 +80,44 @@ func (a *API) do(ctx context.Context, method, path string, in any) (body []byte,
 			return nil, "", err
 		}
 	}
-	err = a.call(func(rest *api.RESTClient, _ *api.GraphQLClient) error {
-		var r io.Reader
-		if payload != nil {
-			r = bytes.NewReader(payload)
+	for i := 0; ; i++ {
+		err = a.call(func(rest *api.RESTClient, _ *api.GraphQLClient) error {
+			return request(ctx, rest, method, path, payload, &body, &next)
+		})
+		// A 5xx is usually GitHub having a moment. Not for POST: it may have gone through.
+		if i == len(retryDelays) || method == http.MethodPost || !serverError(err) {
+			return body, next, err
 		}
-		resp, err := rest.RequestWithContext(ctx, method, path, r)
-		if err != nil {
-			return err
+		select {
+		case <-ctx.Done():
+			return body, next, err
+		case <-time.After(retryDelays[i]):
 		}
-		defer resp.Body.Close()
-		next = nextPage(resp.Header.Get("Link"))
-		body, err = io.ReadAll(resp.Body)
+	}
+}
+
+// retryDelays is the wait before each retry of a request GitHub answered with a 5xx.
+var retryDelays = []time.Duration{time.Second, 3 * time.Second}
+
+func serverError(err error) bool {
+	var he *api.HTTPError
+	return errors.As(err, &he) && he.StatusCode >= 500
+}
+
+// request sends one REST request, reading the reply into body and next.
+func request(ctx context.Context, rest *api.RESTClient, method, path string, payload []byte, body *[]byte, next *string) error {
+	var r io.Reader
+	if payload != nil {
+		r = bytes.NewReader(payload)
+	}
+	resp, err := rest.RequestWithContext(ctx, method, path, r)
+	if err != nil {
 		return err
-	})
-	return body, next, err
+	}
+	defer resp.Body.Close()
+	*next = nextPage(resp.Header.Get("Link"))
+	*body, err = io.ReadAll(resp.Body)
+	return err
 }
 
 // send is do with the reply decoded into out (nil = ignored).

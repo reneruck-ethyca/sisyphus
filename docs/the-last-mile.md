@@ -771,3 +771,5 @@ None right now.
   onto pbac2; #7730's plain rebase onto the new #7729 replayed #7692's old commits and ran out of conflict rounds on
   files it never touched. Also: a stale-rebase abort after a restart now removes the killed git's `index.lock`
   first (older than the process), which had left #7728 mid-rebase.
+- **2026-11-25:** GitHub REST calls other than POST are retried twice on a 5xx (1s, 3s). fidesplus#7730's clean
+  restack went needs-human because removing its downrev label before the push hit a passing HTTP 500.

@@ -261,3 +261,17 @@ func TestQueueFailures(t *testing.T) {
 		t.Errorf("no runs: %+v, %v", got, err)
 	}
 }
+
+func TestRetries5xxExceptPOST(t *testing.T) {
+	defer func(d []time.Duration) { retryDelays = d }(retryDelays)
+	retryDelays = []time.Duration{0, 0}
+	ctx := context.Background()
+	a, s := newStub(map[string][]reply{"DELETE /repos/o/r/issues/1/labels/l": {{status: 500}, {status: 504}, {status: 200, body: `[]`}}})
+	if _, _, err := a.do(ctx, http.MethodDelete, "repos/o/r/issues/1/labels/l", nil); err != nil || len(s.got) != 3 {
+		t.Errorf("DELETE = %v after %d calls", err, len(s.got))
+	}
+	a, s = newStub(map[string][]reply{"POST /repos/o/r/issues/1/comments": {{status: 502}}})
+	if _, _, err := a.do(ctx, http.MethodPost, "repos/o/r/issues/1/comments", []byte(`{}`)); !IsStatus(err, 502) || len(s.got) != 1 {
+		t.Errorf("POST = %v after %d calls", err, len(s.got))
+	}
+}
