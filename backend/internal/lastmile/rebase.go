@@ -187,6 +187,9 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 // open handoff whose branch is h's base, else an open PR nobody handed off, which TLM
 // only watches (looked up once per base). A protected base is a long-lived branch, not a parent.
 func (m *Manager) detectStack(ctx context.Context, h *Handoff, p github.PRSnapshot) error {
+	if p.Stack != nil {
+		h.StackNumber = p.Stack.Number
+	}
 	base := p.BaseRef
 	if h.StackParent != "" || base == "" || p.BaseProtected {
 		return nil
@@ -199,14 +202,14 @@ func (m *Manager) detectStack(ctx context.Context, h *Handoff, p github.PRSnapsh
 		logEvent(h, m.now(), "stack", "joined the stack under "+hs[i].ID)
 		return nil
 	}
-	if base == h.ChainBase {
+	if base == h.ChainBase || h.ParentPR != 0 { // a watched parent is stack()'s until it merges or closes
 		return nil
 	}
 	ref, ok, err := m.GH.FindPR(ctx, h.Repo, base)
 	if err != nil {
 		return err
 	}
-	h.ChainBase, h.ParentPR = base, 0
+	h.ChainBase = base
 	if ok {
 		h.ParentPR, h.Base = ref.Number, base
 		logEvent(h, m.now(), "stack", fmt.Sprintf("chained on #%d, which nobody handed off: watched, never merged", ref.Number))
@@ -278,6 +281,9 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		return false, nil
 	}
 	h.ParentMerged = true // afterCommit sends stack-parent-merged on this change
+	if h.StackNumber != 0 {
+		return true, m.nativeRestacked(ctx, h, p, parent)
+	}
 	newBase := parent.base
 	if cmp.Or(p.BaseRef, h.Base) != newBase {
 		if err := m.GH.EditPR(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, github.PREdit{Base: newBase}); err != nil {
@@ -297,6 +303,51 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		m.setState(h, StateCIRunning, "rebasing onto "+newBase)
 	}
 	return true, nil
+}
+
+// nativeRestacked follows GitHub's own restack of a native stack after the PR below
+// merged: TLM neither retargets nor rebases (that would race GitHub's force-push). Once
+// GitHub retargeted the PR, the worktree moves to the head GitHub pushed.
+func (m *Manager) nativeRestacked(ctx context.Context, h *Handoff, p github.PRSnapshot, parent below) error {
+	if p.BaseRef == "" || p.BaseRef == h.Base {
+		m.setState(h, h.State, "waiting for GitHub to restack after "+parent.name+" merged")
+		return nil
+	}
+	if err := m.syncWorktree(ctx, *h, p.HeadSHA); err != nil {
+		h.EscalatedBy = TriggerConflict
+		m.escalate(ctx, h, "the worktree can't follow GitHub's restack: "+err.Error())
+		return nil
+	}
+	logEvent(h, m.now(), "stack", fmt.Sprintf("%s merged: GitHub restacked onto %s; worktree synced to %s", parent.name, p.BaseRef, short(p.HeadSHA)))
+	h.Base = p.BaseRef
+	h.StackParent, h.ParentHead, h.ParentPR, h.StackNumber = "", "", 0, 0
+	return nil
+}
+
+// syncWorktree moves h's worktree to head, a push TLM didn't make, when the worktree
+// holds nothing of its own: clean, and at what the branch last had on origin.
+func (m *Manager) syncWorktree(ctx context.Context, h Handoff, head string) error {
+	unlock, err := m.lockWorktree(ctx, h.ID, h.Worktree)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	git := func(args ...string) (string, error) { return proc.Run(ctx, h.Worktree, "git", args...) }
+	if st, err := status(ctx, h); err != nil || st != "" {
+		return errors.New("it has uncommitted changes")
+	}
+	local, err := git("rev-parse", "HEAD")
+	if err != nil || local == head {
+		return err
+	}
+	if pushed, _ := git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+h.Branch); pushed != local {
+		return fmt.Errorf("it has commits that aren't on origin/%s", h.Branch)
+	}
+	if _, err := git("fetch", "--quiet", "origin", fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", h.Branch, h.Branch)); err != nil {
+		return err
+	}
+	_, err = git("reset", "--quiet", "--hard", head)
+	return err
 }
 
 // restack is the background work of a rebase: it takes the worktree lock, rebases on
@@ -540,3 +591,6 @@ func (m *Manager) checkResolution(ctx context.Context, dir string, files, untrac
 }
 
 // clip cuts s to n bytes, on a character boundary.
+
+// short is a sha cut to 12 characters for an event.
+func short(sha string) string { return sha[:min(len(sha), 12)] }

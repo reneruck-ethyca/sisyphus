@@ -141,6 +141,7 @@ type Handoff struct {
 	ParentMerged bool   `json:"parent_merged,omitempty"` // the parent merged, and stack-parent-merged was sent
 	ParentPR     int    `json:"parent_pr,omitempty"`     // the open PR below, when nobody handed it off: watched, never merged
 	ChainBase    string `json:"chain_base,omitempty"`    // the base last looked up for a parent PR
+	StackNumber  int    `json:"stack_number,omitempty"`  // the native GitHub stack it was last seen in: GitHub restacks it
 
 	// Reviewer bookkeeping (design §6): GitHub is the source of truth after the first request.
 	BotRequested     bool      `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once

@@ -167,3 +167,75 @@ func TestNativeStackMergesOnlyTheBottom(t *testing.T) {
 		t.Fatalf("auto %v merged %v async %v; %q", gh.AutoMerged, gh.Merged, gh.AsyncMerged, h.Reason)
 	}
 }
+
+func TestNativeBottomMergesAsync(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.AutoMergeAllowed = true
+	p.Stack = &github.PRStack{Number: 3, Base: "main", Bottom: prRef.Number, Position: 1, Size: 2}
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); len(gh.AsyncMerged) != 1 || len(gh.AutoMerged)+len(gh.Merged) != 0 || h.Error != "" {
+		t.Fatalf("async %v auto %v merged %v; %+v", gh.AsyncMerged, gh.AutoMerged, gh.Merged, h)
+	}
+}
+
+// githubRestacks does what GitHub does to a native stack's child once the PR below
+// squash-merged: replays the child's commit onto main and force-pushes it. It returns the new head.
+func githubRestacks(t *testing.T, clone string) string {
+	t.Helper()
+	up := gittest.Git(t, clone, "remote", "get-url", "origin")
+	other := filepath.Join(t.TempDir(), "gh")
+	gittest.Git(t, filepath.Dir(other), "clone", "-q", up, other)
+	gittest.Git(t, other, "checkout", "-q", "-b", "restacked", "origin/main")
+	gittest.Commit(t, other, "b.txt", "child")
+	gittest.Git(t, other, "push", "-q", "-f", "origin", "HEAD:feature/y")
+	return gittest.Git(t, other, "rev-parse", "HEAD")
+}
+
+func retargets(edits []github.PREdit) int {
+	n := 0
+	for _, e := range edits {
+		if e.Base != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestNativeChildLetsGitHubRestack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, clone, child := watchedFixture(t, Request{})
+	native := &github.PRStack{Number: 3, Base: "main", Bottom: watchedRef.Number, Position: 2, Size: 2}
+	c := gh.Snapshots[childRef.Key()]
+	c.Stack = native
+	gh.Snapshots[childRef.Key()] = c
+	m.tick(ctx)
+	if h := m.must(t, child.ID); h.StackNumber != 3 || h.ParentPR != watchedRef.Number {
+		t.Fatalf("child = %+v", h)
+	}
+
+	advanceMain(t, clone, "a.txt", "squashed")
+	p := gh.Snapshots[watchedRef.Key()]
+	p.State = "MERGED"
+	gh.Snapshots[watchedRef.Key()] = p
+	m.tick(ctx) // merged, but GitHub hasn't restacked the child yet
+	h := m.must(t, child.ID)
+	if _, busy := m.running.get(child.ID); retargets(gh.Edits) != 0 || busy || !strings.Contains(h.Reason, "GitHub") {
+		t.Fatalf("before GitHub's restack: edits %+v, %+v", gh.Edits, h)
+	}
+
+	head := githubRestacks(t, clone)
+	c.BaseRef, c.HeadSHA, c.Stack = "main", head, nil // a one-PR stack is gone
+	gh.Snapshots[childRef.Key()] = c
+	m.tick(ctx)
+	h = m.must(t, child.ID)
+	if retargets(gh.Edits) != 0 || h.Base != "main" || h.ParentPR != 0 || h.StackNumber != 0 || h.State == StateNeedsHuman {
+		t.Fatalf("after GitHub's restack: edits %+v, %+v", gh.Edits, h)
+	}
+	if got := gittest.Git(t, h.Worktree, "rev-parse", "HEAD"); got != head {
+		t.Errorf("worktree at %s, want GitHub's %s", got, head)
+	}
+}

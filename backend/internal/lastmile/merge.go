@@ -156,7 +156,10 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		if err := m.letGo(ctx, h); err != nil {
 			return state, reason, err
 		}
-		return state, cmp.Or(reason, why), nil
+		if state == StateApproved {
+			reason = why
+		}
+		return state, reason, nil
 	}
 	mode := h.Autonomy.Merge
 	s.AutoMerge = m.autoMergeOn(*h, s)
@@ -175,7 +178,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	}
 	// GitHub won't enable auto-merge on a PR that is already mergeable: TLM merges that one itself.
 	// Nor does TLM hand it a PR on a repo that requires no review: GitHub would merge it unapproved.
-	native := s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved) &&
+	native := s.Stack == nil && s.AutoMergeAllowed && !h.MergeRequested && (mode == MergeAuto || mode == MergeApproved) &&
 		s.ReviewDecision != "" && (s.AutoMerge || !slices.Contains(mergeableNow, s.MergeState))
 	switch {
 	case native && !s.Draft && !s.AutoMerge && !s.InQueue:
@@ -209,11 +212,23 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		(mode == MergeAuto && !evaluate(*h, s, m.cfg.LastMile, m.now()).WouldMerge)) {
 		return state, reason, nil
 	}
-	if s.MergeQueue {
-		// GitHub may not show the PR in the queue for a tick or two after it was added.
-		if m.enqueuing(*h) {
+	if s.MergeQueue && m.enqueuing(*h) { // GitHub may not show the PR in the queue for a tick or two after it was added
+		return StateQueued, "", nil
+	}
+	if s.Stack != nil { // the classic merge endpoint and enqueue refuse a stacked PR
+		if err := m.GH.MergeAsync(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, s.Head, s.MergeQueue); err != nil {
+			return m.refused(ctx, h, err, state, reason)
+		}
+		if s.MergeQueue {
+			h.EnqueuedAt, h.EnqueuedHead = m.now(), s.Head
+			logEvent(h, m.now(), "merge", fmt.Sprintf("added to the merge queue (stack #%d)", s.Stack.Number))
 			return StateQueued, "", nil
 		}
+		logEvent(h, m.now(), "merge", fmt.Sprintf("squash-merge of %s requested (stack #%d)", short(s.Head), s.Stack.Number))
+		m.Kick()
+		return state, reason, nil
+	}
+	if s.MergeQueue {
 		if err := m.GH.Enqueue(ctx, s.NodeID); err != nil {
 			return m.refused(ctx, h, err, state, reason)
 		}
@@ -224,7 +239,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 	if err := m.GH.MergeSquash(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, s.Head); err != nil {
 		return m.refused(ctx, h, err, state, reason)
 	}
-	logEvent(h, m.now(), "merge", "squash-merged "+s.Head[:min(len(s.Head), 12)])
+	logEvent(h, m.now(), "merge", "squash-merged "+short(s.Head))
 	m.Kick() // the next tick reads the PR as merged and finishes the handoff, instead of a full interval later
 	return state, reason, nil
 }
