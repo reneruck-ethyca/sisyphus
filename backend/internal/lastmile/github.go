@@ -21,6 +21,7 @@ type GitHub interface {
 	RunLog(ctx context.Context, repo string, runID, jobID int64) (string, error)
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 	MergeSquash(ctx context.Context, ref github.PRRef, head string) error
+	MergeAsync(ctx context.Context, ref github.PRRef, head string, queue bool) error
 	Enqueue(ctx context.Context, nodeID string) error
 	Dequeue(ctx context.Context, nodeID string) error
 	EnableAutoMerge(ctx context.Context, nodeID string) error
@@ -46,6 +47,8 @@ type FakeGitHub struct {
 	Logs         map[int64]string // RunLog by job id
 	Reruns       []int64          // runs RerunFailed was asked for
 	Merged       []github.PRRef   // MergeSquash calls
+	AsyncMerged  []github.PRRef   // MergeAsync calls
+	Found        map[string]int   // FindPR by branch, over Existing
 	Enqueued     []string         // node ids Enqueue was asked for
 	Dequeued     []string         // node ids Dequeue was asked for
 	AutoMerged   []string         // node ids EnableAutoMerge was asked for
@@ -107,7 +110,10 @@ func (f *FakeGitHub) CreateLabel(_ context.Context, _, name, _, _ string) error 
 	return f.Err
 }
 
-func (f *FakeGitHub) FindPR(context.Context, string, string) (github.PRRef, bool, error) {
+func (f *FakeGitHub) FindPR(_ context.Context, repo, branch string) (github.PRRef, bool, error) {
+	if n, ok := f.Found[branch]; ok {
+		return github.PRRef{Repo: repo, Number: n}, true, f.Err
+	}
 	return f.Existing, f.Existing.Number != 0, f.Err
 }
 
@@ -122,6 +128,11 @@ func (f *FakeGitHub) RerunFailed(_ context.Context, _ string, runID int64) error
 
 func (f *FakeGitHub) MergeSquash(_ context.Context, ref github.PRRef, _ string) error {
 	f.Merged = append(f.Merged, ref)
+	return cmp.Or(f.MergeErr, f.Err)
+}
+
+func (f *FakeGitHub) MergeAsync(_ context.Context, ref github.PRRef, _ string, _ bool) error {
+	f.AsyncMerged = append(f.AsyncMerged, ref)
 	return cmp.Or(f.MergeErr, f.Err)
 }
 

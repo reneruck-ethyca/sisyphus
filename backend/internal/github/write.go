@@ -230,6 +230,17 @@ func (a *API) MergeSquash(ctx context.Context, ref PRRef, head string) error {
 	return a.send(ctx, http.MethodPut, pullPath(ref)+"/merge", map[string]string{"merge_method": "squash", "sha": head}, nil)
 }
 
+// MergeAsync squash-merges a PR in a native stack, which the classic merge endpoint
+// refuses: through the base's merge queue when queue, else directly. GitHub merges in
+// the background; the PR's state shows the outcome.
+func (a *API) MergeAsync(ctx context.Context, ref PRRef, head string, queue bool) error {
+	body := map[string]string{"merge_method": "squash", "sha": head}
+	if queue {
+		body = map[string]string{"merge_action": "merge_queue", "sha": head}
+	}
+	return a.send(ctx, http.MethodPut, pullPath(ref)+"/merge-async", body, nil)
+}
+
 // Enqueue puts the PR (by GraphQL node id) in its base's merge queue.
 func (a *API) Enqueue(ctx context.Context, nodeID string) error {
 	return a.graphql(ctx, `mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){clientMutationId}}`,

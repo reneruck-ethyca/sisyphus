@@ -57,3 +57,24 @@ func TestParsePRView(t *testing.T) {
 		t.Error("garbage should fail")
 	}
 }
+
+func TestParsePRViewStack(t *testing.T) {
+	b := []byte(`{"repository":{"pullRequest":{"number":11,"baseRefName":"main","baseRef":{"refUpdateRule":{"pattern":"main"}},
+"stack":{"number":3,"baseRefName":"main","entries":{"nodes":[
+ {"position":2,"pullRequest":{"number":11,"state":"OPEN"}},
+ {"position":1,"pullRequest":{"number":10,"state":"MERGED"}},
+ {"position":3,"pullRequest":{"number":12,"state":"OPEN"}}]}},
+"stackEntry":{"position":2}}}}`)
+	s, _, err := parsePRView(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PRStack{Number: 3, Base: "main", Bottom: 11, Position: 2, Size: 3}
+	if s.Stack == nil || *s.Stack != want || !s.BaseProtected {
+		t.Errorf("stack = %+v, protected %v", s.Stack, s.BaseProtected)
+	}
+	s, _, err = parsePRView([]byte(`{"repository":{"pullRequest":{"number":11,"baseRef":{"refUpdateRule":null},"stack":null,"stackEntry":null}}}`))
+	if err != nil || s.Stack != nil || s.BaseProtected {
+		t.Errorf("plain PR: %+v, %v", s, err)
+	}
+}

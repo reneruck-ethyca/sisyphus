@@ -54,6 +54,17 @@ type PRSnapshot struct {
 	AutoMergeAllowed               bool   // the repo allows auto-merge
 	MergeQueue, InQueue, AutoMerge bool   // base has a merge queue; the PR is in it; auto-merge is on
 	QueueRemovals                  []QueueRemoval
+	Stack                          *PRStack // nil outside a native GitHub stack
+	BaseProtected                  bool     // the base branch has a protection rule or ruleset
+}
+
+// PRStack is the PR's place in a native GitHub stack.
+type PRStack struct {
+	Number   int    `json:"number"`
+	Base     string `json:"base"`   // the stack's trunk
+	Bottom   int    `json:"bottom"` // the lowest open PR: the only one that may merge
+	Position int    `json:"position"`
+	Size     int    `json:"size"`
 }
 
 // checkNodes is one page of a head commit's checks: check runs and commit statuses.
@@ -70,6 +81,8 @@ reviews(last:100){nodes{author{login __typename} state body submittedAt commit{o
 reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login} ... on Bot{login} ... on Mannequin{login} ... on Team{slug}}}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){` + checkNodes + `}}}}}
 files(first:100){nodes{path}}
+baseRef{refUpdateRule{pattern}}
+stack{number baseRefName entries(first:100){nodes{position pullRequest{number state}}}} stackEntry{position}
 }}}`
 
 // checksQuery reads the checks after cursor, for a PR with more than one page of them.
@@ -196,6 +209,23 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 				Files nodes[struct {
 					Path string `json:"path"`
 				}] `json:"files"`
+				BaseRef *struct {
+					RefUpdateRule *struct{} `json:"refUpdateRule"`
+				} `json:"baseRef"`
+				Stack *struct {
+					Number      int    `json:"number"`
+					BaseRefName string `json:"baseRefName"`
+					Entries     nodes[struct {
+						Position    int `json:"position"`
+						PullRequest struct {
+							Number int    `json:"number"`
+							State  string `json:"state"`
+						} `json:"pullRequest"`
+					}] `json:"entries"`
+				} `json:"stack"`
+				StackEntry *struct {
+					Position int `json:"position"`
+				} `json:"stackEntry"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	}
@@ -262,6 +292,19 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 	}
 	for _, f := range p.Files.Nodes {
 		s.Files = append(s.Files, f.Path)
+	}
+	s.BaseProtected = p.BaseRef != nil && p.BaseRef.RefUpdateRule != nil
+	if st := p.Stack; st != nil {
+		s.Stack = &PRStack{Number: st.Number, Base: st.BaseRefName, Size: len(st.Entries.Nodes)}
+		if p.StackEntry != nil {
+			s.Stack.Position = p.StackEntry.Position
+		}
+		low := 0 // GitHub doesn't say whether merged entries leave the stack: the bottom is the lowest open one
+		for _, e := range st.Entries.Nodes {
+			if e.PullRequest.State == "OPEN" && (low == 0 || e.Position < low) {
+				low, s.Stack.Bottom = e.Position, e.PullRequest.Number
+			}
+		}
 	}
 	return s, after, nil
 }
