@@ -42,7 +42,7 @@ function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
   const head = (v: HandoffView) => <><span class="row"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Ago t={v.updated} /></span>
     <span class="title">{v.title}</span></>;
   const item = (v: HandoffView) => <a key={v.id} class="pr" href={`/lastmile/${v.id}`} aria-current={cur(v)}>{head(v)}{meta(v)}</a>;
-  // A stack or chain on a rail: top first, its base at the foot, as GitHub draws a stack.
+  // A stack or chain on a rail in merge order: its base branch on top, then the PR that merges first.
   const rail = (g: HandoffView[]) => {
     const bottom = g[0], gs = g.find((v) => v.snapshot?.stack)?.snapshot?.stack, ghost = bottom.parent_pr;
     if (g.length === 1 && !gs && !ghost) return item(bottom);
@@ -53,14 +53,15 @@ function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
       return ghost ? `waits for #${ghost}` : [pos, next && "lands next"].filter(Boolean).join(" · ");
     };
     return <div key={bottom.id} class={"rail" + (gs ? "" : " chain")}>
-      <div class="cap">{gs ? <StackIcon /> : <ChainIcon />}{gs ? "GitHub stack" : "Branch chain"} · top first</div>
-      {[...g].reverse().map((v) => <a key={v.id} class="pr rr" href={`/lastmile/${v.id}`} aria-current={cur(v)}>
+      <div class="base" title={`${gs ? "GitHub stack" : "Branch chain"} onto this base, in merge order`}>
+        <span class="node">{gs ? <StackIcon /> : <ChainIcon />}</span>{gs?.base ?? (bottom.snapshot?.base || bottom.base)}</div>
+      {ghost ? <div class="rr ghost"><span class="node"><span class="dot hollow" /></span>
+        <span class="body"><span class="meta">{base(bottom.repo)} #{ghost} · not a handoff, open</span></span></div>
+        : null}
+      {g.map((v) => <a key={v.id} class="pr rr" href={`/lastmile/${v.id}`} aria-current={cur(v)}>
         <span class="node"><span class={`dot ${handoffTone(v.state)}${v === bottom && next ? " next" : ""}`} /></span>
         <span class="body">{head(v)}{meta(v, note(v))}</span>
       </a>)}
-      {ghost ? <div class="rr ghost"><span class="node"><span class="dot hollow" /></span>
-        <span class="body"><span class="meta">{base(bottom.repo)} #{ghost} · not a handoff, open</span></span></div>
-        : <div class="foot"><span class="node"><span class="tick" /></span>{gs?.base ?? bottom.base}</div>}
     </div>;
   };
   return <>
@@ -74,15 +75,14 @@ function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
 function Overview({ s }: { s: Status }) {
   const hs = s.handoffs ?? [], needs = s.needs_human ?? [];
   return <main>
-    <div class="pagehead"><h1>Last mile</h1><div class="meta-line"><span>{plural(hs.length, "handoff")}</span>
-      <a href="/lastmile/shadow">Shadow-merge report →</a></div></div>
+    <div class="pagehead"><h1>Last mile</h1><div class="meta-line"><span>{plural(hs.length, "handoff")}</span></div></div>
     {!s.handoffs && <p class="notice quiet">The last mile is off (<code>lastmile.disabled</code>).</p>}
     <section aria-labelledby="needs"><h2 id="needs">Needs you</h2>
       {needs.length ? needs.map((v) => <p class="notice" role="alert" key={v.id}><b><a href={`/lastmile/${v.id}`}>{v.id}{v.pr_number ? ` · ${base(v.repo)} #${v.pr_number}` : ""}</a></b>
         {" "}{v.title}{v.prev_state && ` (was ${v.prev_state})`}: {v.reason}{" "}<ApprovalNote v={v} />
         {v.pr_url && <><Ext href={v.pr_url}>Open PR ↗</Ext>{" "}</>}<a href={`/lastmile/${v.id}`}>Open handoff →</a></p>)
         : <div class="card empty"><div><b>Nothing needs you right now</b>
-          <div class="muted">{hs.length ? "Pick a handoff on the left to see its state, merge policy and timeline." : <>An agent hands a branch over with <code>tlm handoff</code>.</>}</div></div></div>}
+          <div class="muted">{hs.length ? "Pick a handoff on the left to see its state, reviewers and timeline." : <>An agent hands a branch over with <code>tlm handoff</code>.</>}</div></div></div>}
     </section>
   </main>;
 }
