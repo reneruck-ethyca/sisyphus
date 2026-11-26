@@ -19,20 +19,55 @@ export function LastMile({ status: s, id }: { status?: Status; id?: string }) {
   </Page>;
 }
 
+// stacks splits the open handoffs, in Views order (each root followed by its descendants), into
+// one run per stack, bottom first. A handoff whose parent is over starts its own run.
+// ponytail: a fork (two children on one parent) still draws as one straight rail.
+export function stacks(open: HandoffView[]): HandoffView[][] {
+  const out: HandoffView[][] = [];
+  for (const v of open) v.waiting_on && out.length ? out[out.length - 1].push(v) : out.push([v]);
+  return out;
+}
+
+const StackIcon = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+  <rect x="2" y="9" width="12" height="4" rx="1" /><path d="M4 6.5h8M6 3.5h4" /></svg>;
+const ChainIcon = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+  <path d="M6.5 9.5l3-3" /><path d="M7 4.5l1.2-1.2a2.5 2.5 0 013.5 3.5L10.5 8" /><path d="M9 11.5l-1.2 1.2a2.5 2.5 0 01-3.5-3.5L5.5 8" /></svg>;
+
 function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
-  const open = hs.filter((v) => !v.over).map((v) => v.waiting_on ? v : { ...v, depth: 0 });
+  const open = hs.filter((v) => !v.over);
   const done = hs.filter((v) => v.over).sort((a, b) => b.updated.localeCompare(a.updated));
-  const item = (v: HandoffView) => <a key={v.id} class={"pr" + (v.depth ? ` depth${Math.min(v.depth, 3)}` : "")} href={`/lastmile/${v.id}`}
-    aria-current={v.id === sel ? "page" : undefined}>
-    <span class="row"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Ago t={v.updated} /></span>
-    <span class="title">{v.title}</span>
-    <span class="meta">{v.pr_number ? `${base(v.repo)} #${v.pr_number}` : v.id}{v.waiting_on && ` · waiting on ${v.waiting_on}`}{!!v.parent_pr && ` · on #${v.parent_pr}`}{approval(v) && " · ✓ approved"}</span>
-  </a>;
+  const cur = (v: HandoffView) => v.id === sel ? "page" as const : undefined;
+  const meta = (v: HandoffView, note?: string | false) => <span class="meta">{v.pr_number ? `${base(v.repo)} #${v.pr_number}` : v.id}
+    {note && ` · ${note}`}{approval(v) && " · ✓ approved"}</span>;
+  const head = (v: HandoffView) => <><span class="row"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Ago t={v.updated} /></span>
+    <span class="title">{v.title}</span></>;
+  const item = (v: HandoffView) => <a key={v.id} class="pr" href={`/lastmile/${v.id}`} aria-current={cur(v)}>{head(v)}{meta(v)}</a>;
+  // A stack or chain on a rail: top first, its base at the foot, as GitHub draws a stack.
+  const rail = (g: HandoffView[]) => {
+    const bottom = g[0], gs = g.find((v) => v.snapshot?.stack)?.snapshot?.stack, ghost = bottom.parent_pr;
+    if (g.length === 1 && !gs && !ghost) return item(bottom);
+    const next = !ghost && (bottom.snapshot?.stack?.position ?? 1) === 1;
+    const note = (v: HandoffView) => {
+      const s = v.snapshot?.stack, pos = s && `${s.position} of ${s.size}`;
+      if (v !== bottom) return pos;
+      return ghost ? `waits for #${ghost}` : [pos, next && "lands next"].filter(Boolean).join(" · ");
+    };
+    return <div key={bottom.id} class={"rail" + (gs ? "" : " chain")}>
+      <div class="cap">{gs ? <StackIcon /> : <ChainIcon />}{gs ? "GitHub stack" : "Branch chain"} · top first</div>
+      {[...g].reverse().map((v) => <a key={v.id} class="pr rr" href={`/lastmile/${v.id}`} aria-current={cur(v)}>
+        <span class="node"><span class={`dot ${handoffTone(v.state)}${v === bottom && next ? " next" : ""}`} /></span>
+        <span class="body">{head(v)}{meta(v, note(v))}</span>
+      </a>)}
+      {ghost ? <div class="rr ghost"><span class="node"><span class="dot hollow" /></span>
+        <span class="body"><span class="meta">{base(bottom.repo)} #{ghost} · not a handoff, open</span></span></div>
+        : <div class="foot"><span class="node"><span class="tick" /></span>{gs?.base ?? bottom.base}</div>}
+    </div>;
+  };
   return <>
     <h2><span>Open</span><span>{open.length}</span></h2>
-    {open.length ? open.map(item) : <p class="empty">{hs.length ? "No open handoffs." : "No handoffs yet."}</p>}
+    {open.length ? stacks(open).map(rail) : <p class="empty">{hs.length ? "No open handoffs." : "No handoffs yet."}</p>}
     {!!done.length && <details class="history" open={done.some((v) => v.id === sel)}>
-      <summary><h2><span>History</span><span>{done.length}</span></h2></summary>{done.map(item)}</details>}
+      <summary><h2><span>History</span><span>{done.length}</span></h2></summary>{done.map((v) => item(v))}</details>}
   </>;
 }
 

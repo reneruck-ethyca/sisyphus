@@ -822,3 +822,7 @@ None right now.
   merged), when it is clean and fully pushed, else needs-human. GitHub's restack after a merge below counts as done
   only once the PR is retargeted *and* its head moved; after 30 minutes without it, needs-human. A `merge-async` is
   asked once per head; not merged 5 minutes later, needs-human.
+- **2026-11-26:** UI: the Last mile sidebar draws each stack or chain on a rail instead of indenting it (chosen from
+  six mocks on a Claude Design canvas): one dot per PR coloured by state, top of the stack first and its base branch
+  at the foot, as GitHub draws a stack. Solid rail for a native GitHub stack, dashed for a plain branch chain; the PR
+  that lands next has a ring, and a chain parent that isn't a handoff is a hollow dot at the foot. History stays flat.

@@ -10,7 +10,8 @@
   --neutral-bg: light-dark(#ebe8df, #3a3935); --neutral: light-dark(#5b5a54, #c9c5ba);
   --live-bg: light-dark(#e1e8f1, #273448); --live: light-dark(#3f5878, #a9c1e0);
   --merged-bg: light-dark(#ece5f4, #35294a); --merged: light-dark(#6b4a9a, #c9b3e8);
-  --bad-bg: light-dark(#f4dedb, #4a2522); --bad: light-dark(#9e3530, #f0a199); }
+  --bad-bg: light-dark(#f4dedb, #4a2522); --bad: light-dark(#9e3530, #f0a199);
+  --rail: light-dark(#c9a08c, #7a5646); --rail-chain: light-dark(#a9a598, #66635c); }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
@@ -108,10 +109,27 @@ section { display: flex; flex-direction: column; gap: 10px; }
 .list .grow { min-width: 0; }
 .list .ends { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .list time, .list .facts { color: var(--muted); font-size: 13px; }
-/* Last mile sidebar: a stack's children sit indented under their parent. */
-aside a.pr.depth1, aside a.pr.depth2, aside a.pr.depth3 { padding-left: 29px; }
-aside a.pr.depth2 { padding-left: 45px; } aside a.pr.depth3 { padding-left: 61px; }
-aside a.pr[class*="depth"] .title { border-left: 2px solid var(--line); padding-left: 8px; }
+/* Last mile sidebar: a stack or chain on a rail, one dot per PR coloured by state, top first and its base at the
+   foot. Solid: a GitHub stack; dashed: a plain branch chain. Each row draws its own piece of the line, so rows of
+   any height join up; the dot's centre sits 20px below a row's top. */
+aside .rail { --c: var(--rail); --s: solid; margin-top: 6px; }
+aside .rail.chain { --c: var(--rail-chain); --s: dashed; }
+aside .rail .cap { display: flex; align-items: center; gap: 6px; padding: 4px 16px 2px; font-size: 12px; color: var(--muted); }
+aside .rail .rr, aside .rail .foot { display: flex; flex-direction: row; gap: 10px; position: relative; padding: 10px 16px 10px 13px; border-left: 3px solid transparent; }
+aside .rail .rr::before, aside .rail .foot::before { content: ""; position: absolute; left: 22px; top: 0; bottom: 0; border-left: 2px var(--s) var(--c); }
+aside .rail .cap + .rr::before { top: 20px; }
+aside .rail .ghost::before { bottom: auto; height: 20px; }
+aside .rail .body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+aside .rail .node { flex: none; width: 20px; display: flex; justify-content: center; padding-top: 4px; position: relative; z-index: 1; }
+aside .rail .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--side); background: var(--neutral); }
+aside .rail .dot.bad { background: var(--bad); } aside .rail .dot.ok { background: var(--ok); }
+aside .rail .dot.open, aside .rail .dot.live { background: var(--live); } aside .rail .dot.merged { background: var(--merged); }
+aside .rail .dot.next { box-shadow: 0 0 0 2px var(--accent); }
+aside .rail .dot.hollow { background: var(--side); border-color: var(--muted); }
+aside .rail .foot { padding-top: 2px; padding-bottom: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+aside .rail .foot::before { bottom: auto; height: 11px; }
+aside .rail .foot .node { padding-top: 0; }
+aside .rail .tick { width: 10px; height: 2px; background: var(--c); }
 .rounds { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .rvs { display: flex; flex-wrap: wrap; gap: 4px; max-width: 230px; }
 .rv { font-size: 12px; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line); white-space: nowrap; color: var(--fg); }
