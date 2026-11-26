@@ -31,7 +31,8 @@ function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
   return <>
     <h2><span>Open</span><span>{open.length}</span></h2>
     {open.length ? open.map(item) : <p class="empty">{hs.length ? "No open handoffs." : "No handoffs yet."}</p>}
-    {!!done.length && <><h2><span>History</span><span>{done.length}</span></h2>{done.map(item)}</>}
+    {!!done.length && <details class="history" open={done.some((v) => v.id === sel)}>
+      <summary><h2><span>History</span><span>{done.length}</span></h2></summary>{done.map(item)}</details>}
   </>;
 }
 
