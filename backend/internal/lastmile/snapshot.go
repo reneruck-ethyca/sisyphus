@@ -62,6 +62,7 @@ type Snapshot struct {
 	AutoMerge        bool   `json:"auto_merge"` // GitHub auto-merge is on for the PR
 
 	QueueRemovals []github.QueueRemoval `json:"queue_removals,omitempty"`
+	Stack         *github.PRStack       `json:"stack,omitempty"` // the PR's native GitHub stack
 }
 
 // Ready says the PR is out of draft.
@@ -77,7 +78,7 @@ func (s Snapshot) Approved() bool {
 // buildSnapshot reads gh's view of the PR into a Snapshot; the caller adds Behind.
 func buildSnapshot(p github.PRSnapshot, opened, now time.Time, botLogins []string) Snapshot {
 	s := Snapshot{Head: p.HeadSHA, Author: p.Author, Draft: p.Draft, Mergeable: p.Mergeable, MergeState: p.MergeState,
-		ReviewDecision: p.ReviewDecision, Requested: p.RequestedUsers, Checks: p.Checks, Base: p.BaseRef,
+		ReviewDecision: p.ReviewDecision, Requested: p.RequestedUsers, Stack: p.Stack, Checks: p.Checks, Base: p.BaseRef,
 		Additions: p.Additions, Deletions: p.Deletions, Files: p.Files,
 		NodeID: p.NodeID, AutoMergeAllowed: p.AutoMergeAllowed, MergeQueue: p.MergeQueue, InQueue: p.InQueue, AutoMerge: p.AutoMerge,
 		QueueRemovals: p.QueueRemovals}

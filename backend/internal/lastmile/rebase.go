@@ -183,23 +183,88 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 	return true, nil
 }
 
+// detectStack links h to the PR below it when the handoff named none (design §3): an
+// open handoff whose branch is h's base, else an open PR nobody handed off, which TLM
+// only watches (looked up once per base). A protected base is a long-lived branch, not a parent.
+func (m *Manager) detectStack(ctx context.Context, h *Handoff, p github.PRSnapshot) error {
+	base := p.BaseRef
+	if h.StackParent != "" || base == "" || p.BaseProtected {
+		return nil
+	}
+	hs := m.List()
+	if i := slices.IndexFunc(hs, func(o Handoff) bool {
+		return o.ID != h.ID && o.Repo == h.Repo && o.Branch == base && !Terminal(o.State)
+	}); i >= 0 {
+		h.StackParent, h.Base, h.ParentPR, h.ChainBase = hs[i].ID, base, 0, base
+		logEvent(h, m.now(), "stack", "joined the stack under "+hs[i].ID)
+		return nil
+	}
+	if base == h.ChainBase {
+		return nil
+	}
+	ref, ok, err := m.GH.FindPR(ctx, h.Repo, base)
+	if err != nil {
+		return err
+	}
+	h.ChainBase, h.ParentPR = base, 0
+	if ok {
+		h.ParentPR, h.Base = ref.Number, base
+		logEvent(h, m.now(), "stack", fmt.Sprintf("chained on #%d, which nobody handed off: watched, never merged", ref.Number))
+	}
+	return nil
+}
+
+// below is the PR a stack child sits on: a handoff, or a PR TLM only watches.
+type below struct {
+	name, state string // state: a handoff state; a watched PR's is mapped onto them
+	base, head  string // the parent's base, and its last head
+}
+
+// parent reads the PR below h; ok is false when h isn't a stack child.
+func (m *Manager) parent(ctx context.Context, h Handoff) (b below, ok bool, err error) {
+	switch {
+	case h.StackParent != "":
+		p, found := m.Get(h.StackParent)
+		if !found {
+			return b, false, nil
+		}
+		b = below{name: p.ID, state: p.State, base: p.Base}
+		if p.Snapshot != nil {
+			b.head = p.Snapshot.Head
+		}
+		return b, true, nil
+	case h.ParentPR != 0:
+		// ponytail: one PR read per tick per watched parent; fine at a handful of chains.
+		p, err := m.GH.PRView(ctx, github.PRRef{Repo: h.Repo, Number: h.ParentPR})
+		if err != nil {
+			return b, false, err
+		}
+		b = below{name: fmt.Sprintf("#%d", h.ParentPR), state: StatePROpen, base: p.BaseRef, head: p.HeadSHA}
+		switch p.State {
+		case "MERGED":
+			b.state = StateMerged
+		case "CLOSED":
+			b.state = StateClosed
+		}
+		return b, true, nil
+	}
+	return b, false, nil
+}
+
 // stack handles a child of a stack (design §3). While the parent is open it notes the
 // parent's head, the old base point once a squash merge hides it. When the parent
 // merged it notifies, retargets the PR to the parent's own base and rebases onto it;
 // when it was closed or cancelled the child needs a human. true = took over this tick.
 func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s Snapshot) (bool, error) {
-	if h.StackParent == "" {
-		return false, nil
+	parent, ok, err := m.parent(ctx, *h)
+	if !ok || err != nil {
+		return false, err
 	}
-	parent, ok := m.Get(h.StackParent)
-	if !ok {
-		return false, nil
-	}
-	switch parent.State {
+	switch parent.state {
 	case StateClosed, StateCancelled:
-		h.StackParent, h.ParentHead = "", "" // a resumed handoff is a plain one on its base
+		h.StackParent, h.ParentHead, h.ParentPR = "", "", 0 // a resumed handoff is a plain one on its base
 		h.EscalatedBy = ""
-		m.escalate(ctx, h, "stack parent closed: "+parent.ID)
+		m.escalate(ctx, h, "stack parent closed: "+parent.name)
 		return true, nil
 	case StateMerged:
 	default:
@@ -213,18 +278,15 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		return false, nil
 	}
 	h.ParentMerged = true // afterCommit sends stack-parent-merged on this change
-	newBase := parent.Base
+	newBase := parent.base
 	if cmp.Or(p.BaseRef, h.Base) != newBase {
 		if err := m.GH.EditPR(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, github.PREdit{Base: newBase}); err != nil {
 			return true, fmt.Errorf("retargeting to %s: %w", newBase, err)
 		}
-		logEvent(h, m.now(), "retarget", fmt.Sprintf("parent %s merged: PR base %s -> %s", parent.ID, h.Base, newBase))
+		logEvent(h, m.now(), "retarget", fmt.Sprintf("parent %s merged: PR base %s -> %s", parent.name, h.Base, newBase))
 	}
 	h.Base = newBase
-	upstream := h.ParentHead
-	if upstream == "" && parent.Snapshot != nil {
-		upstream = parent.Snapshot.Head
-	}
+	upstream := cmp.Or(h.ParentHead, parent.head)
 	if upstream == "" {
 		h.EscalatedBy = TriggerConflict
 		m.escalate(ctx, h, "stack parent merged, but its last head is unknown, so the rebase has no old base point")

@@ -1,0 +1,137 @@
+package lastmile
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/reneruck/sisyphus/internal/github"
+	"github.com/reneruck/sisyphus/internal/gittest"
+)
+
+var watchedRef = github.PRRef{Repo: "ethyca/fidesplus", Number: 5}
+
+// chainChild hands off feature/y, one commit on top of feature/x, with base feature/x and no
+// --stack-parent, and ticks until its PR (#8) is open and read once.
+func chainChild(t *testing.T, m *Manager, clone string) Handoff {
+	t.Helper()
+	ctx := context.Background()
+	gh := m.GH.(*FakeGitHub)
+	dir := filepath.Join(t.TempDir(), "child")
+	gittest.Git(t, clone, "worktree", "add", "-q", "-b", "feature/y", dir, "feature/x")
+	gittest.Commit(t, dir, "b.txt", "child")
+	child, err := m.Handoff(ctx, Request{Worktree: dir, Base: "feature/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh.NextPR = childRef
+	m.tick(ctx)
+	gh.Snapshots[childRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, dir, "rev-parse", "HEAD"), BaseRef: "feature/x"}
+	m.tick(ctx)
+	return m.must(t, child.ID)
+}
+
+func TestChainUnderAHandoffIsLinked(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, clone, _ := fixture(t)
+	gh := m.GH.(*FakeGitHub)
+	gh.Snapshots = map[string]github.PRSnapshot{}
+	parent, err := m.Handoff(ctx, Request{Worktree: clone, Base: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh.NextPR = prRef
+	m.tick(ctx)
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), BaseRef: "main"}
+	child := chainChild(t, m, clone)
+	if child.StackParent != parent.ID || child.ParentPR != 0 || child.Base != "feature/x" {
+		t.Fatalf("child = %+v", child)
+	}
+	m.tick(ctx) // the next tick notes the parent's head, as for --stack-parent
+	if h := m.must(t, child.ID); h.ParentHead != gittest.Git(t, clone, "rev-parse", "HEAD") {
+		t.Errorf("parent head = %q", h.ParentHead)
+	}
+}
+
+// watchedFixture: feature/x is PR #5, which nobody handed off; feature/y is chained on it.
+func watchedFixture(t *testing.T) (*Manager, *FakeGitHub, string, Handoff) {
+	t.Helper()
+	m, clone, _ := fixture(t)
+	gh := m.GH.(*FakeGitHub)
+	gh.Snapshots = map[string]github.PRSnapshot{}
+	gh.Found = map[string]int{"feature/x": watchedRef.Number}
+	gittest.Git(t, clone, "push", "-q", "origin", "feature/x")
+	gh.Snapshots[watchedRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), BaseRef: "main"}
+	return m, gh, clone, chainChild(t, m, clone)
+}
+
+func TestChainOnAPRNobodyHandedOffIsWatchedThenRestacked(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, clone, child := watchedFixture(t)
+	if child.ParentPR != watchedRef.Number || child.StackParent != "" {
+		t.Fatalf("child = %+v", child)
+	}
+	m.tick(ctx)
+	if h := m.must(t, child.ID); h.ParentHead != gittest.Git(t, clone, "rev-parse", "HEAD") {
+		t.Fatalf("parent head = %q", h.ParentHead)
+	}
+	// Someone squash-merges #5.
+	advanceMain(t, clone, "a.txt", "squashed")
+	p := gh.Snapshots[watchedRef.Key()]
+	p.State = "MERGED"
+	gh.Snapshots[watchedRef.Key()] = p
+	m.tick(ctx)
+	h := m.must(t, child.ID)
+	if !h.ParentMerged || h.Base != "main" || len(gh.Edits) == 0 || gh.Edits[len(gh.Edits)-1].Base != "main" {
+		t.Fatalf("after merge: %+v, edits %+v", h, gh.Edits)
+	}
+	m.Wait()
+	m.tick(ctx)
+	h = m.must(t, child.ID)
+	if h.ParentPR != 0 || h.ParentHead != "" || h.Error != "" {
+		t.Fatalf("after rebase: %+v", h)
+	}
+	if got := gittest.Git(t, h.Worktree, "log", "--format=%s", "origin/main..HEAD"); got != "child" {
+		t.Errorf("commits on top of main: %q", got)
+	}
+}
+
+func TestWatchedParentClosed(t *testing.T) {
+	t.Parallel()
+	m, gh, _, child := watchedFixture(t)
+	p := gh.Snapshots[watchedRef.Key()]
+	p.State = "CLOSED"
+	gh.Snapshots[watchedRef.Key()] = p
+	m.tick(context.Background())
+	h := m.must(t, child.ID)
+	if h.State != StateNeedsHuman || !strings.Contains(h.Reason, "stack parent closed: #5") || h.ParentPR != 0 {
+		t.Errorf("child = %+v", h)
+	}
+}
+
+func TestProtectedBaseIsNoChain(t *testing.T) {
+	t.Parallel()
+	m, clone, _ := fixture(t)
+	gh := m.GH.(*FakeGitHub)
+	gh.Snapshots = map[string]github.PRSnapshot{}
+	gh.Found = map[string]int{"feature/x": watchedRef.Number} // a long-lived hotfix/X.Y.Z -> main PR
+	gittest.Git(t, clone, "push", "-q", "origin", "feature/x")
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "child")
+	gittest.Git(t, clone, "worktree", "add", "-q", "-b", "feature/y", dir, "feature/x")
+	gittest.Commit(t, dir, "b.txt", "child")
+	child, err := m.Handoff(ctx, Request{Worktree: dir, Base: "feature/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh.NextPR = childRef
+	m.tick(ctx)
+	gh.Snapshots[childRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, dir, "rev-parse", "HEAD"), BaseRef: "feature/x", BaseProtected: true}
+	m.tick(ctx)
+	if h := m.must(t, child.ID); h.ParentPR != 0 || h.StackParent != "" {
+		t.Errorf("child = %+v", h)
+	}
+}

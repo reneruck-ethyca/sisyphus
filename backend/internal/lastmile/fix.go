@@ -74,7 +74,7 @@ func (e effects) apply(h *Handoff) {
 		h.RebaseAsked = e.rebase
 	}
 	if e.unstack {
-		h.StackParent, h.ParentHead = "", ""
+		h.StackParent, h.ParentHead, h.ParentPR = "", "", 0
 	}
 	if e.downrevDropped {
 		h.DownrevHead, h.DownrevFrom = "", ""

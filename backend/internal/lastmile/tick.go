@@ -200,6 +200,9 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	}
 
 	noteRemoved(h, p)
+	if err := m.detectStack(ctx, h, p); err != nil {
+		return err
+	}
 	if done, err := m.stack(ctx, h, p, s); done || err != nil {
 		return err
 	}
