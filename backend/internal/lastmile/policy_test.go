@@ -32,9 +32,10 @@ func TestEvaluate(t *testing.T) {
 		blocker string // substring; "" = would merge
 	}{
 		{"all clear", func(*Snapshot, *config.LastMile) {}, ""},
-		{"no approval", func(s *Snapshot, _ *config.LastMile) { s.Approvals, s.ReviewDecision = nil, "" }, "no current human approval"},
-		{"bot approval only", func(s *Snapshot, _ *config.LastMile) { s.Approvals[0].Bot = true }, "no current human approval"},
-		{"stale approval", func(s *Snapshot, _ *config.LastMile) { s.Approvals[0].Stale = true }, "approval is stale"},
+		{"no approval", func(s *Snapshot, _ *config.LastMile) { s.Approvals, s.ReviewDecision = nil, "" }, "no human approval"},
+		{"bot approval only", func(s *Snapshot, _ *config.LastMile) { s.Approvals[0].Bot = true }, "no human approval"},
+		{"stale approval GitHub kept", func(s *Snapshot, _ *config.LastMile) { s.Approvals[0].Stale = true }, ""},
+		{"stale approval, no review required", func(s *Snapshot, _ *config.LastMile) { s.Approvals[0].Stale, s.ReviewDecision = true, "" }, "no human approval"},
 		{"changes requested", func(s *Snapshot, _ *config.LastMile) { s.ReviewDecision = "CHANGES_REQUESTED" }, "changes requested"},
 		{"review required", func(s *Snapshot, _ *config.LastMile) { s.ReviewDecision = "REVIEW_REQUIRED" }, "review required"},
 		{"ci red", func(s *Snapshot, _ *config.LastMile) { s.CI = CIRed }, "checks not green"},
@@ -63,11 +64,7 @@ func TestEvaluate(t *testing.T) {
 				}
 				return
 			}
-			// A stale approval leaves no current one either: two blockers; every other rule trips alone.
-			want := 1
-			if c.name == "stale approval" {
-				want = 2
-			}
+			const want = 1
 			if v.WouldMerge || len(v.Blockers) != want || !slices.ContainsFunc(v.Blockers, func(b string) bool { return strings.Contains(b, c.blocker) }) {
 				t.Errorf("blockers = %v, want %q (%d)", v.Blockers, c.blocker, want)
 			}

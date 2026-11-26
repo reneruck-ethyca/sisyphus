@@ -315,5 +315,5 @@ func (m *Manager) unlabelDownrev(ctx context.Context, h *Handoff, why string) {
 		}
 		logEvent(h, m.now(), "label", label+" removed: "+why)
 	}
-	h.DownrevHead, h.DownrevFrom, h.DownrevRoot = "", "", ""
+	h.DownrevHead, h.DownrevFrom = "", ""
 }

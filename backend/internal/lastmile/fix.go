@@ -77,12 +77,9 @@ func (e effects) apply(h *Handoff) {
 		h.StackParent, h.ParentHead = "", ""
 	}
 	if e.downrevDropped {
-		h.DownrevHead, h.DownrevFrom, h.DownrevRoot = "", "", ""
+		h.DownrevHead, h.DownrevFrom = "", ""
 	}
 	if e.downrevHead != "" {
-		if h.DownrevHead != e.downrevFrom || h.DownrevRoot == "" { // not a bump on top of a labelled bump
-			h.DownrevRoot = e.downrevFrom
-		}
 		h.DownrevFrom, h.DownrevHead = e.downrevFrom, e.downrevHead
 	}
 }

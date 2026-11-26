@@ -330,32 +330,6 @@ func TestDownrevNoLabelAfterConflictOrRed(t *testing.T) {
 	}
 }
 
-func TestDownrevApprovalCarriesOver(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	approvedBefore := func(head string) github.PRSnapshot {
-		p := mergeable()
-		p.HeadSHA = head
-		p.Reviews = []github.SnapReview{{User: "carol", State: "APPROVED", CommitSHA: "old"}}
-		return p
-	}
-	m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
-	m.handoffs[0].DownrevFrom, m.handoffs[0].DownrevHead = "old", "h"
-	gh.Snapshots[prRef.Key()] = approvedBefore("h")
-	m.tick(ctx)
-	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
-		t.Errorf("labelled bump: merged %v, handoff %+v", gh.Merged, m.must(t, id))
-	}
-
-	m, gh, _, id = opened(t, Request{Autonomy: "merge=approved"})
-	m.handoffs[0].DownrevFrom, m.handoffs[0].DownrevHead = "old", "h"
-	gh.Snapshots[prRef.Key()] = approvedBefore("h2") // a new head after the bump: the label comes off, the approval is stale
-	m.tick(ctx)
-	if h := m.must(t, id); len(gh.Merged) != 0 || h.DownrevHead != "" {
-		t.Errorf("new head: merged %v, handoff %+v", gh.Merged, h)
-	}
-}
-
 func TestDownrevLabelFailurePushesWithout(t *testing.T) {
 	t.Parallel()
 	m, gh, id, _ := downrevFixture(t, false, false)
@@ -364,7 +338,7 @@ func TestDownrevLabelFailurePushesWithout(t *testing.T) {
 	m.tick(context.Background())
 	h := m.must(t, id)
 	bumped(t, h)
-	if h.State == StateNeedsHuman || h.DownrevHead != "" || h.DownrevFrom != "" || h.DownrevRoot != "" {
+	if h.State == StateNeedsHuman || h.DownrevHead != "" || h.DownrevFrom != "" {
 		t.Errorf("handoff %+v", h)
 	}
 }
@@ -410,7 +384,7 @@ func TestDownrevLabelOffOnCancelAndInNeedsHuman(t *testing.T) {
 	}
 }
 
-func TestDownrevApprovalCarriesThroughConsecutiveBumps(t *testing.T) {
+func TestDownrevConsecutiveBumpsThenMerge(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	m, gh, _, id, pre := labelled(t)
@@ -428,13 +402,13 @@ func TestDownrevApprovalCarriesThroughConsecutiveBumps(t *testing.T) {
 	m.tick(ctx)
 	h := m.must(t, id)
 	c := gittest.Git(t, h.Worktree, "rev-parse", "HEAD")
-	if c == b || h.DownrevHead != c || h.DownrevFrom != b || h.DownrevRoot != pre || !strings.Contains(read(t, h.Worktree, "p1"), dr("b3")) {
+	if c == b || h.DownrevHead != c || h.DownrevFrom != b || !strings.Contains(read(t, h.Worktree, "p1"), dr("b3")) {
 		t.Fatalf("second bump: %+v", h)
 	}
 	approved(c, "CLEAN")
 	m.tick(ctx)
 	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
-		t.Errorf("approval of %s didn't carry over two bumps: merged %v, handoff %+v", pre, gh.Merged, m.must(t, id))
+		t.Errorf("approval of %s GitHub kept: merged %v, handoff %+v", pre, gh.Merged, m.must(t, id))
 	}
 }
 
@@ -464,7 +438,7 @@ func TestDownrevLabelOffBeforeAgentPush(t *testing.T) {
 	if !slices.Equal(w.removedAt, []string{head}) {
 		t.Errorf("origin had %v when the label came off, want the labelled head %s", w.removedAt, head)
 	}
-	if h.DownrevHead != "" || h.DownrevFrom != "" || h.DownrevRoot != "" {
+	if h.DownrevHead != "" || h.DownrevFrom != "" {
 		t.Errorf("downrev kept: %+v", h)
 	}
 }

@@ -66,11 +66,9 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 	if !h.ReadyAt.IsZero() {
 		sig.TimeInReviewSec = int64(now.Sub(h.ReadyAt).Seconds())
 	}
-	humanFresh := false
 	for _, a := range s.Approvals {
 		sig.Approvers = append(sig.Approvers, Approver{User: a.User, Bot: a.Bot})
 		sig.ApprovalsStale = sig.ApprovalsStale || a.Stale
-		humanFresh = humanFresh || (!a.Stale && !a.Bot)
 	}
 
 	b := []string{}
@@ -79,11 +77,8 @@ func evaluate(h Handoff, s Snapshot, cfg config.LastMile, now time.Time) Verdict
 		b = append(b, "changes requested")
 	case s.ReviewDecision == "REVIEW_REQUIRED":
 		b = append(b, "review required")
-	case !humanFresh:
-		b = append(b, "no current human approval")
-	}
-	if sig.ApprovalsStale {
-		b = append(b, "an approval is stale")
+	case !humanApproved(s):
+		b = append(b, "no human approval")
 	}
 	if s.CI != CIGreen {
 		b = append(b, "checks not green ("+s.CI+")")

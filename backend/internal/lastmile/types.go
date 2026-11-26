@@ -178,7 +178,6 @@ type Handoff struct {
 	// Downrev bookkeeping (design §7.4).
 	DownrevHead string `json:"downrev_head,omitempty"` // the head TLM labelled downrev-only
 	DownrevFrom string `json:"downrev_from,omitempty"` // the head right before that bump
-	DownrevRoot string `json:"downrev_root,omitempty"` // the head before the first of consecutive labelled bumps: its approvals carry over
 
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"` // last change of State

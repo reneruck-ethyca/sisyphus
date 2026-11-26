@@ -197,32 +197,41 @@ func TestMergeOffDisablesOwnAutoMerge(t *testing.T) {
 	}
 }
 
-// The merge mode wants a human's approval of the current head; the button, like
-// GitHub's, takes GitHub's review decision.
-func TestMergeModeNeedsFreshHumanApprovalButtonDoesNot(t *testing.T) {
+// The merge mode wants a human's approval, kept by GitHub across later pushes; the
+// button, like GitHub's, takes GitHub's review decision.
+func TestMergeModeNeedsHumanApprovalButtonDoesNot(t *testing.T) {
 	t.Parallel()
-	for name, r := range map[string]github.SnapReview{
-		"stale": {User: "carol", State: "APPROVED", CommitSHA: "old"},
-		"bot":   {User: "lint[bot]", State: "APPROVED", CommitSHA: "h"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
-			p := mergeable()
-			p.Reviews = []github.SnapReview{r}
-			gh.Snapshots[prRef.Key()] = p
-			m.tick(context.Background())
-			if h := m.must(t, id); len(gh.Merged) != 0 || h.State != StateApproved {
-				t.Fatalf("merged %v, handoff %s", gh.Merged, h.State)
-			}
-			if _, err := m.Merge(context.Background(), id); err != nil {
-				t.Fatal(err)
-			}
-			m.tick(context.Background())
-			if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
-				t.Errorf("button: merged %v", gh.Merged)
-			}
-		})
+	m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.Reviews = []github.SnapReview{{User: "lint[bot]", State: "APPROVED", CommitSHA: "h"}}
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(context.Background())
+	if h := m.must(t, id); len(gh.Merged) != 0 || h.State != StateApproved {
+		t.Fatalf("merged %v, handoff %s", gh.Merged, h.State)
+	}
+	if _, err := m.Merge(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	m.tick(context.Background())
+	if !slices.Equal(gh.Merged, []github.PRRef{prRef}) {
+		t.Errorf("button: merged %v", gh.Merged)
+	}
+}
+
+func TestMergeModeFollowsGitHubOnStaleApprovals(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		decision string
+		merges   bool
+	}{{"APPROVED", true}, {"", false}} { // "": no review required, so GitHub keeps nothing
+		m, gh, _, _ := opened(t, Request{Autonomy: "merge=approved"})
+		p := mergeable()
+		p.ReviewDecision, p.Reviews = c.decision, []github.SnapReview{{User: "carol", State: "APPROVED", CommitSHA: "old"}}
+		gh.Snapshots[prRef.Key()] = p
+		m.tick(context.Background())
+		if merged := len(gh.Merged) == 1; merged != c.merges {
+			t.Errorf("decision %q: merged %v, want %v", c.decision, gh.Merged, c.merges)
+		}
 	}
 }
 

@@ -104,7 +104,7 @@ func (m *Manager) Cancel(ctx context.Context, id string) (Handoff, error) {
 			return invalid("handoff %s is already %s", id, h.State)
 		}
 		armed, h.AutoMergeSet, h.EnqueuedAt = *h, false, time.Time{}
-		h.DownrevHead, h.DownrevFrom, h.DownrevRoot = "", "", ""
+		h.DownrevHead, h.DownrevFrom = "", ""
 		m.setState(h, StateCancelled, "")
 		return nil
 	})

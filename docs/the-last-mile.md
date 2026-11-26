@@ -313,7 +313,8 @@ too, by the rule above.
 4. **`merge=approved`**: merge as soon as the PR is approved; the evaluator is not consulted.
 
 The evaluator's rule set:
-   - required approvals present, none stale
+   - GitHub's review decision is approved and a human (not a bot) approved; an approval of an older
+     head counts when GitHub kept it (the repo's branch protection decides that, not TLM)
    - all required checks green on the current head
    - no unresolved threads, except threads whose last comment is ours (the `gh` login): answered
      threads don't block
@@ -339,8 +340,10 @@ There is no diff-size rule (dropped 2026-11-18).
 
 The button mirrors GitHub's: it needs GitHub's review decision to be approved and the required
 checks green, so an approval of an older head counts when the repo keeps stale approvals. A merge
-mode (`approved`, `auto`) is stricter: it needs a current human approval, one that isn't stale and
-isn't a bot's. Every TLM merge is pinned to the head it saw, and a button press to the head it was
+mode (`approved`, `auto`) follows GitHub the same way and only adds that the approval is a human's,
+not a bot's: how updates after an approval are handled is the repo's branch-protection policy, and
+TLM doesn't second-guess it. On a repo that requires no review GitHub keeps nothing, so there the
+human approval must be of the current head. Every TLM merge is pinned to the head it saw, and a button press to the head it was
 pressed on: if the head moves first, the press is dropped and has to be made again. A merge freeze holds
 `approved` and `auto`, not the button, and not GitHub's own auto-merge, whose timing is GitHub's.
 A PR GitHub reports as already mergeable can't get auto-merge, so TLM merges it itself. Turning the mode to `off` (or `shadow`) withdraws a pressed
@@ -380,8 +383,8 @@ by the PR's author (the `gh` login TLM acts as) or one TLM posted.
 Removals count only while TLM means to merge the PR (the button was pressed, or the mode is `auto`
 or `approved`); a PR a person queued by hand is theirs. Removals from before the handoff or from a
 needs-human stretch don't count, and Resume after the 10th starts the count again. A fix pushed
-after a removal makes the approval stale, so the PR goes back into the queue once someone approves
-the new head.
+after a removal goes back into the queue once GitHub reports the PR approved again: at once where the
+repo keeps approvals across pushes, after a re-approval where it dismisses them.
 
 ### 7.3 After a merge
 
@@ -411,9 +414,7 @@ CI, on the PR and in the merge queue, run only the migration checks.
   It records the head it labelled.
 - **Label off as soon as anything else changes.** Any other head (an agent's commit, a person's
   push, a rebase without a bump) removes the label before the new head's CI matters.
-- **Approval carries over.** A human approval of the head before a labelled bump counts as an
-  approval of the bumped head (§7.1's fresh-approval rule), since the label vouches that nothing
-  else changed. GitHub may still demand re-approval if branch protection dismisses stale reviews.
+- **Approval.** Whether an approval survives the bump is GitHub's call (§7.1), as for any push.
 - **Scope:** per repo in config (`lastmile.downrev_labels`, `{"ethyca/fidesplus": "downrev-only"}`);
   other repos still get the bump, without a label.
 - **As built:** one bump commit per versions directory, rewriting the `down_revision` value
@@ -773,3 +774,10 @@ None right now.
   first (older than the process), which had left #7728 mid-rebase.
 - **2026-11-25:** GitHub REST calls other than POST are retried twice on a 5xx (1s, 3s). fidesplus#7730's clean
   restack went needs-human because removing its downrev label before the push hit a passing HTTP 500.
+- **2026-11-26:** §7, §7.1, §7.2, §7.4: the merge modes (`approved`, `auto`) take GitHub's review decision as the
+  button does: an approval of an older head counts when GitHub kept it. They only add that a human, not a bot,
+  approved. How updates after an approval are handled is the repo's branch-protection policy, and TLM no longer
+  diverges from it. fidesplus#7761, #7762 and #7764 were approved on GitHub with green CI and sat unmerged in
+  `merge=approved` because TLM's own review-fix pushes had made the approvals stale. The evaluator's
+  "approval is stale" blocker is gone (`approvals_stale` stays a signal), and so is the downrev approval
+  carry-over (`downrev_root`), which the general rule now covers.
