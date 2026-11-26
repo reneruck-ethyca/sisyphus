@@ -227,6 +227,12 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	if done, err := m.drift(ctx, h, s, base); done || err != nil {
 		return err
 	}
+	// Follow a retarget made on GitHub once the branch has caught up with the new base:
+	// until then drift's fork-point needs the old base's name.
+	if p.BaseRef != "" && p.BaseRef != h.Base && s.Behind == 0 {
+		logEvent(h, m.now(), "retarget", fmt.Sprintf("PR base changed on GitHub: %s -> %s", h.Base, p.BaseRef))
+		h.Base = p.BaseRef
+	}
 	state, reason := nextState(*h, s)
 	if s.CI == CIRed {
 		s.Failures = m.failures(ctx, *h, s.Checks)

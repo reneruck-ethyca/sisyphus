@@ -663,3 +663,15 @@ func TestBranchOnAMergedBaseRebasesOnlyItsOwnCommits(t *testing.T) {
 		t.Errorf("commits on top of main: %q", got)
 	}
 }
+
+func TestFollowsBaseRetargetedOnGitHub(t *testing.T) {
+	t.Parallel()
+	m, gh, _, id := opened(t, Request{})
+	h := m.must(t, id)
+	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, h.Worktree, "rev-parse", "HEAD"), BaseRef: "main", Author: "me"}
+	m.set(t, id, func(h *Handoff) { h.Base = "gone" })
+	m.tick(context.Background())
+	if got := m.must(t, id).Base; got != "main" {
+		t.Errorf("base = %q, want GitHub's main", got)
+	}
+}

@@ -826,3 +826,15 @@ None right now.
   six mocks on a Claude Design canvas): one dot per PR coloured by state, top of the stack first and its base branch
   at the foot, as GitHub draws a stack. Solid rail for a native GitHub stack, dashed for a plain branch chain; the PR
   that lands next has a ring, and a chain parent that isn't a handoff is a hollow dot at the foot. History stays flat.
+- **2026-11-26:** UI: the rail now reads in merge order instead of GitHub's top-first order: the base branch (or the
+  hollow non-handoff parent) sits under the caption, then the PR that merges first, the top of the stack last. Asked
+  for so the PR at the top of the list is the one that lands first.
+- **2026-11-26:** UI: a small arrowhead on the rail just under each dot (and the base) points up from the PR below to what it depends
+  on, so the dependency direction reads without knowing the order convention.
+- **2026-11-26:** UI: the rail's caption ("GitHub stack · …") and its separate base row are merged into one top row:
+  the stack or chain icon on the rail followed by the base branch name (the kind moved to a tooltip). Less chrome,
+  and the base reads as where the rail starts.
+- **2026-11-26:** A PR retargeted on GitHub by hand (e.g. #7770 moved onto `pbac2`) left the handoff's base on the old
+  branch forever. TLM now takes GitHub's base once the branch has caught up with it (behind 0), logged as a
+  `retarget` event; not before, since drift's fork-point needs the old base's name to replay only the branch's own
+  commits. The sidebar shows GitHub's base straight away.
