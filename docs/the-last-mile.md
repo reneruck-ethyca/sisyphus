@@ -93,7 +93,9 @@ The orchestrator should not block or poll.
 - **Stacks.** With `--stack-parent` (a handoff id, or a branch), TLM retargets and rebases children itself when the parent
   merges (`git rebase --onto origin/<new base> <parent's last head>`, so a squash merge is fine). A child whose open
   parent rewrote its history (rebased after its own parent's squash merge) is rebased the same way when its base
-  moves: onto the parent's new head, from the parent head it forked off. The orchestrator hands off the whole stack once and never manages bases again.
+  moves: onto the parent's new head, from the parent head it forked off. A branch on another PR's branch without
+  `--stack-parent` gets the same treatment when that base was force-pushed: the old tip comes from
+  `git merge-base --fork-point` (the remote ref's reflog). The orchestrator hands off the whole stack once and never manages bases again.
 
 What the orchestrator gets back is a terminal outcome (merged, or needs-human with a reason and a
 link), not a stream of CI noise.
@@ -781,3 +783,7 @@ None right now.
   `merge=approved` because TLM's own review-fix pushes had made the approvals stale. The evaluator's
   "approval is stale" blocker is gone (`approvals_stale` stays a signal), and so is the downrev approval
   carry-over (`downrev_root`), which the general rule now covers.
+- **2026-11-26:** §3: a drift rebase onto a base that was force-pushed now replays only the branch's own commits
+  even without `--stack-parent`, taking the old base tip from `git merge-base --fork-point`. fidesplus#7770 sat on
+  #7744's branch, which was rebased; the plain rebase replayed #7744's old commits, conflicted in 11 files
+  (a migration among them) and went to needs-human. Replaying its own two commits is clean.

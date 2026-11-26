@@ -615,3 +615,25 @@ func TestStackChildRebasesOnlyItsOwnCommitsAfterParentRewrite(t *testing.T) {
 		t.Errorf("commits on top of the parent: %q", got) // the parent's old commit is dropped, not replayed
 	}
 }
+
+func TestBranchOnARewrittenBaseRebasesOnlyItsOwnCommits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, parent, child, _ := stackFixture(t, Request{})
+	// A handoff on another PR's branch that TLM doesn't know as its parent.
+	m.update(child.ID, func(h *Handoff) error { h.StackParent, h.ParentHead = "", ""; return nil })
+	f := gittest.Git(t, parent.Worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+	os.WriteFile(filepath.Join(parent.Worktree, f), []byte("rewritten"), 0o644)
+	gittest.Git(t, parent.Worktree, "commit", "-q", "-a", "--amend", "-m", "rewritten")
+	gittest.Git(t, parent.Worktree, "push", "-q", "-f", "origin", "feature/x")
+	gh.Snapshots[childRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, child.Worktree, "rev-parse", "HEAD"), BaseRef: "feature/x", MergeState: "DIRTY"}
+	m.tick(ctx)
+	m.Wait()
+	h := m.must(t, child.ID)
+	if h.State == StateNeedsHuman {
+		t.Fatalf("child = %s %q", h.State, h.Reason)
+	}
+	if got := gittest.Git(t, h.Worktree, "log", "--format=%s", "origin/feature/x..HEAD"); got != "child" {
+		t.Errorf("commits on top of the base: %q", got)
+	}
+}

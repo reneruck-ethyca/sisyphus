@@ -146,6 +146,14 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 			upstream = h.ParentHead
 		}
 	}
+	// The same rewrite under a base TLM doesn't track as a parent: the remote ref's reflog
+	// still knows the old tip the branch forked off.
+	if upstream == "" {
+		fork, _ := m.lockedGit(ctx, *h, "merge-base", "--fork-point", "origin/"+base, "HEAD")
+		if mb, _ := m.lockedGit(ctx, *h, "merge-base", "origin/"+base, "HEAD"); fork != "" && fork != mb {
+			upstream = fork
+		}
+	}
 	conflicts, err := mergeTree(ctx, h.Worktree, base, upstream)
 	if err != nil {
 		return false, err
