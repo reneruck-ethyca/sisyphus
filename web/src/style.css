@@ -273,12 +273,6 @@ main.home section { min-width: 0; }
 .meterrow > span { min-width: 120px; }
 .meterrow meter { flex: 1 1 200px; height: 10px; }
 .meterrow b { font-variant-numeric: tabular-nums; }
-.matrix { font-variant-numeric: tabular-nums; }
-.matrix th.n, .matrix td.n { text-align: right; font-weight: inherit; color: inherit; }
-.matrix th.n { color: var(--muted); font-weight: 600; }
-.matrix td { padding: 8px 12px; }
-.matrix tr:last-child td { border-bottom: 0; }
-.matrix td.agree { color: var(--ok); font-weight: 600; } .matrix td.miss { color: var(--bad); font-weight: 600; }
 @media (max-width: 760px) {
   .two { grid-template-columns: 1fr; }
   .counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }

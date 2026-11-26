@@ -53,12 +53,6 @@ export type Snapshot = {
   unresolved: number; new_feedback?: { id: string; kind: string; author: string; bot: boolean }[];
   stack?: { number: number; base: string; bottom: number; position: number; size: number }; // a native GitHub stack
 };
-export type Signals = {
-  additions: number; deletions: number; files: number; risky_paths: string[] | null; fix_rounds: Record<string, number> | null;
-  approvers: { user: string; bot: boolean }[] | null; time_in_review_sec: number; flake_reruns: number;
-  unresolved: number; behind: number; approvals_stale: boolean;
-};
-export type Verdict = { at: string; head: string; would_merge: boolean; blockers: string[] | null; signals: Signals };
 export type DirtyFile = { path: string; code: string; add: number; del: number; binary?: boolean };
 export type Dirty = { status: string; files: DirtyFile[]; summary?: string; message?: string; err?: string; dismissed?: boolean };
 export type HandoffEvent = { time: string; kind: string; text: string };
@@ -71,7 +65,7 @@ export type Handoff = {
   merge_requested?: boolean; rebase_asked?: string; auto_merge_set?: boolean; queue_kicks?: number; enqueued_at?: string;
   state: string; prev_state?: string; reason?: string; error?: string; warning?: string;
   pr_number?: number; pr_url?: string; parent_pr?: number; stack_number?: number;
-  events?: HandoffEvent[]; snapshot?: Snapshot; dirty?: Dirty; shadow?: Verdict;
+  events?: HandoffEvent[]; snapshot?: Snapshot; dirty?: Dirty;
   created: string; updated: string;
 };
 
@@ -103,21 +97,6 @@ export type StackStatus = {
 export type HistoryRow = {
   repo: string; number: number; url: string; title: string; author: string;
   tracked_at: string; dropped_at: string; reason: string; id: string; runs: Run[] | null;
-};
-
-export type ShadowPR = {
-  handoff_id: string; repo: string; pr: number; head: string; verdict_at: string; would_merge: boolean;
-  blockers: string[] | null; signals: Signals; outcome: string; outcome_at?: string; merged_by?: string;
-};
-export type ShadowLine = {
-  time: string; handoff_id: string; repo: string; pr: number; head?: string; would_merge?: boolean;
-  blockers?: string[]; signals?: Signals; outcome?: string; merged_by?: string;
-};
-export type Agreement = { merged: number; closed: number; open: number };
-export type ShadowReport = {
-  totals: { observed: number; merged: number; closed: number; open: number };
-  agreement: { would_merge_yes: Agreement; would_merge_no: Agreement };
-  mean_time_in_review_sec: number; prs: ShadowPR[]; history?: ShadowLine[];
 };
 
 export type Field = {

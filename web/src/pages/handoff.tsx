@@ -1,4 +1,4 @@
-// One handoff (the right pane of the last mile): its state, the dirty-worktree panel, merge policy, reviewers, the PR, fix rounds and the timeline.
+// One handoff (the right pane of the last mile): its state, the dirty-worktree panel, reviewers, the PR, fix rounds and the timeline.
 import { Fragment } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { HTTPError, post, put, session, type Dirty, type HandoffView } from "../api";
@@ -35,16 +35,6 @@ export function HandoffMain({ v }: { v: HandoffView }) {
 
       <div class="split">
         <div class="side">
-          <section><h2>Merge policy</h2>
-            <div class="card card-b">
-              {v.shadow ? <>
-                <p><b>Would merge: <span class={v.shadow.would_merge ? "y" : "n"}>{v.shadow.would_merge ? "yes" : "no"}</span></b>
-                  {" "}<span class="muted">as of <Ago t={v.shadow.at} />, head <code>{short(v.shadow.head)}</code></span></p>
-                {!!v.shadow.blockers?.length && <ul>{v.shadow.blockers.map((b, i) => <li key={i}>{b}</li>)}</ul>}
-              </> : <p class="muted">No verdict yet{v.autonomy.merge !== "shadow" && `: this handoff runs with merge=${v.autonomy.merge}`}.</p>}
-              <div class="actions"><a class="btn quiet small" href={`/lastmile/shadow?handoff=${encodeURIComponent(v.id)}#${v.id}`}>Shadow merge for this PR →</a></div>
-            </div>
-          </section>
           <ReviewersCard v={v} />
           {v.snapshot && <SnapshotCard v={v} />}
         </div>

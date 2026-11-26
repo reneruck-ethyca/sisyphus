@@ -1,14 +1,11 @@
-// Home: what needs you, then reviews, the last mile, capacity and the shadow report.
-import type { ShadowReport, Status } from "../api";
+// Home: what needs you, then reviews, the last mile, and capacity.
+import type { Status } from "../api";
 import { Ago, BudgetMeter, Chip, Ext, Loading, Notices, Page } from "../components";
-import { base, clock, isZero, lmCount, pct, plural, runPath, secs } from "../format";
-import { useFetch } from "../live";
+import { base, clock, isZero, lmCount, pct, plural, runPath } from "../format";
 import { Approved } from "./lastmile";
 import { DesignButton, runHref } from "./reviews";
 
 export function Home({ status: s, error }: { status?: Status; error: string }) {
-  const lastmileOn = !!s?.handoffs; // nil handoffs: the last mile is off
-  const shadow = useFetch<ShadowReport>(lastmileOn ? "/api/lastmile/shadow" : "", s?.handoffs?.length);
   if (!s) return <Page title="Home"><Loading />{error && <p class="notice">{error}</p>}</Page>;
   const prs = s.prs ?? [], handoffs = s.handoffs ?? [];
   const inGroup = (g: string) => prs.filter((p) => p.group === g);
@@ -99,18 +96,6 @@ export function Home({ status: s, error }: { status?: Status; error: string }) {
           </div>
         </section>
 
-        {shadow.data && <section aria-labelledby="sm"><div class="sh"><h2 id="sm">Shadow merge</h2><a class="end" href="/lastmile/shadow">Shadow-merge report →</a></div>
-          <div class="card">
-            <table class="matrix">
-              <thead><tr><th>Last verdict</th><th class="n">You merged</th><th class="n">You closed</th><th class="n">Still open</th></tr></thead>
-              <tbody>
-                <tr><td>would merge: yes</td><td class="n agree">{shadow.data.agreement.would_merge_yes.merged}</td><td class="n miss">{shadow.data.agreement.would_merge_yes.closed}</td><td class="n">{shadow.data.agreement.would_merge_yes.open}</td></tr>
-                <tr><td>would merge: no</td><td class="n miss">{shadow.data.agreement.would_merge_no.merged}</td><td class="n agree">{shadow.data.agreement.would_merge_no.closed}</td><td class="n">{shadow.data.agreement.would_merge_no.open}</td></tr>
-              </tbody>
-            </table>
-            <div class="card-f">{plural(shadow.data.totals.observed, "PR")} observed{shadow.data.totals.merged > 0 && ` · mean time in review ${secs(shadow.data.mean_time_in_review_sec)} (merged PRs)`} · agreement is by each PR's last verdict</div>
-          </div>
-        </section>}
       </div>
     </main>
   </Page>;

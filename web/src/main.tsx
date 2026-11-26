@@ -8,7 +8,6 @@ import { LastMile } from "./pages/lastmile";
 import { Logs } from "./pages/logs";
 import { Reviews } from "./pages/reviews";
 import { Settings } from "./pages/settings";
-import { Shadow } from "./pages/shadow";
 
 // route matches a path against a pattern like "/prs/:owner/:repo/:n"; null = no match.
 function route(pattern: string, path: string): Record<string, string> | null {
@@ -38,7 +37,6 @@ function App() {
   if ((m = route("/history/:owner/:repo/:n", path))) return <Reviews status={status} error={error} archive pr={pr(m)} />;
   if ((m = route("/history/:owner/:repo/:n/runs/:run", path))) return <Reviews status={status} error={error} archive pr={pr(m)} run={m.run} />;
   if (path === "/lastmile") return <LastMile status={status} />;
-  if (path === "/lastmile/shadow") return <Shadow status={status} query={url.searchParams} />;
   if ((m = route("/lastmile/:id", path))) return <LastMile status={status} id={m.id} />;
   if (path === "/logs") return <Logs status={status} />;
   if (path === "/settings") return <Settings status={status} />;
