@@ -51,6 +51,7 @@ export type Snapshot = {
   approvals?: Approval[]; auto_merge_allowed?: boolean; in_queue?: boolean; merge_queue?: boolean; auto_merge?: boolean; node_id?: string; unanswered?: number; requested?: string[]; checks?: Check[]; ci: string; base: string; behind: number;
   additions: number; deletions: number; files?: string[]; failures?: Failure[];
   unresolved: number; new_feedback?: { id: string; kind: string; author: string; bot: boolean }[];
+  stack?: { number: number; base: string; bottom: number; position: number; size: number }; // a native GitHub stack
 };
 export type Signals = {
   additions: number; deletions: number; files: number; risky_paths: string[] | null; fix_rounds: Record<string, number> | null;
@@ -69,7 +70,7 @@ export type Handoff = {
   max_fix_rounds: number; fix_rounds?: Record<string, number>;
   merge_requested?: boolean; rebase_asked?: string; auto_merge_set?: boolean; queue_kicks?: number; enqueued_at?: string;
   state: string; prev_state?: string; reason?: string; error?: string; warning?: string;
-  pr_number?: number; pr_url?: string;
+  pr_number?: number; pr_url?: string; parent_pr?: number; stack_number?: number;
   events?: HandoffEvent[]; snapshot?: Snapshot; dirty?: Dirty; shadow?: Verdict;
   created: string; updated: string;
 };

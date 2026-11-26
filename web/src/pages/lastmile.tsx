@@ -26,7 +26,7 @@ function HandoffList({ hs, sel }: { hs: HandoffView[]; sel?: string }) {
     aria-current={v.id === sel ? "page" : undefined}>
     <span class="row"><Chip tone={handoffTone(v.state)}>{v.state}</Chip><Ago t={v.updated} /></span>
     <span class="title">{v.title}</span>
-    <span class="meta">{v.pr_number ? `${base(v.repo)} #${v.pr_number}` : v.id}{v.waiting_on && ` · waiting on ${v.waiting_on}`}{approval(v) && " · ✓ approved"}</span>
+    <span class="meta">{v.pr_number ? `${base(v.repo)} #${v.pr_number}` : v.id}{v.waiting_on && ` · waiting on ${v.waiting_on}`}{!!v.parent_pr && ` · on #${v.parent_pr}`}{approval(v) && " · ✓ approved"}</span>
   </a>;
   return <>
     <h2><span>Open</span><span>{open.length}</span></h2>

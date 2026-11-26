@@ -18,6 +18,8 @@ export function HandoffMain({ v }: { v: HandoffView }) {
           <span>{v.repo}{v.pr_url && <> <Ext href={v.pr_url}>#{v.pr_number} ↗</Ext></>}</span>
           <span>branch <code>{v.branch}</code> onto <code>{v.base}</code></span>
           {v.waiting_on && <span>waiting on <a href={`/lastmile/${v.waiting_on}`}>{v.waiting_on}</a></span>}
+          {!!v.parent_pr && <span>chained on #{v.parent_pr} (not handed off: watched, never merged)</span>}
+          {v.snapshot?.stack && <span>GitHub stack #{v.snapshot.stack.number} · {v.snapshot.stack.position} of {v.snapshot.stack.size}</span>}
           {!!v.queue_kicks && <span>{plural(v.queue_kicks, "queue kick")}</span>}
           <span>updated <Ago t={v.updated} /></span></div>
         {v.agent_running && <p class="notice quiet"><Chip tone="live">{v.agent_running === "dirty" ? "agent" : `${v.agent_running} agent`}</Chip> running since <Ago t={v.agent_started} />

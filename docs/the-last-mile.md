@@ -96,6 +96,17 @@ The orchestrator should not block or poll.
   moves: onto the parent's new head, from the parent head it forked off. A branch on another PR's branch without
   `--stack-parent` gets the same treatment when that base was force-pushed, or merged and GitHub retargeted the PR:
   the old tip comes from `git merge-base --fork-point` against the old base's remote ref (its reflog). The orchestrator hands off the whole stack once and never manages bases again.
+- **Detected stacks.** Without `--stack-parent`, TLM finds the stack itself on every tick. A PR whose base is an open
+  handoff's branch is linked to it, the same as the flag would. A PR whose base is an open PR nobody handed off is
+  chained on it (`parent_pr`): TLM watches that PR, never merges or touches it, and restacks the child when it merges.
+  A protected base (a hotfix branch with its own open PR) is never a parent. GitHub-native stacks (`gh stack`) are read
+  from the PR's `stack` field.
+- **Landing stacks.** Bottom-up, each PR as soon as it is ready. A PR with an open PR below it never merges (merge
+  mode, auto-merge or button): a chain child would land on its parent's branch, and GitHub refuses a native one. A
+  native stack's bottom PR merges through `merge-async` (the classic merge endpoint and enqueue refuse stacked PRs).
+  After a merge below, GitHub rebases and retargets a native stack itself: TLM waits for the retarget and moves the
+  worktree to GitHub's new head instead of rebasing. Any other drift in a native stack (the bottom behind trunk, a push
+  mid-stack) TLM rebases itself, as for chains.
 
 What the orchestrator gets back is a terminal outcome (merged, or needs-human with a reason and a
 link), not a stream of CI noise.
@@ -789,3 +800,14 @@ None right now.
   (a migration among them) and went to needs-human. Replaying its own two commits is clean.
   The same day both bases squash-merged into `pbac2` and GitHub retargeted #7770; the fork point is now taken from
   the handoff's old base ref, so that case replays only the PR's own commits too.
+- **2026-11-26:** §3: stacks are detected, not only declared, and native GitHub stacks are supported. Detection runs
+  every tick from the PR view (new: `stack`, `stackEntry`, `baseRef.refUpdateRule`): a base that is an open handoff's
+  branch links it; a base that is an open PR nobody handed off makes it a watched parent (`ParentPR`, looked up once
+  per base with `FindPR`); a protected base never counts. A merge guard (`stackWait`) keeps any PR with an open PR
+  below it from merging. Before this, an approved, green stack child under `merge=approved` got GitHub auto-merge
+  enabled into its parent's branch. Native stacks merge via `PUT …/merge-async` (squash, or `merge_action:
+  merge_queue`); the bottom is the lowest still-open entry, since GitHub's docs don't say whether merged entries
+  leave the stack. After a merge below, a native child (`StackNumber`, kept because a 2-PR stack may dissolve)
+  waits for GitHub's retarget and then resets its clean, fully pushed worktree to GitHub's head; otherwise it goes
+  needs-human. "Needs Rebase stack" has no known field: a `merge-async` 400 escalates with GitHub's message.
+  Unverified on a live native stack: no repo here has one yet.
