@@ -91,6 +91,18 @@ func mergeRefusal(h Handoff) string {
 	case s.InQueue:
 		return "it is in the merge queue already"
 	}
+	return stackWait(h)
+}
+
+// stackWait says why a stack child can't merge yet: a PR below it is still open, so
+// merging would land it on that PR's branch (a chain), or GitHub refuses it (a native stack).
+func stackWait(h Handoff) string {
+	switch s := h.Snapshot; {
+	case h.StackParent != "" || h.ParentPR != 0:
+		return "waiting on the PR below it (" + h.Base + ")"
+	case s != nil && s.Stack != nil && s.Stack.Bottom != 0 && s.Stack.Bottom != h.PRNumber:
+		return fmt.Sprintf("waiting on #%d below it in stack #%d", s.Stack.Bottom, s.Stack.Number)
+	}
 	return ""
 }
 
@@ -139,6 +151,13 @@ var queueable = []string{StateApproved, StateCIGreen, StateAwaitingReview, State
 // (design §7.1). Where the repo allows it, merge=auto and merge=approved hand the
 // decision to GitHub auto-merge, which TLM turns off again when the mode goes off.
 func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, reason string) (string, string, error) {
+	if why := stackWait(*h); why != "" {
+		h.MergeRequested, h.MergeRequestedHead = false, ""
+		if err := m.letGo(ctx, h); err != nil {
+			return state, reason, err
+		}
+		return state, cmp.Or(reason, why), nil
+	}
 	mode := h.Autonomy.Merge
 	s.AutoMerge = m.autoMergeOn(*h, s)
 	// A press merges the head the person saw: GitHub may keep the approval across a push they didn't see.

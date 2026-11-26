@@ -14,14 +14,15 @@ var watchedRef = github.PRRef{Repo: "ethyca/fidesplus", Number: 5}
 
 // chainChild hands off feature/y, one commit on top of feature/x, with base feature/x and no
 // --stack-parent, and ticks until its PR (#8) is open and read once.
-func chainChild(t *testing.T, m *Manager, clone string) Handoff {
+func chainChild(t *testing.T, m *Manager, clone string, req Request) Handoff {
 	t.Helper()
 	ctx := context.Background()
 	gh := m.GH.(*FakeGitHub)
 	dir := filepath.Join(t.TempDir(), "child")
 	gittest.Git(t, clone, "worktree", "add", "-q", "-b", "feature/y", dir, "feature/x")
 	gittest.Commit(t, dir, "b.txt", "child")
-	child, err := m.Handoff(ctx, Request{Worktree: dir, Base: "feature/x"})
+	req.Worktree, req.Base = dir, "feature/x"
+	child, err := m.Handoff(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,7 @@ func TestChainUnderAHandoffIsLinked(t *testing.T) {
 	gh.NextPR = prRef
 	m.tick(ctx)
 	gh.Snapshots[prRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), BaseRef: "main"}
-	child := chainChild(t, m, clone)
+	child := chainChild(t, m, clone, Request{})
 	if child.StackParent != parent.ID || child.ParentPR != 0 || child.Base != "feature/x" {
 		t.Fatalf("child = %+v", child)
 	}
@@ -56,7 +57,7 @@ func TestChainUnderAHandoffIsLinked(t *testing.T) {
 }
 
 // watchedFixture: feature/x is PR #5, which nobody handed off; feature/y is chained on it.
-func watchedFixture(t *testing.T) (*Manager, *FakeGitHub, string, Handoff) {
+func watchedFixture(t *testing.T, req Request) (*Manager, *FakeGitHub, string, Handoff) {
 	t.Helper()
 	m, clone, _ := fixture(t)
 	gh := m.GH.(*FakeGitHub)
@@ -64,13 +65,13 @@ func watchedFixture(t *testing.T) (*Manager, *FakeGitHub, string, Handoff) {
 	gh.Found = map[string]int{"feature/x": watchedRef.Number}
 	gittest.Git(t, clone, "push", "-q", "origin", "feature/x")
 	gh.Snapshots[watchedRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, clone, "rev-parse", "HEAD"), BaseRef: "main"}
-	return m, gh, clone, chainChild(t, m, clone)
+	return m, gh, clone, chainChild(t, m, clone, req)
 }
 
 func TestChainOnAPRNobodyHandedOffIsWatchedThenRestacked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	m, gh, clone, child := watchedFixture(t)
+	m, gh, clone, child := watchedFixture(t, Request{})
 	if child.ParentPR != watchedRef.Number || child.StackParent != "" {
 		t.Fatalf("child = %+v", child)
 	}
@@ -101,7 +102,7 @@ func TestChainOnAPRNobodyHandedOffIsWatchedThenRestacked(t *testing.T) {
 
 func TestWatchedParentClosed(t *testing.T) {
 	t.Parallel()
-	m, gh, _, child := watchedFixture(t)
+	m, gh, _, child := watchedFixture(t, Request{})
 	p := gh.Snapshots[watchedRef.Key()]
 	p.State = "CLOSED"
 	gh.Snapshots[watchedRef.Key()] = p
@@ -133,5 +134,36 @@ func TestProtectedBaseIsNoChain(t *testing.T) {
 	m.tick(ctx)
 	if h := m.must(t, child.ID); h.ParentPR != 0 || h.StackParent != "" {
 		t.Errorf("child = %+v", h)
+	}
+}
+
+func TestChainChildNeverMergesIntoItsParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, _, child := watchedFixture(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.HeadSHA, p.BaseRef, p.AutoMergeAllowed = child.Snapshot.Head, "feature/x", true
+	p.Reviews[0].CommitSHA = p.HeadSHA
+	gh.Snapshots[childRef.Key()] = p
+	m.tick(ctx)
+	h := m.must(t, child.ID)
+	if len(gh.AutoMerged)+len(gh.Merged)+len(gh.AsyncMerged) != 0 || !strings.Contains(h.Reason, "waiting on") {
+		t.Fatalf("auto %v merged %v async %v; %s %q", gh.AutoMerged, gh.Merged, gh.AsyncMerged, h.State, h.Reason)
+	}
+	_, err := m.Merge(ctx, child.ID)
+	invalidWith(t, err, "waiting on")
+}
+
+func TestNativeStackMergesOnlyTheBottom(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, _, id := opened(t, Request{Autonomy: "merge=approved"})
+	p := mergeable()
+	p.AutoMergeAllowed = true
+	p.Stack = &github.PRStack{Number: 3, Base: "main", Bottom: 6, Position: 2, Size: 2}
+	gh.Snapshots[prRef.Key()] = p
+	m.tick(ctx)
+	if h := m.must(t, id); len(gh.AutoMerged)+len(gh.Merged)+len(gh.AsyncMerged) != 0 || !strings.Contains(h.Reason, "waiting on #6") {
+		t.Fatalf("auto %v merged %v async %v; %q", gh.AutoMerged, gh.Merged, gh.AsyncMerged, h.Reason)
 	}
 }
