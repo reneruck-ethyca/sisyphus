@@ -637,3 +637,29 @@ func TestBranchOnARewrittenBaseRebasesOnlyItsOwnCommits(t *testing.T) {
 		t.Errorf("commits on top of the base: %q", got)
 	}
 }
+
+func TestBranchOnAMergedBaseRebasesOnlyItsOwnCommits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m, gh, parent, child, _ := stackFixture(t, Request{})
+	m.update(child.ID, func(h *Handoff) error { h.StackParent, h.ParentHead = "", ""; return nil })
+	// The base is rewritten, squash-merged into main, and GitHub retargets the PR.
+	f := gittest.Git(t, parent.Worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+	os.WriteFile(filepath.Join(parent.Worktree, f), []byte("rewritten"), 0o644)
+	gittest.Git(t, parent.Worktree, "commit", "-q", "-a", "--amend", "-m", "rewritten")
+	gittest.Git(t, parent.Worktree, "push", "-q", "-f", "origin", "feature/x")
+	gittest.Git(t, parent.Worktree, "checkout", "-q", "-B", "squash", "origin/main")
+	gittest.Git(t, parent.Worktree, "merge", "-q", "--squash", "feature/x")
+	gittest.Git(t, parent.Worktree, "commit", "-q", "-m", "parent squashed")
+	gittest.Git(t, parent.Worktree, "push", "-q", "origin", "HEAD:main")
+	gh.Snapshots[childRef.Key()] = github.PRSnapshot{State: "OPEN", HeadSHA: gittest.Git(t, child.Worktree, "rev-parse", "HEAD"), BaseRef: "main", MergeState: "BEHIND"}
+	m.tick(ctx)
+	m.Wait()
+	h := m.must(t, child.ID)
+	if h.State == StateNeedsHuman {
+		t.Fatalf("child = %s %q", h.State, h.Reason)
+	}
+	if got := gittest.Git(t, h.Worktree, "log", "--format=%s", "origin/main..HEAD"); got != "child" {
+		t.Errorf("commits on top of main: %q", got)
+	}
+}

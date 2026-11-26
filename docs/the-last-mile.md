@@ -94,8 +94,8 @@ The orchestrator should not block or poll.
   merges (`git rebase --onto origin/<new base> <parent's last head>`, so a squash merge is fine). A child whose open
   parent rewrote its history (rebased after its own parent's squash merge) is rebased the same way when its base
   moves: onto the parent's new head, from the parent head it forked off. A branch on another PR's branch without
-  `--stack-parent` gets the same treatment when that base was force-pushed: the old tip comes from
-  `git merge-base --fork-point` (the remote ref's reflog). The orchestrator hands off the whole stack once and never manages bases again.
+  `--stack-parent` gets the same treatment when that base was force-pushed, or merged and GitHub retargeted the PR:
+  the old tip comes from `git merge-base --fork-point` against the old base's remote ref (its reflog). The orchestrator hands off the whole stack once and never manages bases again.
 
 What the orchestrator gets back is a terminal outcome (merged, or needs-human with a reason and a
 link), not a stream of CI noise.
@@ -787,3 +787,5 @@ None right now.
   even without `--stack-parent`, taking the old base tip from `git merge-base --fork-point`. fidesplus#7770 sat on
   #7744's branch, which was rebased; the plain rebase replayed #7744's old commits, conflicted in 11 files
   (a migration among them) and went to needs-human. Replaying its own two commits is clean.
+  The same day both bases squash-merged into `pbac2` and GitHub retargeted #7770; the fork point is now taken from
+  the handoff's old base ref, so that case replays only the PR's own commits too.
