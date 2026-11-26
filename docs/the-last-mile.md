@@ -99,7 +99,9 @@ The orchestrator should not block or poll.
 - **Detected stacks.** Without `--stack-parent`, TLM finds the stack itself on every tick. A PR whose base is an open
   handoff's branch is linked to it, the same as the flag would. A PR whose base is an open PR nobody handed off is
   chained on it (`parent_pr`): TLM watches that PR, never merges or touches it, and restacks the child when it merges.
-  A protected base (a hotfix branch with its own open PR) is never a parent. GitHub-native stacks (`gh stack`) are read
+  A long-lived base is never a parent, even with its own open PR (fixes into `hotfix/X.Y.Z` while `hotfix/X.Y.Z → main`
+  is open): one matching `lastmile.long_lived_bases` (default `main`, `master`, `dev`, `develop`, `hotfix/*`, `hotfix-*`,
+  `release/*`, `release-*`) or protected on GitHub (REST, rulesets included). GitHub-native stacks (`gh stack`) are read
   from the PR's `stack` field.
 - **Landing stacks.** Bottom-up, each PR as soon as it is ready. A PR with an open PR below it never merges (merge
   mode, auto-merge or button): a chain child would land on its parent's branch, and GitHub refuses a native one. A
@@ -801,7 +803,7 @@ None right now.
   The same day both bases squash-merged into `pbac2` and GitHub retargeted #7770; the fork point is now taken from
   the handoff's old base ref, so that case replays only the PR's own commits too.
 - **2026-11-26:** §3: stacks are detected, not only declared, and native GitHub stacks are supported. Detection runs
-  every tick from the PR view (new: `stack`, `stackEntry`, `baseRef.refUpdateRule`): a base that is an open handoff's
+  every tick from the PR view (new: `stack`, `stackEntry`): a base that is an open handoff's
   branch links it; a base that is an open PR nobody handed off makes it a watched parent (`ParentPR`, looked up once
   per base with `FindPR`); a protected base never counts. A merge guard (`stackWait`) keeps any PR with an open PR
   below it from merging. Before this, an approved, green stack child under `merge=approved` got GitHub auto-merge
@@ -811,3 +813,12 @@ None right now.
   waits for GitHub's retarget and then resets its clean, fully pushed worktree to GitHub's head; otherwise it goes
   needs-human. "Needs Rebase stack" has no known field: a `merge-async` 400 escalates with GitHub's message.
   Unverified on a live native stack: no repo here has one yet.
+- **2026-11-26:** §3, after review of the entry above: "protected" now comes from REST (`GET /branches/{b}`), since
+  GraphQL's `refUpdateRule` misses rulesets (fidesplus `dev`, `release-*`), and a new `lastmile.long_lived_bases` glob
+  list covers long-lived branches that aren't protected at all: fidesplus `hotfix/3.3.1`, head of open #7767, is
+  unprotected, so fixes into it would have been held as stack children and later retargeted to `main`. A base with
+  no PR is looked up again every 10 minutes (a PR opened for it later is found). Drift of a watched child replays
+  from `ParentHead` too. Any native-stack PR's worktree follows pushes GitHub makes (not only after its own parent
+  merged), when it is clean and fully pushed, else needs-human. GitHub's restack after a merge below counts as done
+  only once the PR is retargeted *and* its head moved; after 30 minutes without it, needs-human. A `merge-async` is
+  asked once per head; not merged 5 minutes later, needs-human.

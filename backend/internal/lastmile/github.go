@@ -22,6 +22,7 @@ type GitHub interface {
 	RerunFailed(ctx context.Context, repo string, runID int64) error
 	MergeSquash(ctx context.Context, ref github.PRRef, head string) error
 	MergeAsync(ctx context.Context, ref github.PRRef, head string, queue bool) error
+	BranchProtected(ctx context.Context, repo, branch string) (bool, error)
 	Enqueue(ctx context.Context, nodeID string) error
 	Dequeue(ctx context.Context, nodeID string) error
 	EnableAutoMerge(ctx context.Context, nodeID string) error
@@ -49,6 +50,7 @@ type FakeGitHub struct {
 	Merged       []github.PRRef   // MergeSquash calls
 	AsyncMerged  []github.PRRef   // MergeAsync calls
 	Found        map[string]int   // FindPR by branch, over Existing
+	Protected    map[string]bool  // BranchProtected by branch
 	Enqueued     []string         // node ids Enqueue was asked for
 	Dequeued     []string         // node ids Dequeue was asked for
 	AutoMerged   []string         // node ids EnableAutoMerge was asked for
@@ -134,6 +136,10 @@ func (f *FakeGitHub) MergeSquash(_ context.Context, ref github.PRRef, _ string) 
 func (f *FakeGitHub) MergeAsync(_ context.Context, ref github.PRRef, _ string, _ bool) error {
 	f.AsyncMerged = append(f.AsyncMerged, ref)
 	return cmp.Or(f.MergeErr, f.Err)
+}
+
+func (f *FakeGitHub) BranchProtected(_ context.Context, _, branch string) (bool, error) {
+	return f.Protected[branch], f.Err
 }
 
 func (f *FakeGitHub) Enqueue(_ context.Context, nodeID string) error {

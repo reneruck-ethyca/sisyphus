@@ -77,6 +77,12 @@ type LastMile struct {
 	DownrevLabels   map[string]string    `json:"downrev_labels"`    // per "owner/name": the label for a PR whose only change since green is a down_revision bump
 	MergeFreeze     []FreezeWindow       `json:"merge_freeze"`      // windows in which TLM would not merge
 	ManualMerge     []string             `json:"manual_merge"`      // "owner/name": merges only from the dashboard (button or merge mode), never from a handoff or tlm
+	LongLivedBases  []string             `json:"long_lived_bases"`  // globs: a base branch that is never a stack parent, though it may have its own open PR
+}
+
+// LongLived says base is a long-lived branch: never the PR below a stack child.
+func (l LastMile) LongLived(base string) bool {
+	return slices.ContainsFunc(l.LongLivedBases, func(g string) bool { return GlobMatch(g, base) })
 }
 
 // Manual says repo's PRs merge only from the dashboard.
@@ -578,8 +584,9 @@ func defaults() Config {
 			DownrevLabels:   map[string]string{"ethyca/fidesplus": "downrev-only"},
 			RiskyPaths:      []string{"**/migrations/**", "**/auth/**", ".github/**", "**/Dockerfile*", "infra/**", "**/*.tf"},
 			// A merge to main deploys (fidesinfra) or publishes a release (the others).
-			ManualMerge: []string{"ethyca/fidesinfra", "ethyca/terraform-modules", "ethyca/internal-helm-charts"},
-			BotLogins:   []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
+			ManualMerge:    []string{"ethyca/fidesinfra", "ethyca/terraform-modules", "ethyca/internal-helm-charts"},
+			LongLivedBases: []string{"main", "master", "dev", "develop", "hotfix/*", "hotfix-*", "release/*", "release-*"},
+			BotLogins:      []string{"ethycabot"}, // the org's review bot, a user account; sisyphus posts as its user, so it isn't one
 		},
 	}
 }

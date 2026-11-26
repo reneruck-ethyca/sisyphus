@@ -55,7 +55,6 @@ type PRSnapshot struct {
 	MergeQueue, InQueue, AutoMerge bool   // base has a merge queue; the PR is in it; auto-merge is on
 	QueueRemovals                  []QueueRemoval
 	Stack                          *PRStack // nil outside a native GitHub stack
-	BaseProtected                  bool     // the base branch has a protection rule or ruleset
 }
 
 // PRStack is the PR's place in a native GitHub stack.
@@ -81,7 +80,6 @@ reviews(last:100){nodes{author{login __typename} state body submittedAt commit{o
 reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login} ... on Bot{login} ... on Mannequin{login} ... on Team{slug}}}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){` + checkNodes + `}}}}}
 files(first:100){nodes{path}}
-baseRef{refUpdateRule{pattern}}
 stack{number baseRefName entries(first:100){nodes{position pullRequest{number state}}}} stackEntry{position}
 }}}`
 
@@ -209,9 +207,6 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 				Files nodes[struct {
 					Path string `json:"path"`
 				}] `json:"files"`
-				BaseRef *struct {
-					RefUpdateRule *struct{} `json:"refUpdateRule"`
-				} `json:"baseRef"`
 				Stack *struct {
 					Number      int    `json:"number"`
 					BaseRefName string `json:"baseRefName"`
@@ -293,7 +288,6 @@ func parsePRView(b []byte) (s PRSnapshot, after string, err error) {
 	for _, f := range p.Files.Nodes {
 		s.Files = append(s.Files, f.Path)
 	}
-	s.BaseProtected = p.BaseRef != nil && p.BaseRef.RefUpdateRule != nil
 	if st := p.Stack; st != nil {
 		s.Stack = &PRStack{Number: st.Number, Base: st.BaseRefName, Size: len(st.Entries.Nodes)}
 		if p.StackEntry != nil {

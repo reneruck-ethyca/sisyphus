@@ -137,11 +137,17 @@ type Handoff struct {
 	Run             *RunMark       `json:"run,omitempty"`            // the agent run in flight; still set with no run in memory = lost to a restart
 
 	// Stack bookkeeping (design §3): while StackParent is set, Base is the parent's branch.
-	ParentHead   string `json:"parent_head,omitempty"`   // the parent's last head while it was open: the old base point once a squash merge hides it
-	ParentMerged bool   `json:"parent_merged,omitempty"` // the parent merged, and stack-parent-merged was sent
-	ParentPR     int    `json:"parent_pr,omitempty"`     // the open PR below, when nobody handed it off: watched, never merged
-	ChainBase    string `json:"chain_base,omitempty"`    // the base last looked up for a parent PR
-	StackNumber  int    `json:"stack_number,omitempty"`  // the native GitHub stack it was last seen in: GitHub restacks it
+	ParentHead     string    `json:"parent_head,omitempty"`      // the parent's last head while it was open: the old base point once a squash merge hides it
+	ParentMerged   bool      `json:"parent_merged,omitempty"`    // the parent merged, and stack-parent-merged was sent
+	ParentPR       int       `json:"parent_pr,omitempty"`        // the open PR below, when nobody handed it off: watched, never merged
+	ChainBase      string    `json:"chain_base,omitempty"`       // the base last looked up for a parent PR
+	ChainAt        time.Time `json:"chain_at,omitzero"`          // when; a base without a PR is looked up again after chainRecheck
+	ChainSettled   bool      `json:"chain_settled,omitempty"`    // ChainBase is long-lived or protected: never a parent
+	StackNumber    int       `json:"stack_number,omitempty"`     // the native GitHub stack it was last seen in: GitHub restacks it
+	StackHead      string    `json:"stack_head,omitempty"`       // the PR's head while its parent was open; GitHub's restack moves it
+	RestackSince   time.Time `json:"restack_since,omitzero"`     // waiting for GitHub's restack since
+	AsyncMergeHead string    `json:"async_merge_head,omitempty"` // the head a merge-async was accepted for
+	AsyncMergeAt   time.Time `json:"async_merge_at,omitzero"`
 
 	// Reviewer bookkeeping (design §6): GitHub is the source of truth after the first request.
 	BotRequested     bool      `json:"bot_requested,omitempty"`     // the bot reviewer was requested, once

@@ -203,6 +203,14 @@ func (m *Manager) follow(ctx context.Context, h *Handoff) error {
 	if err := m.detectStack(ctx, h, p); err != nil {
 		return err
 	}
+	// GitHub restacks a native stack itself, with pushes TLM didn't make: the worktree follows them.
+	if h.StackNumber != 0 {
+		if err := m.syncWorktree(ctx, *h, s.Head); err != nil {
+			h.EscalatedBy = TriggerConflict
+			m.escalate(ctx, h, "the worktree can't follow GitHub's restack: "+err.Error())
+			return nil
+		}
+	}
 	if done, err := m.stack(ctx, h, p, s); done || err != nil {
 		return err
 	}

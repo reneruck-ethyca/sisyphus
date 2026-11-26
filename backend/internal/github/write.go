@@ -230,6 +230,16 @@ func (a *API) MergeSquash(ctx context.Context, ref PRRef, head string) error {
 	return a.send(ctx, http.MethodPut, pullPath(ref)+"/merge", map[string]string{"merge_method": "squash", "sha": head}, nil)
 }
 
+// BranchProtected says branch has a protection rule or ruleset, as REST reports it
+// (GraphQL's refUpdateRule misses rulesets).
+func (a *API) BranchProtected(ctx context.Context, repo, branch string) (bool, error) {
+	var b struct {
+		Protected bool `json:"protected"`
+	}
+	err := a.get(ctx, "repos/"+repo+"/branches/"+branch, &b)
+	return b.Protected, err
+}
+
 // MergeAsync squash-merges a PR in a native stack, which the classic merge endpoint
 // refuses: through the base's merge queue when queue, else directly. GitHub merges in
 // the background; the PR's state shows the outcome.

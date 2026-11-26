@@ -216,6 +216,13 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 		return StateQueued, "", nil
 	}
 	if s.Stack != nil { // the classic merge endpoint and enqueue refuse a stacked PR
+		if !s.MergeQueue && h.AsyncMergeHead == s.Head { // GitHub merges in the background: ask once per head
+			if m.now().Sub(h.AsyncMergeAt) < asyncMergeWait {
+				return state, reason, nil
+			}
+			return StateNeedsHuman, fmt.Sprintf("GitHub accepted the merge of %s (stack #%d) %s ago but hasn't merged it: check the PR (it may need Rebase stack)",
+				short(s.Head), s.Stack.Number, asyncMergeWait), nil
+		}
 		if err := m.GH.MergeAsync(ctx, github.PRRef{Repo: h.Repo, Number: h.PRNumber}, s.Head, s.MergeQueue); err != nil {
 			return m.refused(ctx, h, err, state, reason)
 		}
@@ -224,6 +231,7 @@ func (m *Manager) mergeStep(ctx context.Context, h *Handoff, s Snapshot, state, 
 			logEvent(h, m.now(), "merge", fmt.Sprintf("added to the merge queue (stack #%d)", s.Stack.Number))
 			return StateQueued, "", nil
 		}
+		h.AsyncMergeHead, h.AsyncMergeAt = s.Head, m.now()
 		logEvent(h, m.now(), "merge", fmt.Sprintf("squash-merge of %s requested (stack #%d)", short(s.Head), s.Stack.Number))
 		m.Kick()
 		return state, reason, nil

@@ -141,7 +141,7 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 	// A stack child whose open parent rewrote its history (a rebase after its own
 	// parent's squash merge) still holds the parent's old commits: replay only its own.
 	var upstream string
-	if h.StackParent != "" && h.ParentHead != "" {
+	if (h.StackParent != "" || h.ParentPR != 0) && h.ParentHead != "" {
 		if _, err := m.lockedGit(ctx, *h, "merge-base", "--is-ancestor", h.ParentHead, "HEAD"); err == nil {
 			upstream = h.ParentHead
 		}
@@ -183,15 +183,22 @@ func (m *Manager) drift(ctx context.Context, h *Handoff, s Snapshot, base string
 	return true, nil
 }
 
+// Stack waits (vars so tests can shorten them).
+var (
+	chainRecheck   = 10 * time.Minute // a base found to have no PR is looked up again after this
+	restackWait    = 30 * time.Minute // GitHub's restack of a native child after a merge below, before a human is asked
+	asyncMergeWait = 5 * time.Minute  // a merge-async GitHub accepted, before a human is asked
+)
+
 // detectStack links h to the PR below it when the handoff named none (design §3): an
 // open handoff whose branch is h's base, else an open PR nobody handed off, which TLM
-// only watches (looked up once per base). A protected base is a long-lived branch, not a parent.
+// only watches. A long-lived base (by name, or protected on GitHub) is never a parent.
 func (m *Manager) detectStack(ctx context.Context, h *Handoff, p github.PRSnapshot) error {
 	if p.Stack != nil {
 		h.StackNumber = p.Stack.Number
 	}
 	base := p.BaseRef
-	if h.StackParent != "" || base == "" || p.BaseProtected {
+	if h.StackParent != "" || base == "" || m.cfg.LastMile.LongLived(base) {
 		return nil
 	}
 	hs := m.List()
@@ -202,18 +209,22 @@ func (m *Manager) detectStack(ctx context.Context, h *Handoff, p github.PRSnapsh
 		logEvent(h, m.now(), "stack", "joined the stack under "+hs[i].ID)
 		return nil
 	}
-	if base == h.ChainBase || h.ParentPR != 0 { // a watched parent is stack()'s until it merges or closes
+	// A watched parent is stack()'s until it merges or closes. A miss is retried: the
+	// base's PR may be opened after this one.
+	if h.ParentPR != 0 || base == h.ChainBase && (h.ChainSettled || m.now().Sub(h.ChainAt) < chainRecheck) {
 		return nil
 	}
-	ref, ok, err := m.GH.FindPR(ctx, h.Repo, base)
-	if err != nil {
+	h.ChainBase, h.ChainAt, h.ChainSettled = base, m.now(), true
+	if protected, err := m.GH.BranchProtected(ctx, h.Repo, base); err != nil || protected {
 		return err
 	}
-	h.ChainBase = base
-	if ok {
-		h.ParentPR, h.Base = ref.Number, base
-		logEvent(h, m.now(), "stack", fmt.Sprintf("chained on #%d, which nobody handed off: watched, never merged", ref.Number))
+	h.ChainSettled = false
+	ref, ok, err := m.GH.FindPR(ctx, h.Repo, base)
+	if err != nil || !ok {
+		return err
 	}
+	h.ParentPR, h.Base = ref.Number, base
+	logEvent(h, m.now(), "stack", fmt.Sprintf("chained on #%d, which nobody handed off: watched, never merged", ref.Number))
 	return nil
 }
 
@@ -271,6 +282,10 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 		return true, nil
 	case StateMerged:
 	default:
+		h.StackHead, h.RestackSince = s.Head, time.Time{}
+		if p.Stack == nil {
+			h.StackNumber = 0 // out of the native stack while the parent is open: a plain chain now
+		}
 		// Only a parent head the branch is built on: after the parent rewrote its history
 		// (its own rebase) the old head is still where this branch forked off.
 		if sha, err := m.lockedGit(ctx, *h, "rev-parse", "origin/"+h.Base); err == nil && sha != "" {
@@ -306,21 +321,26 @@ func (m *Manager) stack(ctx context.Context, h *Handoff, p github.PRSnapshot, s 
 }
 
 // nativeRestacked follows GitHub's own restack of a native stack after the PR below
-// merged: TLM neither retargets nor rebases (that would race GitHub's force-push). Once
-// GitHub retargeted the PR, the worktree moves to the head GitHub pushed.
+// merged: TLM neither retargets nor rebases (that would race GitHub's force-push). The
+// restack is done once GitHub retargeted the PR and pushed a new head; follow has moved
+// the worktree to it. A restack that doesn't come goes to a human.
 func (m *Manager) nativeRestacked(ctx context.Context, h *Handoff, p github.PRSnapshot, parent below) error {
-	if p.BaseRef == "" || p.BaseRef == h.Base {
+	if p.BaseRef == "" || p.BaseRef == h.Base || p.HeadSHA == h.StackHead {
+		if h.RestackSince.IsZero() {
+			h.RestackSince = m.now()
+		}
+		if m.now().Sub(h.RestackSince) > restackWait {
+			h.EscalatedBy = TriggerConflict
+			m.escalate(ctx, h, fmt.Sprintf("%s merged %s ago, but GitHub hasn't restacked this PR (base %s): restack it (gh stack rebase) and resume",
+				parent.name, restackWait, p.BaseRef))
+			return nil
+		}
 		m.setState(h, h.State, "waiting for GitHub to restack after "+parent.name+" merged")
 		return nil
 	}
-	if err := m.syncWorktree(ctx, *h, p.HeadSHA); err != nil {
-		h.EscalatedBy = TriggerConflict
-		m.escalate(ctx, h, "the worktree can't follow GitHub's restack: "+err.Error())
-		return nil
-	}
-	logEvent(h, m.now(), "stack", fmt.Sprintf("%s merged: GitHub restacked onto %s; worktree synced to %s", parent.name, p.BaseRef, short(p.HeadSHA)))
-	h.Base = p.BaseRef
-	h.StackParent, h.ParentHead, h.ParentPR, h.StackNumber = "", "", 0, 0
+	logEvent(h, m.now(), "stack", fmt.Sprintf("%s merged: GitHub restacked onto %s at %s", parent.name, p.BaseRef, short(p.HeadSHA)))
+	h.Base, h.RestackSince = p.BaseRef, time.Time{}
+	h.StackParent, h.ParentHead, h.ParentPR, h.StackNumber, h.StackHead = "", "", 0, 0, ""
 	return nil
 }
 
@@ -345,6 +365,9 @@ func (m *Manager) syncWorktree(ctx context.Context, h Handoff, head string) erro
 	}
 	if _, err := git("fetch", "--quiet", "origin", fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", h.Branch, h.Branch)); err != nil {
 		return err
+	}
+	if fetched, _ := git("rev-parse", "refs/remotes/origin/"+h.Branch); fetched != head {
+		return nil // the API and git disagree for a moment: the next tick tries again
 	}
 	_, err = git("reset", "--quiet", "--hard", head)
 	return err
